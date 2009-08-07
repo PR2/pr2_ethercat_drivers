@@ -358,7 +358,7 @@ void WG06::convertState(ActuatorState &state, unsigned char *current_buffer, uns
   {
     if (pressure_publisher_ && pressure_publisher_->trylock())
     {
-      pressure_publisher_->msg_.header.stamp = ros::Time(realtime_gettime());
+      pressure_publisher_->msg_.header.stamp = ros::Time::now();
       pressure_publisher_->msg_.set_data0_size(22);
       pressure_publisher_->msg_.set_data1_size(22);
       for (int i = 0; i < 22; ++i ) {

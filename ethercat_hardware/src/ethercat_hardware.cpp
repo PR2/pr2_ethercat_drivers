@@ -154,7 +154,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   // Create HardwareInterface
   hw_ = new HardwareInterface(num_actuators);
-  hw_->current_time_ = realtime_gettime();
+  hw_->current_time_ = ros::Time::now().toSec();
   last_published_ = hw_->current_time_;
 
   // Initialize slaves
@@ -305,11 +305,11 @@ void EthercatHardware::update(bool reset, bool halt)
   }
 
   // Transmit process data
-  double start = realtime_gettime();
+  double start = ros::Time::now().toSec();
   if (!em_->txandrx_PD(buffer_size_, current_buffer_)) {
     ++diagnostics_.txandrx_errors_;
   }
-  diagnostics_.acc_(realtime_gettime() - start);
+  diagnostics_.acc_(ros::Time::now().toSec() - start);
 
   // Convert status back to HW Interface
   current = current_buffer_;
@@ -333,7 +333,7 @@ void EthercatHardware::update(bool reset, bool halt)
     --reset_state_;
 
   // Update current time
-  hw_->current_time_ = realtime_gettime();
+  hw_->current_time_ = ros::Time::now().toSec();
 
   unsigned char *tmp = current_buffer_;
   current_buffer_ = last_buffer_;
