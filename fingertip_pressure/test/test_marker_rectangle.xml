@@ -1,0 +1,17 @@
+<launch>
+  <!-- Bring up the nodes we want to test. -->
+  <node pkg="fingertip_pressure" type="sim_sensor.py" />
+  <node pkg="fingertip_pressure" type="sensor_info.py" />
+  <node pkg="fingertip_pressure" type="rectangle_viz.py" />
+  
+  <!-- Test for publication of 'scan' topic -->
+  <!-- Run hztest -->
+  <test test-name="hztest_test_marker" pkg="rostest" type="hztest" name="scan_test">
+    <param name="topic" value="/visualization_marker" />  
+    <param name="hz" value="880" />
+    <param name="hzerror" value="88" />
+    <param name="test_duration" value="3.0" />
+    <param name="check_intervals" value="false" />    
+  </test>
+
+</launch>

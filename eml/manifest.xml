@@ -1,0 +1,16 @@
+<package>
+<description brief="EtherCAT Master Library">
+
+EtherCAT Master Library
+An Open Source implementation of the EtherCAT protocol
+
+</description>
+<author>Tom Panis, Klaas Gadeyne, Bob Koninckx</author>
+<license>GPL</license>
+<review status="3rdparty" notes=""/>
+<url>http://ethercatmaster.berlios.de/</url>
+<export>
+  <cpp lflags="-L${prefix}/eml/lib -leml" cflags="-I${prefix}/eml/include"/>
+  <doxymaker external="http://ethercatmaster.berlios.de/doxygen/html/index.html"/>
+</export>
+</package>

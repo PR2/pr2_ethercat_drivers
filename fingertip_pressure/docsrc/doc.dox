@@ -1,0 +1,215 @@
+/**
+
+
+@section topic Fingertip Sensor ROS Topics
+ - sim_sensor.py
+
+ */
+
+
+/**
+\mainpage
+\htmlinclude manifest.html
+
+Each pr2 gripper is equipped with two pressure-sensitive fingertips. Each
+pressure comprises 22 pressure sensing elements: one on the back, 6 around
+the edges and a 3x5 array on the front. \b fingertip_pressure provides nodes 
+to facilitate the visualization and interpretation of the fingertip pressure
+sensor data.
+
+\section rosapi ROS API
+
+List of nodes:
+- \b "fingertip_pressure/sensor_info" Publishes sensor geometry, tf frame
+	and unit scaling information.
+- \b "fingertip_pressure/view_fingertip_pressure" Visualization panel to
+	show the fingertip pressure information.
+- \b "fingertip_pressure/sphere_viz" Sphere-based fingertip pressure visualization marker.
+- \b "fingertip_pressure/rectangle_viz" Rectangle-based fingertip pressure
+	visualization marker.
+- \b "fingertip_pressure/sim_sensor" Simulates a pressure sensor for
+	testing purposes.
+
+\image html overview.gif 
+
+<hr>
+
+\subsection sensor_info sensor_info
+
+Publishes sensor geometry, tf frame and unit scaling information.
+
+\subsubsection Usage
+\verbatim
+$ sensor_info
+\endverbatim
+
+\subsubsection topics ROS topics
+
+Subscribes to:
+- none
+
+Publishes to:
+- \b "/pressure/&lt;gripper_motor_name&gt;_info": [fingertip_pressure/PressureInfo]
+	Comprises one [fingertip_pressure/PressureInfoElement] for each of the
+	two fingertips. For each sensor, the tf frame is specified, and for each
+	pressure sensing element, a scaling factor to Newtons, and rectangular
+	geometry approximation are provided.
+
+\subsubsection parameters ROS parameters
+
+Currently assumes that &lt;gripper_motor_name&gt; is r_gripper_motor and
+l_gripper_motor.
+
+Reads the following parameters from the parameter server
+
+- none
+
+Sets the following parameters on the parameter server
+
+- none
+
+
+
+
+
+
+\subsection view_fingertip_pressure view_fingertip_pressure
+
+RX visualization panel to show the fingertip pressure information. Allows
+conversion to N or kPa units and zero-offset removal.
+
+\subsubsection Usage
+\verbatim
+$ view_fingertip_pressure
+\endverbatim
+
+
+\subsubsection topics ROS topics
+
+Subscribes to:
+- \b "/pressure/&lt;gripper_motor_name&gt;" "in": [pr2_msgs/PressureState] Raw
+	data from the pressure sensor
+
+- \b "/pressure/&lt;gripper_motor_name&gt;_info" "in": [fingertip_pressure/PressureInfo] Sensor calibration, geometry and tf frame.
+
+Publishes to:
+- none
+
+\subsubsection parameters ROS parameters
+
+Currently assumes that &lt;gripper_motor_name&gt; is r_gripper_motor.
+
+Reads the following parameters from the parameter server
+
+- none
+
+Sets the following parameters on the parameter server
+
+- none
+
+
+
+
+
+
+\subsection viz sphere_viz and rectangle_viz
+
+sphere_viz and rectangle_viz provide two visualization marker
+visualizations of the fingertip pressure data. The sphere visualization is
+more useful for general use, while the rectangle visualization allows the
+geometry of the sensors output by sensor_info to be checked.
+
+\subsubsection Usage
+\verbatim
+$ rectangle_viz
+\endverbatim
+
+\subsubsection topics ROS topics
+
+Subscribes to:
+- \b "/pressure/&lt;gripper_motor_name&gt;" "in": [robot_msgs/PressureState] Raw
+	data from the pressure sensor
+
+- \b "/pressure/&lt;gripper_motor_name&gt;_info" "in": [fingertip_pressure/PressureInfo] Sensor calibration, geometry and tf frame.
+
+Publishes to:
+- \b "/visualization_marker": [visualization_msgs/Marker] Stream graphical 
+  objects to be displayed.
+
+\subsubsection parameters ROS parameters
+
+Currently assumes that &lt;gripper_motor_name&gt; is r_gripper_motor and
+l_gripper_motor.
+
+Reads the following parameters from the parameter server
+
+- none
+
+Sets the following parameters on the parameter server
+
+- none
+
+
+
+
+\subsection sim_sensor sim_sensor
+
+sim_sensor allows the fingertip_pressure package to be tested without
+actual hardware by providing a raw sensor data feed.
+
+\subsubsection Usage
+\verbatim
+$ sim_sensor
+\endverbatim
+
+
+
+\subsubsection topics ROS topics
+
+Subscribes to:
+- none
+
+Publishes to:
+- \b "pressure/&lt;gripper_motor_name&gt;": [robot_msgs/PressureInfo] Simulated
+	pressure sensor data.
+
+\subsubsection parameters ROS parameters
+
+Currently assumes that &lt;gripper_motor_name&gt; is r_gripper_motor and
+l_gripper_motor.
+
+Reads the following parameters from the parameter server
+
+- none
+
+Sets the following parameters on the parameter server
+
+- none
+
+
+
+
+
+\section commandline Command-line tools
+
+- demo/fingertip_demo.launch A standalone demo of the package's
+	capabilities.
+
+\subsection fingertip_demo fingertip_demo.launch
+
+Runs all the package's nodes, and rviz
+(to view the visualization markers). This should demonstrate all the
+packages capabilities.
+
+\subsubsection Usage
+\verbatim
+$ roslaunch demo/fingertip_demo.launch
+\endverbatim
+and in a separate shell
+\verbatim
+$ roscd pr2_gazebo
+$ roslaunch pr2_empty.launch
+\endverbatim
+
+
+*/

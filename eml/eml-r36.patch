@@ -1,0 +1,1000 @@
+Index: tests/posix/eval_test.cpp
+===================================================================
+--- tests/posix/eval_test.cpp	(revision 36)
++++ tests/posix/eval_test.cpp	(working copy)
+@@ -40,6 +40,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <dll/ethercat_dll.h>
++#include <unistd.h>
+ #include <dll/ethercat_frame.h>
+ #include <al/ethercat_master.h>
+ #include <al/ethercat_slave_handler.h>
+Index: tests/rtnet/eval_test.cpp
+===================================================================
+--- tests/rtnet/eval_test.cpp	(revision 36)
++++ tests/rtnet/eval_test.cpp	(working copy)
+@@ -40,6 +40,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <dll/ethercat_dll.h>
++#include <unistd.h>
+ #include <dll/ethercat_frame.h>
+ #include <al/ethercat_master.h>
+ #include <al/ethercat_slave_handler.h>
+Index: include/ethercat/arch-eCos/ethercat/ethercat_log.h
+===================================================================
+--- include/ethercat/arch-eCos/ethercat/ethercat_log.h	(revision 36)
++++ include/ethercat/arch-eCos/ethercat/ethercat_log.h	(working copy)
+@@ -43,7 +43,7 @@
+ #define EC_LOG_FATAL     0
+ 
+ // Redefine this function if not using eCos...
+-#define log(level, args...) \
++#define ec_log(level, args...) \
+ if(level < CYGNUM_ETHERCATMASTER_LOG_LEVEL) diag_printf(args)
+ 
+ #endif // __ethercat_log_h__
+Index: include/ethercat/arch-template/ethercat_log.h
+===================================================================
+--- include/ethercat/arch-template/ethercat_log.h	(revision 36)
++++ include/ethercat/arch-template/ethercat_log.h	(working copy)
+@@ -42,7 +42,7 @@
+ #define EC_LOG_FATAL     0
+ 
+ // Redefine this function if you're not using eCos...
+-#define log(level, args...) \
++#define ec_log(level, args...) \
+ if(level < CYGNUM_ETHERCATMASTER_LOG_LEVEL) diag_printf(args)
+ 
+ #endif // __ethercat_log_h__
+Index: include/ethercat/arch-RTnet/ethercat/ethercat_log.h
+===================================================================
+--- include/ethercat/arch-RTnet/ethercat/ethercat_log.h	(revision 36)
++++ include/ethercat/arch-RTnet/ethercat/ethercat_log.h	(working copy)
+@@ -42,7 +42,6 @@
+ #define EC_LOG_FATAL     0
+ 
+ // Redefine this function if not using eCos...
+-#define log(level, args...) \
+-printf(args)
++#define ec_log(level, args...) 
+ 
+ #endif // __ethercat_log_h__
+Index: include/dll/ethercat_slave_memory.h
+===================================================================
+--- include/dll/ethercat_slave_memory.h	(revision 36)
++++ include/dll/ethercat_slave_memory.h	(working copy)
+@@ -49,6 +49,7 @@
+ */
+ static const EC_UDINT EC_ProductCodeAddressInSII = 0x0000000a;
+ static const EC_UDINT EC_RevisionAddressInSII = 0x0000000c;
++static const EC_UDINT EC_SerialAddressInSII = 0x0000000e;
+ 
+ typedef enum {
+   Type = 0,
+@@ -245,7 +246,7 @@
+   case 14 : return FMMU_14; break;
+   case 15 : return FMMU_15; break;
+   default:
+-    log(EC_LOG_ERROR, "FMMUx: No such channel %d\n",channel);
++    ec_log(EC_LOG_ERROR, "FMMUx: No such channel %d\n",channel);
+     return -1;
+   }
+ }
+@@ -270,7 +271,7 @@
+   case 14 : return Sync_Manager_14; break;
+   case 15 : return Sync_Manager_15; break;
+   default:
+-    log(EC_LOG_ERROR, "Sync_Managerx: No such channel %d\n",channel);
++    ec_log(EC_LOG_ERROR, "Sync_Managerx: No such channel %d\n",channel);
+     return -1;
+   }
+ }
+@@ -295,7 +296,7 @@
+   case 14 : return Watchdog_Time_Channel_14; break;
+   case 15 : return Watchdog_Time_Channel_15; break;
+   default:
+-    log(EC_LOG_ERROR, "Watchdog_Time_Channelx: No such channel %d\n",channel);
++    ec_log(EC_LOG_ERROR, "Watchdog_Time_Channelx: No such channel %d\n",channel);
+     return -1;
+   }
+ }
+@@ -456,6 +457,8 @@
+   bool WriteError;
+   /// Eeprom busy?
+   bool Busy;
++  // Acknowledge Error
++  bool AcknowledgeError;
+ };
+ 
+ /// Class representing a bit position within a byte
+Index: include/al/ethercat_slave_conf.h
+===================================================================
+--- include/al/ethercat_slave_conf.h	(revision 36)
++++ include/al/ethercat_slave_conf.h	(working copy)
+@@ -160,8 +160,10 @@
+   EC_FixedStationAddress get_station_address() const {return m_station_address; };
+   /// Get FMMU config to be written when going to preop
+   const EtherCAT_FMMU_Config * get_fmmu_config() const {return m_fmmu_config; };
++  void set_fmmu_config(EtherCAT_FMMU_Config *new_config) { m_fmmu_config = new_config; };
+   /// Get PD Configuration (SMS)
+   const EtherCAT_PD_Config * get_pd_config() const {return m_pd_config; };
++  void set_pd_config(EtherCAT_PD_Config *new_config) { m_pd_config = new_config; };
+   /// Get configuration of Sync Man channel 0 and 1 for MBX
+   /** @return pointer to config in case of complex slave, or NULL for
+       a simple slave
+Index: include/al/ethercat_mbx.h
+===================================================================
+--- include/al/ethercat_mbx.h	(revision 36)
++++ include/al/ethercat_mbx.h	(working copy)
+@@ -76,7 +76,7 @@
+       if(priority < 4)
+ 	msg_priority = priority;
+       else {
+-	log(EC_LOG_WARNING, "EC_MbxMsgPriority: Max Priority is 0x03, using 0x03\n");
++	ec_log(EC_LOG_WARNING, "EC_MbxMsgPriority: Max Priority is 0x03, using 0x03\n");
+ 	msg_priority = 0x03;
+       }
+     }
+Index: include/al/ethercat_slave_handler.h
+===================================================================
+--- include/al/ethercat_slave_handler.h	(revision 36)
++++ include/al/ethercat_slave_handler.h	(working copy)
+@@ -65,22 +65,29 @@
+   EtherCAT_SlaveHandler(EC_UINT a_ring_position,
+ 			EC_UDINT a_product_code,
+ 			EC_UDINT a_revision,
++                        EC_UDINT a_serial,
+ 			EC_FixedStationAddress a_station_address,
+ 			EtherCAT_FMMU_Config * a_fmmu_config,
+ 			EtherCAT_PD_Config * a_pd_config,
+ 			EtherCAT_MbxConfig * a_mbx_config = NULL);
+   /// Constructor using Slave Configuration
+   EtherCAT_SlaveHandler(EC_UINT a_ring_position,
+-			const EtherCAT_SlaveConfig * a_sconf);
++			const EtherCAT_SlaveConfig * a_sconf,
++                        EC_UDINT a_serial);
+   virtual ~EtherCAT_SlaveHandler();
+ 
+   /// Get position in the EtherCAT logical ring
+   EC_UINT get_ring_position() const {return m_ring_position; };
++  /// Get serial
++  EC_UDINT get_serial() const { return m_serial; };
+ 
+  protected:
+ 
+   /// Position in the EtherCAT logical Ring
+   EC_UINT m_ring_position;
++
++  /// Serial
++  EC_UDINT m_serial;
+ };
+ 
+ 
+Index: src/dll/ethercat_telegram.cxx
+===================================================================
+--- src/dll/ethercat_telegram.cxx	(revision 36)
++++ src/dll/ethercat_telegram.cxx	(working copy)
+@@ -144,7 +144,7 @@
+   if (index == m_idx)
+     return true;
+   else{
+-    log(EC_LOG_ERROR, "EC_Telegram::check_index(): Index field does not correspond with received data\n");
++    ec_log(EC_LOG_ERROR, "EC_Telegram::check_index(): Index field does not correspond with received data\n");
+     return false;
+   }
+ }
+@@ -168,14 +168,14 @@
+   nextbit = lennext & NEXT_BIT;
+   if ( ((nextbit == NEXT_BIT) && (next == NULL)) ||
+        ((nextbit == 0x0000) && (next != NULL)) ){
+-    log(EC_LOG_ERROR, "EC_Telegram::check_lennext(): Next field does not correspond with received data\n");
++    ec_log(EC_LOG_ERROR, "EC_Telegram::check_lennext(): Next field does not correspond with received data\n");
+     return false;
+   }
+   else // Extract len information
+     {
+       len = lennext & LEN_BIT;
+       if (len != get_datalen()){
+-	log(EC_LOG_ERROR, "EC_Telegram::check_lennext(): Len field does not correspond with received data\n");
++	ec_log(EC_LOG_ERROR, "EC_Telegram::check_lennext(): Len field does not correspond with received data\n");
+ 	return false;
+       }
+       return true;
+Index: src/dll/ethercat_slave_memory.cxx
+===================================================================
+--- src/dll/ethercat_slave_memory.cxx	(revision 36)
++++ src/dll/ethercat_slave_memory.cxx	(working copy)
+@@ -92,7 +92,7 @@
+ EC_ALControl::EC_ALControl(const unsigned char * a_buffer)
+   : EC_DataStruct(EC_Slave_RD[AL_Control].size)
+ {
+-  log(EC_LOG_ERROR, "Not implemented yet\n");
++  ec_log(EC_LOG_ERROR, "Not implemented yet\n");
+ }
+ 
+ unsigned char * 
+@@ -160,6 +160,7 @@
+   ReadOp = (bool) ((byte & 0x100) >> 8);
+   WriteOp = (bool) ((byte & 0x200) >> 9);
+   ReloadOp = (bool) ((byte & 0x400) >> 10);
++  AcknowledgeError = (bool) ((byte & 0x2000) >> 13);
+   WriteError = (bool) ((byte & 0x4000) >> 14);
+   Busy = (bool) ((byte & 0x8000) >> 15);
+ }
+@@ -173,6 +174,7 @@
+   byte |= ((EC_UINT) ReadOp ) << 8;
+   byte |= ((EC_UINT) WriteOp ) << 9;
+   byte |= ((EC_UINT) ReloadOp) << 10;
++  byte |= ((EC_UINT) AcknowledgeError) << 13;
+   byte |= ((EC_UINT) WriteError) << 14;
+   byte |= ((EC_UINT) Busy) << 15;
+   return host2nw(a_buffer,byte);
+@@ -202,7 +204,7 @@
+ EC_FMMU::EC_FMMU(const unsigned char * a_buffer)
+   : EC_DataStruct(EC_Slave_RD[FMMU_0].size)
+ {
+-  log(EC_LOG_ERROR, "Not implemented yet");
++  ec_log(EC_LOG_ERROR, "Not implemented yet");
+ }
+ 
+ unsigned char *
+@@ -256,7 +258,7 @@
+ EC_SyncMan::EC_SyncMan(const unsigned char * a_buffer)
+   : EC_DataStruct(EC_Slave_RD[Sync_Manager_0].size)
+ {
+-  log(EC_LOG_ERROR, "Not implemented yet\n");
++  ec_log(EC_LOG_ERROR, "Not implemented yet\n");
+ }
+ 
+ unsigned char *
+Index: src/dll/ethercat_frame.cxx
+===================================================================
+--- src/dll/ethercat_frame.cxx	(revision 36)
++++ src/dll/ethercat_frame.cxx	(working copy)
+@@ -153,7 +153,7 @@
+       if (this->body_length() == (size_t) (frame_header & bodylength))
+ 	return true;
+     }
+-  log(EC_LOG_ERROR, "building frame: checkheader failed\n");
++  ec_log(EC_LOG_ERROR, "building frame: checkheader failed\n");
+   return false;
+ }
+ 
+Index: src/dll/ethercat_dll.cxx
+===================================================================
+--- src/dll/ethercat_dll.cxx	(revision 36)
++++ src/dll/ethercat_dll.cxx	(working copy)
+@@ -68,7 +68,7 @@
+ {
+   bool succeed = m_if->txandrx(a_frame, m_if);
+   if (!succeed)
+-    log(EC_LOG_INFO, "DLL::txandrx() Error\n");
++    ec_log(EC_LOG_INFO, "DLL::txandrx() Error\n");
+   return succeed;
+ }
+ 
+Index: src/al/ethercat_slave_conf.cxx
+===================================================================
+--- src/al/ethercat_slave_conf.cxx	(revision 36)
++++ src/al/ethercat_slave_conf.cxx	(working copy)
+@@ -169,7 +169,7 @@
+ 	  }
+     else i++;
+   }
+-  log(EC_LOG_WARNING, "EtherCAT_SlaveDb: No such Config, returning NULL!\n");
++  ec_log(EC_LOG_WARNING, "EtherCAT_SlaveDb: No such Config, returning NULL!\n");
+   return NULL;
+ }
+ 
+Index: src/al/ethercat_router.cxx
+===================================================================
+--- src/al/ethercat_router.cxx	(revision 36)
++++ src/al/ethercat_router.cxx	(working copy)
+@@ -77,14 +77,14 @@
+   if (EtherCAT_Router::m_is_running > 0)
+     --EtherCAT_Router::m_is_running;
+   else
+-    log(EC_LOG_INFO, "EtherCAT_Router already stopped...\n");
++    ec_log(EC_LOG_INFO, "EtherCAT_Router already stopped...\n");
+ }
+ 
+ void
+ EtherCAT_Router::route() const
+ {
+   if ( EtherCAT_Router::m_is_running != 0){
+-    // log(EC_LOG_INFO, "EtherCAT_Router::Routing\n");
++    // ec_log(EC_LOG_INFO, "EtherCAT_Router::Routing\n");
+     EtherCAT_SlaveHandler * sh;
+     for (unsigned int i = 0; i < m_al_instance->get_num_slaves() ; i++){
+       sh = m_al_instance->m_slave_handler[i];
+@@ -116,7 +116,7 @@
+       }
+     }
+     else {
+-      log(EC_LOG_ERROR, "Router: Error checking mbx\n");
++      ec_log(EC_LOG_ERROR, "Router: Error checking mbx\n");
+       return false;
+     }
+   }
+@@ -151,12 +151,12 @@
+       return succeed;
+     }
+     else{
+-      log(EC_LOG_ERROR, "Router::post_mbxmsg() error: SM sizes of source and destination do not match...!!\n");
++      ec_log(EC_LOG_ERROR, "Router::post_mbxmsg() error: SM sizes of source and destination do not match...!!\n");
+       return false;
+     }
+   }
+   else {
+-    log(EC_LOG_ERROR, "Router Error: Destination address of MbxMsg is not a complex slave!!\n");
++    ec_log(EC_LOG_ERROR, "Router Error: Destination address of MbxMsg is not a complex slave!!\n");
+     return false;
+   }
+ }
+@@ -166,7 +166,7 @@
+ {
+   static EtherCAT_Router * EC_Router = EtherCAT_Router::instance();
+   EC_Router->route();
+-  // log(EC_LOG_INFO, "Routing Mbx msgs\n");
++  // ec_log(EC_LOG_INFO, "Routing Mbx msgs\n");
+ }
+ 	  
+       
+Index: src/al/ethercat_FSM.cxx
+===================================================================
+--- src/al/ethercat_FSM.cxx	(revision 36)
++++ src/al/ethercat_FSM.cxx	(working copy)
+@@ -98,11 +98,11 @@
+ 				if ((status.State == a_state ) && (status.Change == false))
+ 					return true;
+ 				else 
+-					log(EC_LOG_WARNING, "EC_ESM_Ops::set_state() Warning: State trans. failed (try %d), desired=%x, status=%x\n",tries,a_state,status.State);
++					ec_log(EC_LOG_WARNING, "EC_ESM_Ops::set_state() Warning: State trans. failed (try %d), desired=%x, status=%x\n",tries,a_state,status.State);
+ 			}
+ 		}
+ 		else {
+-			log(EC_LOG_WARNING, "EC_ESM_Ops::set_state() Warning: Error sending control frame (try %d)\n", tries);
++			ec_log(EC_LOG_WARNING, "EC_ESM_Ops::set_state() Warning: Error sending control frame (try %d)\n", tries);
+ 			struct timespec sleept;
+ 			sleept.tv_sec = 0;
+ 			sleept.tv_nsec = 10*1000*1000; //10ms
+@@ -115,7 +115,7 @@
+     tries++;
+   }
+   // Should never get here...
+-  log(EC_LOG_ERROR, "EC_ESM_Ops::set_state() failed to set state after %d tries", EC_ESM_OPS_MAX_RETRIES);
++  ec_log(EC_LOG_ERROR, "EC_ESM_Ops::set_state() failed to set state after %d tries", EC_ESM_OPS_MAX_RETRIES);
+   return false;
+ }
+ 
+@@ -143,7 +143,7 @@
+   EC_Ethernet_Frame address_frame(&address_tg);
+   bool succeed = m_dll_instance->txandrx(&address_frame);
+   if (succeed == false){
+-    log(EC_LOG_ERROR, "Error setting Fixed Station Address\n");
++    ec_log(EC_LOG_ERROR, "Error setting Fixed Station Address\n");
+     return succeed;
+   }
+   struct timespec sleept;
+@@ -167,7 +167,7 @@
+     EC_Ethernet_Frame mbx_conf_frame(&mbx_conf_tg);
+     succeed = m_dll_instance->txandrx(&mbx_conf_frame);
+     if (succeed == false){
+-      log(EC_LOG_ERROR, "Error setting SM0 conf for mbx\n");
++      ec_log(EC_LOG_ERROR, "Error setting SM0 conf for mbx\n");
+       return succeed;
+     }
+ 	 nanosleep( &sleept, 0);
+@@ -179,7 +179,7 @@
+     mbx_conf_tg.set_wkc(m_logic_instance->get_wkc());
+     succeed = m_dll_instance->txandrx(&mbx_conf_frame);
+     if (succeed == false){
+-      log(EC_LOG_ERROR, "Error setting SM1 conf for mbx\n");
++      ec_log(EC_LOG_ERROR, "Error setting SM1 conf for mbx\n");
+       return succeed;
+     }
+ 	 nanosleep( &sleept, 0);
+@@ -234,7 +234,7 @@
+ 
+   if (succeed == false) 
+     {
+-      log(EC_LOG_ERROR, "error writing fmmu config\n");
++      ec_log(EC_LOG_ERROR, "error writing fmmu config\n");
+       return false;
+     }
+   
+@@ -264,7 +264,7 @@
+     }
+   if (succeed == false) 
+     {
+-      log(EC_LOG_ERROR, "error writing SM config\n");
++      ec_log(EC_LOG_ERROR, "error writing SM config\n");
+       return false;
+     }
+   
+Index: src/al/ethercat_process_data.cxx
+===================================================================
+--- src/al/ethercat_process_data.cxx	(revision 36)
++++ src/al/ethercat_process_data.cxx	(working copy)
+@@ -74,7 +74,7 @@
+   if (m_is_running > 0)
+     --m_is_running;
+   else
+-    log(EC_LOG_INFO, "EtherCAT_PD_Buffer already stopped...\n");
++    ec_log(EC_LOG_INFO, "EtherCAT_PD_Buffer already stopped...\n");
+ }
+ 
+ bool
+@@ -85,13 +85,25 @@
+     // this becomes something like
+     // if ( EtherCAT_PD_Buffer::m_al_instance->get_num_slaves() == m_running)
+     {
+-      m_lrw_telegram.set_idx(m_logic_instance->get_idx());
+-      m_lrw_telegram.set_wkc(m_logic_instance->get_wkc());
+-      m_lrw_telegram.set_datalen(datalen);
+-      m_lrw_telegram.set_data(data);
+-      if (!(m_dll_instance->txandrx(&m_lrw_frame))){
+-	log(EC_LOG_ERROR, "PD_Buffer: Error sending PD\n");
+-	return false;
++      int dst = 0x00010000;
++#define CHUNK_SIZE 1486
++      while (datalen > 0)
++      {
++        size_t chunk_size = datalen <  CHUNK_SIZE ? datalen : CHUNK_SIZE;
++        m_lrw_telegram.set_idx(m_logic_instance->get_idx());
++        m_lrw_telegram.set_wkc(m_logic_instance->get_wkc());
++        m_lrw_telegram.set_datalen(chunk_size);
++        m_lrw_telegram.set_data(data);
++        m_lrw_telegram.set_adr(dst);
++
++        if (!(m_dll_instance->txandrx(&m_lrw_frame)))
++        {
++          ec_log(EC_LOG_ERROR, "PD_Buffer: Error sending PD\n");
++          return false;
++        }
++        datalen -= chunk_size;
++        data += chunk_size;
++        dst += chunk_size;
+       }
+     }
+   return true;
+Index: src/al/ethercat_slave_handler.cxx
+===================================================================
+--- src/al/ethercat_slave_handler.cxx	(revision 36)
++++ src/al/ethercat_slave_handler.cxx	(working copy)
+@@ -36,6 +36,7 @@
+ EtherCAT_SlaveHandler::EtherCAT_SlaveHandler(EC_UINT a_ring_position,
+ 					     EC_UDINT a_product_code,
+ 					     EC_UDINT a_revision,
++					     EC_UDINT a_serial,
+ 					     EC_FixedStationAddress a_station_address,
+ 					     EtherCAT_FMMU_Config * a_fmmu_config,
+ 					     EtherCAT_PD_Config * a_pd_config,
+@@ -47,14 +48,16 @@
+ 			 a_fmmu_config,
+ 			 a_pd_config,
+ 			 a_mbx_config),
+-    m_ring_position(a_ring_position)
++    m_ring_position(a_ring_position),
++    m_serial(a_serial)
+ {}
+ 
+ EtherCAT_SlaveHandler::EtherCAT_SlaveHandler(EC_UINT a_ring_position,
+-					     const EtherCAT_SlaveConfig * a_sconf)
++					     const EtherCAT_SlaveConfig * a_sconf, EC_UDINT a_serial)
+   : EC_ESM(this),
+     EtherCAT_SlaveConfig(*a_sconf),
+-    m_ring_position(a_ring_position)
++    m_ring_position(a_ring_position),
++    m_serial(a_serial)
+ {}
+ 
+ EtherCAT_SlaveHandler::~EtherCAT_SlaveHandler(){}
+Index: src/al/ethercat_AL.cxx
+===================================================================
+--- src/al/ethercat_AL.cxx	(revision 36)
++++ src/al/ethercat_AL.cxx	(working copy)
+@@ -81,7 +81,7 @@
+ 
+   if (init() == false){
+     // Can't use exceptions, since not supported by eCOS f.i.
+-    log(EC_LOG_FATAL, "EtherCAT_AL:: Can't init network\n");
++    ec_log(EC_LOG_FATAL, "EtherCAT_AL:: Can't init network\n");
+   }
+   m_ready = true;
+ }
+@@ -103,12 +103,12 @@
+       return put_slaves_in_init();
+     }
+     else{
+-      log(EC_LOG_FATAL, "Something went wrong while resetting slaves\n");
++      ec_log(EC_LOG_FATAL, "Something went wrong while resetting slaves\n");
+       return false;
+     }
+   }
+   else{
+-    log(EC_LOG_FATAL, "Something went wrong while scanning network\n");
++    ec_log(EC_LOG_FATAL, "Something went wrong while scanning network\n");
+     return false;
+   }
+ }
+@@ -128,58 +128,80 @@
+   EC_Ethernet_Frame counter_frame(&counter_tg);
+   bool succeed = m_dll_instance->txandrx(&counter_frame);
+   if (succeed == false){
+-    log(EC_LOG_FATAL,"Error sending counter frame\n");
++    ec_log(EC_LOG_FATAL,"Error sending counter frame\n");
+     return succeed;
+   }
+   // Init Number of slaves
+   m_num_slaves = counter_tg.get_adp();
+-  log(EC_LOG_INFO, "EtherCAT AL: Ring contains %d slaves\n",m_num_slaves);
++  ec_log(EC_LOG_INFO, "EtherCAT AL: Ring contains %d slaves\n",m_num_slaves);
+   m_slave_handler = new EtherCAT_SlaveHandler*[m_num_slaves];
+ 
+   // Initialise Slave Handlers, Reading productcode and revision from SII
+   EC_UINT adp = 0x0000;
+   EC_UDINT productcode = 0x00000000;
+   EC_UDINT revision = 0x00000000;
++  EC_UDINT serial = 0x00000000;
+   const EC_UINT SII_datalen = EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size + EC_Slave_RD[SII_Data].size;
+   unsigned char data[SII_datalen];
++  const EtherCAT_SlaveConfig * sconf;
+   for (unsigned i = 0; i < SII_datalen; i++)
+     data[i] = 0x00;
+-  const EtherCAT_SlaveConfig * sconf;
+-
+   for (unsigned int i = 0; i < m_num_slaves; i++)
+     {
++      for (unsigned j = 0; j < EC_Slave_RD[SII_Data].size; j++)
++        data[j] = 0x00;
+       succeed = read_SII(adp,EC_ProductCodeAddressInSII,data);
+       if (!succeed){
+-			log(EC_LOG_FATAL,"EC_AL::scan_slaves() Error reading Product code of slave %d\n",i);
+-			return succeed;
++	  ec_log(EC_LOG_FATAL,"EC_AL::scan_slaves() Error reading Product code of slave %d\n",i);
++	  productcode = 0xbaddbadd;
++	  //return succeed;
+       }
++      else {
++	  nw2host(data+EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size,productcode);
++      }
+ 		struct timespec sleept;
+ 		sleept.tv_sec = 0;
+ 		sleept.tv_nsec = 10*1000*1000; //10ms
+ 		nanosleep( &sleept, 0);
+ 
+-      nw2host(data+EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size,productcode);
+       for (unsigned j = 0; j < EC_Slave_RD[SII_Data].size; j++)
+ 			data[j] = 0x00;
+       succeed = read_SII(adp,EC_RevisionAddressInSII,data);
+       if (!succeed){
+-			log(EC_LOG_FATAL,"EC_AL::scan_slaves() Error reading Revision of slave %d\n",i);
+-			return succeed;
+-      } 
++	  ec_log(EC_LOG_FATAL,"EC_AL::scan_slaves() Error reading Revision of slave %d\n",i);
++	  revision = 0xbaddbadd;
++	  //return succeed;
++      }
++      else {
++	  nw2host(data+EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size,revision);
++      }
+ 		nanosleep( &sleept, 0);
+-      nw2host(data+EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size,revision);
++
++      for (unsigned j = 0; j < EC_Slave_RD[SII_Data].size; j++)
++        data[j] = 0x00;
++      succeed = read_SII(adp,EC_SerialAddressInSII,data);
++      if (!succeed){
++   ec_log(EC_LOG_FATAL,"EC_AL::scan_slaves() Error reading Serial of slave %d\n",i);
++   serial = 0xbaddbadd;
++   //return succeed;
++      }
++      else {
++   nw2host(data+EC_Slave_RD[SII_ControlStatus].size + EC_Slave_RD[SII_Address].size,serial);
++      }
++      nanosleep( &sleept, 0);
++
+       sconf = m_slave_db->find(productcode,revision);
+       if (sconf != NULL){
+-	m_slave_handler[i] = new EtherCAT_SlaveHandler(adp2ringpos(adp),sconf);
+-	log(EC_LOG_INFO, "AL creating SlaveHandler: pos=%d, adr=0x%x, Prod. Code=0x%x, rev=0x%x\n", 
+-	       adp2ringpos(adp),(EC_UINT) sconf->get_station_address(),productcode,revision);
++	m_slave_handler[i] = new EtherCAT_SlaveHandler(adp2ringpos(adp),sconf,serial);
++	ec_log(EC_LOG_INFO, "AL creating SlaveHandler: pos=%d, adr=0x%x, Prod. Code=0x%x, rev=0x%x, Serial=%d\n", 
++	       adp2ringpos(adp),(EC_UINT) sconf->get_station_address(),productcode,revision,serial);
+       }
+       else { // No such slave found...
+-	log(EC_LOG_WARNING, "EC_AL Warning: No such slave in db, creating dummy slave\n");
++	ec_log(EC_LOG_WARNING, "EC_AL Warning: No such slave in db, creating dummy slave\n");
+ 	// Create slave handler
+-	m_slave_handler[i] = new EtherCAT_SlaveHandler(adp2ringpos(adp),productcode,revision,adp2ringpos(adp),NULL,NULL);
+-	log(EC_LOG_INFO, "AL creating SlaveHandler: pos=%d, Product Code=0x%x, rev=0x%x\n", 
+-	       adp2ringpos(adp),productcode,revision);
++	m_slave_handler[i] = new EtherCAT_SlaveHandler(adp2ringpos(adp),productcode,revision,serial,(i+1),NULL,NULL);
++	ec_log(EC_LOG_INFO, "AL creating SlaveHandler: pos=%d, Product Code=0x%x, rev=0x%x, Serial=%d\n", 
++	       adp2ringpos(adp),productcode,revision,serial);
+       }
+       // prepare for querying next slave
+       adp--;
+@@ -191,7 +213,7 @@
+ EtherCAT_AL::reset_slaves(void)
+ {
+   // Reset FMMUs
+-  log(EC_LOG_INFO, "AL: resetting FMMUs\n");
++  ec_log(EC_LOG_INFO, "AL: resetting FMMUs\n");
+   EC_UINT ado = EC_Slave_RD[FMMU_0].ado;
+   // Whole FMMU area is 0x100...
+   static const EC_UINT BWR_data_len = 0x100;
+@@ -204,7 +226,7 @@
+     return false;
+   
+   // 3: Reset Sync Managers
+-  log(EC_LOG_INFO, "AL: resetting SMs\n");
++  ec_log(EC_LOG_INFO, "AL: resetting SMs\n");
+   // Whole SM area is also 0x100...
+   bwr_telegram.set_idx(m_logic_instance->get_idx());
+   ado = EC_Slave_RD[Sync_Manager_0].ado; 
+@@ -216,7 +238,7 @@
+ bool
+ EtherCAT_AL::put_slaves_in_init(void)
+ {
+-	log(EC_LOG_INFO, "AL: Setting all slaves in init mode\n");
++	ec_log(EC_LOG_INFO, "AL: Setting all slaves in init mode\n");
+   // 6: Set device state to init
+ 	EC_ALControl al_control(EC_INIT_STATE,false);
+ 	unsigned char AL_Control_data[EC_Slave_RD[AL_Control].size];
+@@ -260,7 +282,7 @@
+ 				EC_ALStatus status(AL_Status_data);
+ 				if (status.State != EC_INIT_STATE)
+ 				{
+-					log(EC_LOG_ERROR, "Error: EC slave %d not in init state, AL_status = %x\n",ringpos,status.State);
++					ec_log(EC_LOG_ERROR, "Error: EC slave %d not in init state, AL_status = %x\n",ringpos,status.State);
+ 					succeed = false;
+ 				}
+ 				ringpos++;
+@@ -274,10 +296,10 @@
+ 				AL_status_telegram.set_idx(m_logic_instance->get_idx());
+ 			}
+ 			else 
+-				log(EC_LOG_ERROR, "EtherCAT_AL: Error sending AL_Status_frame for slave %d\n",ringpos);
++				ec_log(EC_LOG_ERROR, "EtherCAT_AL: Error sending AL_Status_frame for slave %d\n",ringpos);
+ 		}
+ 		else { 
+-			log(EC_LOG_ERROR, "EtherCAT_AL: Error sending AL_Control_frame for slave %d\n",ringpos);
++			ec_log(EC_LOG_ERROR, "EtherCAT_AL: Error sending AL_Control_frame for slave %d\n",ringpos);
+ 			struct timespec sleept;
+ 			sleept.tv_sec = 0;
+ 			sleept.tv_nsec = 10*1000*1000; //10ms
+@@ -312,7 +334,7 @@
+   EC_Ethernet_Frame SII_control_frame(&SII_control_tg);
+   succeed = m_dll_instance->txandrx(&SII_control_frame);
+   if (!succeed){
+-    log(EC_LOG_ERROR,"EC_AL::read_SII() Error sending control frame\n");
++    ec_log(EC_LOG_ERROR,"EC_AL::read_SII() Error sending control frame\n");
+     return false;
+   }
+   // BIG FAT WARNING:  USING 2 TELEGRAMS FOR WRITING AS PROGRAMMED
+@@ -362,19 +384,24 @@
+       // Check if EEPROM still busy
+       EC_SIIControlStatus siics(a_buffer);
+       if (siics.Busy){
+-	log(EC_LOG_WARNING, "EEPROM busy\n");
++	ec_log(EC_LOG_WARNING, "EEPROM busy\n");
+ 	struct timespec sleept;
+ 	sleept.tv_sec = 0;
+ 	sleept.tv_nsec = 10*1000*1000; //10ms
+ 	nanosleep( &sleept, 0);
+ 	tries++;
+       }
+-      else 
++      else { 
++	if (siics.AcknowledgeError) {
++	  ec_log(EC_LOG_ERROR,"EC_AL::read_SII() Acknowledge error\n");
++	  return false;
++	}
+ 	return succeed;
++      }
+     }
+     tries++;
+   }
+-  log(EC_LOG_ERROR,"EC_AL::read_SII() Max tries exceeded\n");
++  ec_log(EC_LOG_ERROR,"EC_AL::read_SII() Max tries exceeded\n");
+   return false;
+ }
+ 
+@@ -388,7 +415,7 @@
+       return m_slave_handler[i];
+     else i++;
+   }
+-  log(EC_LOG_WARNING, "EtherCAT_AL: No such slave, returning NULL\n");
++  ec_log(EC_LOG_WARNING, "EtherCAT_AL: No such slave, returning NULL\n");
+   return NULL;
+ }
+ 
+Index: src/arch/posix/ethercat_posix_drv.c
+===================================================================
+--- src/arch/posix/ethercat_posix_drv.c	(revision 36)
++++ src/arch/posix/ethercat_posix_drv.c	(working copy)
+@@ -60,7 +60,7 @@
+ // specifying 1000us or lower did not work on plain Linux.
+ // recv() returned immediately with EWOULDBLOCK. 
+ // May/must be different for PREEMPT_RT kernels.
+-#define TIMEOUT_USEC 2000
++#define TIMEOUT_USEC 20000
+ 
+ // Maximum times the master may retry to create or close a socket
+ #define MAX_TRIES_SOCKET 10
+@@ -90,14 +90,24 @@
+ 	
+ 	printf("Socket created: socket id: %d\n", sock);
+ 
+-	int index_ioctl;
++	int rv, index_ioctl;
+ 	strncpy(ifr.ifr_name, interface, IFNAMSIZ);
+-	if ((index_ioctl = ioctl(sock, SIOCGIFINDEX, &ifr)) < 0) {
++	if ((rv = ioctl(sock, SIOCGIFFLAGS, &ifr)) < 0) {
++		perror("Cannot get interface flags");
++		close(sock);
++		return -1;
++  }
++  if (!(ifr.ifr_flags & IFF_RUNNING)) {
++    fprintf(stderr, "Interface %s is not UP and RUNNING\n", interface);
++    return -1;
++  }
++
++  if ((index_ioctl = ioctl(sock, SIOCGIFINDEX, &ifr)) < 0) {
+ 		perror("Cannot get interface index");
+ 		close(sock);
+ 		return -1;
+ 	}
+-	printf("Got interface: index: %d\n", index_ioctl);
++	printf("Got interface: index: %d for %s\n", index_ioctl, ifr.ifr_name);
+ 	
+ 	struct timeval tv;
+ 	tv.tv_sec  = ( TIMEOUT_USEC ) / 1000000;
+@@ -167,12 +177,12 @@
+ 		// The actual send
+ 		int len_send = send(sock,(unsigned char *)&msg_to_send,msg_len  ,0);
+ 		if(len_send < 0)
+-			log(EC_LOG_FATAL, "low_level_output(): Cannot Send\n");
++			ec_log(EC_LOG_FATAL, "low_level_output(): Cannot Send\n");
+ 		else
+ 			result = true;	      
+ 	}
+ 	else { // higher level protocol error. Attempt to map to much data in one ethernet frame
+-		log(EC_LOG_FATAL, "EtherCAT fatal: message buffer overflow\n");
++		ec_log(EC_LOG_FATAL, "EtherCAT fatal: message buffer overflow\n");
+ 		// Release the message buffer again
+ 	}
+ 
+@@ -189,12 +199,12 @@
+ 	int len_recv = recv(sock,buffer_receive,sizeof(buffer_receive),0);
+ 	if(len_recv < 0) {
+ 		//perror("low_level_input: Cannot receive msg: ");
+-		log(EC_LOG_ERROR, "low_level_input: Cannot receive msg: %d\n",len_recv);
++		ec_log(EC_LOG_ERROR, "low_level_input: Cannot receive msg: %d\n",len_recv);
+ 		return false;
+ 	}
+ 
+ 	if ( ((msg_received->ether_type[0]) != 0x88) || (msg_received->ether_type[1]) != 0xA4) {
+-		log(EC_LOG_ERROR, "low_level_input: No EtherCAT msg!\n");
++		ec_log(EC_LOG_ERROR, "low_level_input: No EtherCAT msg!\n");
+ 		return false;
+ 	}
+ 
+@@ -202,7 +212,7 @@
+ 	int succes = framebuild(frame,msg_received->data);
+ 	if (succes != 0){
+ 		// FIXME decent error handling here
+-		log(EC_LOG_ERROR, "low_level_input: framebuilding failed!\n");
++		ec_log(EC_LOG_ERROR, "low_level_input: framebuilding failed!\n");
+ 		return false;
+ 	}
+   
+@@ -222,24 +232,24 @@
+ 				return true;
+ 			}
+ 			else{
+-				log(EC_LOG_ERROR, "low_level_txandrx: receiving failed\n");
++				ec_log(EC_LOG_ERROR, "low_level_txandrx: receiving failed\n");
+ 				pthread_mutex_unlock(&txandrx_mut);
+ 			}
+ 		}
+ 		else{
+-			log(EC_LOG_ERROR, "low_level_txandrx: sending failed\n");
++			ec_log(EC_LOG_ERROR, "low_level_txandrx: sending failed\n");
+ 			pthread_mutex_unlock(&txandrx_mut);
+ 		}
+ 		tries++;
+ 	}
+-	log(EC_LOG_FATAL, "low_level_txandrx: failed: MAX_TRIES_TX: Giving up\n");
++	ec_log(EC_LOG_FATAL, "low_level_txandrx: failed: MAX_TRIES_TX: Giving up\n");
+ 	return false;
+ }
+ 
+ struct netif* init_ec(const char * interface) {
+ 	int sock = init_socket(interface);
+ 	if(sock < 0) {
+-		log(EC_LOG_FATAL,"Socket initialisation failed\n");
++		ec_log(EC_LOG_FATAL,"Socket initialisation failed\n");
+ 		return 0;
+ 	}
+ 	struct netif* ni = (struct netif*)malloc(sizeof(struct netif));
+Index: src/arch/RTnet/ethercat_xenomai_drv.c
+===================================================================
+--- src/arch/RTnet/ethercat_xenomai_drv.c	(revision 36)
++++ src/arch/RTnet/ethercat_xenomai_drv.c	(working copy)
+@@ -31,6 +31,7 @@
+ //===========================================================================
+ 
+ 
++#include <string.h>
+ #include <errno.h>
+ #include <signal.h>
+ #include <pthread.h>	
+@@ -151,12 +152,12 @@
+ 		// The actual send
+ 		int len_send = send(sock,(unsigned char *)&msg_to_send,msg_len  ,0);
+ 		if(len_send < 0)
+-			log(EC_LOG_FATAL, "low_level_output(): Cannot Send\n");
++			ec_log(EC_LOG_FATAL, "low_level_output(): Cannot Send\n");
+ 		else
+ 			result = true;	      
+ 	}
+ 	else { // higher level protocol error. Attempt to map to much data in one ethernet frame
+-		log(EC_LOG_FATAL, "EtherCAT fatal: message buffer overflow\n");
++		ec_log(EC_LOG_FATAL, "EtherCAT fatal: message buffer overflow\n");
+ 		// Release the message buffer again
+ 	}
+ 
+@@ -170,15 +171,42 @@
+ 	struct eth_msg *msg_received = (struct eth_msg *)buffer_receive;
+ 	//Receive message from socket
+ 	int sock = netif->socket_private;
+-	int len_recv = recv(sock,buffer_receive,sizeof(buffer_receive),0);
+-	if(len_recv < 0) {
+-		//perror("low_level_input: Cannot receive msg: ");
+-		//log(EC_LOG_ERROR, "low_level_input: Cannot receive msg: %d\n",len_recv);
++
++  int len_recv;
++  int tries=0;
++  static const int MAX_TRIES=3; // Maximum number of tries for recieving packets
++
++  do {
++      ++tries;
++      len_recv = recv(sock,buffer_receive,sizeof(buffer_receive),0);
++      if(len_recv < 0) {
++          //perror("low_level_input: Cannot receive msg: ");
++          ec_log(EC_LOG_ERROR, "low_level_input: Cannot receive msg: %d\n",len_recv);
++          return false;
++      }
++             
++      if (len_recv <= sizeof(ETH_ALEN + ETH_ALEN + 2)) {
++          ec_log(EC_LOG_ERROR, "low_level_input: recieved runt packet: %d\n",len_recv);
++          continue;
++      }
++         
++      if ( (msg_received->ether_shost[4] != netif->hwaddr[4]) ) {
++          ec_log(EC_LOG_ERROR, "low_level_input: got incorrect sequence number: %d, expected %d\n",
++                 msg_received->ether_shost[4], netif->hwaddr[4]);
++          continue;
++      }
++      else {
++          break;
++      }       
++  } while(tries < MAX_TRIES);
++
++  if (tries >= MAX_TRIES) {
++      ec_log(EC_LOG_ERROR, "low_level_input: recieved too many bad packets: %d\n",len_recv);
+ 		return false;
+ 	}
+ 
+ 	if ( ((msg_received->ether_type[0]) != 0x88) || (msg_received->ether_type[1]) != 0xA4) {
+-		log(EC_LOG_ERROR, "low_level_input: No EtherCAT msg!\n");
++		ec_log(EC_LOG_ERROR, "low_level_input: No EtherCAT msg!\n");
+ 		return false;
+ 	}
+ 
+@@ -186,7 +214,7 @@
+ 	int succes = framebuild(frame,msg_received->data);
+ 	if (succes != 0){
+ 		// FIXME decent error handling here
+-		log(EC_LOG_ERROR, "low_level_input: framebuilding failed!\n");
++		ec_log(EC_LOG_ERROR, "low_level_input: framebuilding failed!\n");
+ 		return false;
+ 	}
+   
+@@ -200,30 +228,31 @@
+ 	int tries = 0;
+ 	while (tries < MAX_TRIES_TX) {
+ 		pthread_mutex_lock (&txandrx_mut);
++    netif->hwaddr[4]++;
+ 		if (low_level_output(frame,netif)){
+ 			if (low_level_input(frame,netif)){
+ 				pthread_mutex_unlock(&txandrx_mut);
+ 				return true;
+ 			}
+ 			else{
+-				//log(EC_LOG_ERROR, "low_level_txandrx: receiving failed\n");
++				ec_log(EC_LOG_ERROR, "low_level_txandrx: receiving failed\n");
+ 				pthread_mutex_unlock(&txandrx_mut);
+ 			}
+ 		}
+ 		else{
+-			//log(EC_LOG_ERROR, "low_level_txandrx: sending failed\n");
++			ec_log(EC_LOG_ERROR, "low_level_txandrx: sending failed\n");
+ 			pthread_mutex_unlock(&txandrx_mut);
+ 		}
+ 		tries++;
+ 	}
+-	log(EC_LOG_FATAL, "low_level_txandrx: failed: MAX_TRIES_TX: Giving up\n");
++	ec_log(EC_LOG_FATAL, "low_level_txandrx: failed: MAX_TRIES_TX: Giving up\n");
+ 	return false;
+ }
+ 
+ struct netif* init_ec(const char * interface) {
+ 	int sock = init_socket(interface);
+ 	if(sock < 0) {
+-		log(EC_LOG_FATAL,"Socket initialisation failed\n");
++		ec_log(EC_LOG_FATAL,"Socket initialisation failed\n");
+ 		return 0;
+ 	}
+ 	struct netif* ni = (struct netif*)malloc(sizeof(struct netif));
+Index: src/CMakeLists.txt
+===================================================================
+--- src/CMakeLists.txt	(revision 36)
++++ src/CMakeLists.txt	(working copy)
+@@ -47,7 +47,7 @@
+ 
+   # arch specific headers
+   FILE( GLOB ARCH_RTNET_INCLS ${EML_SOURCE_DIR}/include/ethercat/arch-RTnet/ethercat/[^.]*.h )
+-  INSTALL_FILES( /include/ethercat/arch-RTnet/ FILES ${ARCH_RTNET_INCLS})
++  INSTALL_FILES( /include/ethercat/ FILES ${ARCH_RTNET_INCLS})
+ 
+ ENDIF(BUILD_FOR_RTNET)
+ 
+@@ -78,7 +78,7 @@
+ 
+   # arch specific headers
+   FILE( GLOB ARCH_POSIX_INCLS ${EML_SOURCE_DIR}/include/ethercat/arch-RTnet/ethercat/[^.]*.h )
+-  INSTALL_FILES( /include/ethercat/arch-RTnet/ FILES ${ARCH_POSIX_INCLS})
++  INSTALL_FILES( /include/ethercat/ FILES ${ARCH_POSIX_INCLS})
+ 
+ ENDIF(BUILD_FOR_POSIX)
+ 
+@@ -88,8 +88,8 @@
+ INSTALL_FILES( /include/al/ FILES ${AL_INCLS})
+ FILE( GLOB DLL_INCLS ${EML_SOURCE_DIR}/include/dll/[^.]*.h )
+ INSTALL_FILES( /include/dll/ FILES ${DLL_INCLS})
+-FILE( GLOB ETHERCAT_INCLS ${EML_SOURCE_DIR}/include/ethercat/[^.]*.h )
+-INSTALL_FILES( /include/ethercat/ FILES ${ETHERCAT_INCLS})
++#FILE( GLOB ETHERCAT_INCLS ${EML_SOURCE_DIR}/include/ethercat/[^.]*.h )
++#INSTALL_FILES( /include/ethercat/ FILES ${ETHERCAT_INCLS})
+ 
+ 
+ 
+Index: CMakeLists.txt
+===================================================================
+--- CMakeLists.txt	(revision 36)
++++ CMakeLists.txt	(working copy)
+@@ -20,7 +20,7 @@
+    ECOS_USE_I386_ELF_TOOLS()
+ ENDIF (BUILD_FOR_ECOS)
+ 
+-OPTION( BUILD_FOR_RTNET "Build EML using RTNET/Xenomai" ON)
++OPTION( BUILD_FOR_RTNET "Build EML using RTNET/Xenomai" OFF)
+ 
+ IF (BUILD_FOR_RTNET)
+ 	SET(CMAKE_VERBOSE_MAKEFILE ON)
+@@ -37,7 +37,7 @@
+ 	  OUTPUT_VARIABLE XNPOSIX_USER_LDFLAGS)
+ ENDIF (BUILD_FOR_RTNET)
+ 
+-OPTION( BUILD_FOR_POSIX "Build for POSIX (Only tested on Linux/PREEMPT_RT for now)" OFF)
++OPTION( BUILD_FOR_POSIX "Build for POSIX (Only tested on Linux/PREEMPT_RT for now)" ON)
+ 
+ IF (BUILD_FOR_POSIX)
+         SET (POSIX_USER_LDFLAGS "-lpthread")

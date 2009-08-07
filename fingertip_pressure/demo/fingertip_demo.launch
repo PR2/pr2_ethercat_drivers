@@ -1,0 +1,6 @@
+<launch>
+  <!--include file="$(find pr2_gazebo)/pr2_empty.launch"/-->
+  
+  <node name="pressure_source" pkg="fingertip_pressure" type="sim_sensor.py" respawn="false" output="screen"/>
+  <include file="$(find fingertip_pressure)/demo/fingertip_demo_no_sim.launch"/>
+</launch>

@@ -1,0 +1,13 @@
+<stack name="pr2_ethercat_drivers" version="0.1">
+  <description brief="drivers related to ethercat">
+    This stack contains drivers for the ethercat system and the peripherals
+    that connect to it: motor control boards, fingertip sensors, texture 
+    projector, hand accelerometer.
+  </description>
+  <author>Maintained by Rob Wheeler</author>
+  <review status="unreviewed" notes=""/>
+  <url>http://pr.willowgarage.com/wiki/ethercat_drivers</url>
+  <depend stack="ros"/> <!-- rospy, rostest, wxswig, roslaunch, pycrypto --> 
+  <depend stack="visualization_core"/> <!-- visualization_msgs --> 
+  <depend stack="common_msgs"/> <!-- robot_msgs, geometry_msgs --> 
+</stack>

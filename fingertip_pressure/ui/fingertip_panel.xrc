@@ -1,0 +1,285 @@
+<?xml version="1.0" ?>
+<resource>
+  <object class="wxPanel" name="FingertipPressurePanel">
+    <object class="wxGridBagSizer">
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad0">
+          <font>
+            <size>6</size>
+          </font>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxBOTTOM|wxEXPAND</flag>
+        <border>5</border>
+        <ratio>1</ratio>
+        <cellpos>0,2</cellpos>
+        <cellspan>2,6</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad1">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxRIGHT|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>6,0</cellpos>
+        <cellspan>8,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad2">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxBOTTOM|wxRIGHT|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>2,0</cellpos>
+        <cellspan>4,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad3">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxBOTTOM|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>2,2</cellpos>
+        <cellspan>2,3</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad4">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxBOTTOM|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>2,5</cellpos>
+        <cellspan>2,3</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad5">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxBOTTOM|wxLEFT|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>2,8</cellpos>
+        <cellspan>4,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="pad6">
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <flag>wxLEFT|wxEXPAND</flag>
+        <border>5</border>
+        <cellpos>6,8</cellpos>
+        <cellspan>8,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad7">
+          <label>7</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>4,2</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad8">
+          <label>8</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>4,4</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad9">
+          <label>9</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>4,6</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad10">
+          <label>10</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>6,2</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad11">
+          <label>11</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>6,4</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad12">
+          <label>12</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>6,6</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad13">
+          <label>13</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>8,2</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad14">
+          <label>14</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>8,4</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad15">
+          <label>15</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>8,6</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad16">
+          <label>16</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>10,2</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad17">
+          <label>17</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>10,4</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad18">
+          <label>18</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>10,6</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad19">
+          <label>19</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>12,2</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad20">
+          <label>20</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>12,4</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <flag>wxEXPAND</flag>
+        <object class="wxTextCtrl" name="pad21">
+          <label>21</label>
+          <style>wxTE_MULTILINE|wxTE_CENTRE</style>
+        </object>
+        <cellpos>12,6</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <vgap>0</vgap>
+      <growablecols>1,2,3,4,5,6,7,8,9,10</growablecols>
+      <growablerows>1,2,3,4,5,6,7,8,9,10,11,12,13,14</growablerows>
+      <object class="sizeritem">
+        <object class="wxTextCtrl" name="frame_id">
+          <style>wxTE_CENTRE</style>
+        </object>
+        <flag>wxEXPAND</flag>
+        <cellpos>14,0</cellpos>
+        <cellspan>1,10</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxPanel">
+          <object class="wxBoxSizer">
+            <orient>wxVERTICAL</orient>
+            <object class="sizeritem">
+              <object class="wxRadioButton" name="button_N">
+                <label>N</label>
+                <font>
+                  <size>6</size>
+                  <style>normal</style>
+                  <weight>normal</weight>
+                  <underlined>0</underlined>
+                  <family>swiss</family>
+                  <face>Sans</face>
+                  <encoding>UTF-8</encoding>
+                </font>
+                <XRCED>
+                  <events>EVT_RADIOBUTTON</events>
+                </XRCED>
+              </object>
+            </object>
+            <object class="sizeritem">
+              <object class="wxRadioButton" name="button_kPa">
+                <label>kPa</label>
+                <font>
+                  <size>6</size>
+                  <style>normal</style>
+                  <weight>normal</weight>
+                  <underlined>0</underlined>
+                  <family>swiss</family>
+                  <face>Sans</face>
+                  <encoding>UTF-8</encoding>
+                </font>
+                <XRCED>
+                  <events>EVT_RADIOBUTTON</events>
+                </XRCED>
+              </object>
+            </object>
+          </object>
+        </object>
+        <flag>wxALIGN_CENTRE_VERTICAL|wxALIGN_CENTRE_HORIZONTAL</flag>
+        <cellpos>0,0</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+      <object class="sizeritem">
+        <object class="wxCheckBox" name="button_Zero">
+          <label>Zero</label>
+          <font>
+            <size>6</size>
+            <style>normal</style>
+            <weight>normal</weight>
+            <underlined>0</underlined>
+            <family>swiss</family>
+            <face>Sans</face>
+            <encoding>UTF-8</encoding>
+          </font>
+          <XRCED>
+            <events>EVT_CHECKBOX</events>
+          </XRCED>
+        </object>
+        <flag>wxALIGN_CENTRE_VERTICAL|wxALIGN_CENTRE_HORIZONTAL</flag>
+        <cellpos>0,8</cellpos>
+        <cellspan>2,2</cellspan>
+      </object>
+    </object>
+    <style>wxSUNKEN_BORDER</style>
+  </object>
+</resource>
