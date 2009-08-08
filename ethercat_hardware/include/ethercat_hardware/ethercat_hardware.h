@@ -109,7 +109,7 @@ private:
   double last_published_;
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
-  vector<diagnostic_msgs::DiagnosticValue> values_;
+  vector<diagnostic_msgs::KeyValue> values_;
   vector<diagnostic_msgs::DiagnosticString> strings_;
 
 };

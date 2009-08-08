@@ -304,7 +304,7 @@ private:
 
   // Diagnostic message values
   vector<diagnostic_msgs::DiagnosticString> strings_;
-  vector<diagnostic_msgs::DiagnosticValue> values_;
+  vector<diagnostic_msgs::KeyValue> values_;
   string reason_;
   int level_;
   double voltage_error_, max_voltage_error_;

@@ -59,8 +59,8 @@ int EK1122::initialize(Actuator *, bool)
 void EK1122::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
 {
   vector<diagnostic_msgs::DiagnosticString> strings;
-  vector<diagnostic_msgs::DiagnosticValue> values;
-  diagnostic_msgs::DiagnosticValue v;
+  vector<diagnostic_msgs::KeyValue> values;
+  diagnostic_msgs::KeyValue v;
   diagnostic_msgs::DiagnosticString s;
 
   stringstream str;

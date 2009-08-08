@@ -878,7 +878,7 @@ string WG0X::safetyDisableString(uint8_t status)
   strings_.push_back(s)
 void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buffer)
 {
-  diagnostic_msgs::DiagnosticValue v;
+  diagnostic_msgs::KeyValue v;
   diagnostic_msgs::DiagnosticString s;
   WG0XStatus *status = (WG0XStatus *)(buffer + command_size_);
 

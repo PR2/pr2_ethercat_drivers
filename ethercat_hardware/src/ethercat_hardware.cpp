@@ -209,7 +209,7 @@ void EthercatHardware::publishDiagnostics()
 {
   // Publish status of EtherCAT master
   diagnostic_msgs::DiagnosticStatus status;
-  diagnostic_msgs::DiagnosticValue v;
+  diagnostic_msgs::KeyValue v;
   diagnostic_msgs::DiagnosticString s;
 
   strings_.clear();
