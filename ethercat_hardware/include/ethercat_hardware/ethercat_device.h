@@ -44,7 +44,7 @@
 
 #include <hardware_interface/hardware_interface.h>
 
-#include <diagnostic_msgs/DiagnosticMessage.h>
+#include <diagnostic_msgs/DiagnosticArray.h>
 
 #include <loki/Factory.h>
 #include <loki/Sequence.h>
