@@ -57,19 +57,17 @@ int WG014::initialize(Actuator *, bool)
   return 0;
 }
 #define ADD_STRING_FMT(lab, fmt, ...) \
-  s.label = (lab); \
+  v.label = (lab); \
   { char buf[1024]; \
     snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    s.value = buf; \
+    v.value = buf; \
   } \
-  strings.push_back(s)
+  values.push_back(v)
 
 void WG014::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
 {
-  vector<diagnostic_msgs::DiagnosticString> strings;
   vector<diagnostic_msgs::KeyValue> values;
   diagnostic_msgs::KeyValue v;
-  diagnostic_msgs::DiagnosticString s;
 
   stringstream str;
   str << "EtherCAT Device #" << setw(2) << setfill('0') << sh_->get_ring_position() << " (WG014)";
@@ -84,6 +82,5 @@ void WG014::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
   ADD_STRING_FMT("Product code", "WG014 (%d)", sh_->get_product_code());
   ADD_STRING_FMT("Serial Number", "%s", serial);
 
-  d.set_strings_vec(strings);
   d.set_values_vec(values);
 }

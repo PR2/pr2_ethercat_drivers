@@ -58,11 +58,9 @@ int EK1122::initialize(Actuator *, bool)
 }
 void EK1122::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
 {
-  vector<diagnostic_msgs::DiagnosticString> strings;
   vector<diagnostic_msgs::KeyValue> values;
   diagnostic_msgs::KeyValue v;
-  diagnostic_msgs::DiagnosticString s;
-
+  
   stringstream str;
   str << "EtherCAT Device #" << setw(2) << setfill('0') << sh_->get_ring_position() << " (EK1122)";
   d.name = str.str();
@@ -72,12 +70,11 @@ void EK1122::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
   d.hardware_id = serial;
   d.level = 0;
 
-  s.label = "Product code";
+  v.label = "Product code";
   str.str("");
   str << "EK1122 (" << sh_->get_product_code() << ")";
-  s.value = str.str();
-  strings.push_back(s);
+  v.value = str.str();
+  values.push_back(v);
 
-  d.set_strings_vec(strings);
   d.set_values_vec(values);
 }

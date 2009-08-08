@@ -866,23 +866,21 @@ string WG0X::safetyDisableString(uint8_t status)
 }
 
 #define ADD_STRING_FMT(lab, fmt, ...) \
-  s.label = (lab); \
+  v.label = (lab); \
   { char buf[1024]; \
     snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    s.value = buf; \
+    v.value = buf; \
   } \
-  strings_.push_back(s)
+  values_.push_back(v)
 #define ADD_STRING(lab, val) \
-  s.label = (lab); \
-  s.value = (val); \
-  strings_.push_back(s)
+  v.label = (lab); \
+  v.value = (val); \
+  values_.push_back(v)
 void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buffer)
 {
   diagnostic_msgs::KeyValue v;
-  diagnostic_msgs::DiagnosticString s;
   WG0XStatus *status = (WG0XStatus *)(buffer + command_size_);
 
-  strings_.clear();
   values_.clear();
 
   stringstream str;
@@ -987,6 +985,5 @@ void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buff
   ADD_STRING_FMT("Consecutive Drops", "%d", consecutive_drops_);
   ADD_STRING_FMT("Max Consecutive Drops", "%d", max_consecutive_drops_);
 
-  d.set_strings_vec(strings_);
   d.set_values_vec(values_);
 }

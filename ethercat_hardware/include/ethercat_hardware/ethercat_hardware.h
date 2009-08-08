@@ -110,8 +110,7 @@ private:
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
-  vector<diagnostic_msgs::DiagnosticString> strings_;
-
+  
 };
 
 #endif /* ETHERCAT_HARDWARE_H */

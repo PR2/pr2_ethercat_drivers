@@ -303,7 +303,6 @@ private:
   static const int ACTUATOR_INFO_PAGE = 4095;
 
   // Diagnostic message values
-  vector<diagnostic_msgs::DiagnosticString> strings_;
   vector<diagnostic_msgs::KeyValue> values_;
   string reason_;
   int level_;

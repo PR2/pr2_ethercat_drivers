@@ -189,31 +189,28 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   // Initialize diagnostic data structures
   publisher_.msg_.status.reserve(num_slaves_ + 1);
   statuses_.reserve(num_slaves_ + 1);
-  strings_.reserve(5);
-  values_.reserve(5);
+  values_.reserve(10);
 }
 
 #define ADD_STRING_FMT(lab, fmt, ...) \
-  s.label = (lab); \
+  v.label = (lab); \
   { char buf[1024]; \
     snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    s.value = buf; \
+    v.value = buf; \
   } \
-  strings_.push_back(s)
+  values_.push_back(v)
 #define ADD_STRING(lab, val) \
-  s.label = (lab); \
-  s.value = (val); \
-  strings_.push_back(s)
+  v.label = (lab); \
+  v.value = (val); \
+  values_.push_back(v)
 
 void EthercatHardware::publishDiagnostics()
 {
   // Publish status of EtherCAT master
   diagnostic_msgs::DiagnosticStatus status;
   diagnostic_msgs::KeyValue v;
-  diagnostic_msgs::DiagnosticString s;
-
-  strings_.clear();
-  values_.clear();
+  
+    values_.clear();
   statuses_.clear();
 
   status.name = "EtherCAT Master";
@@ -243,7 +240,6 @@ void EthercatHardware::publishDiagnostics()
   ADD_STRING_FMT("EtherCAT txandrx errors", "%d", diagnostics_.txandrx_errors_);
 
   status.set_values_vec(values_);
-  status.set_strings_vec(strings_);
   statuses_.push_back(status);
 
   unsigned char *current = current_buffer_;
