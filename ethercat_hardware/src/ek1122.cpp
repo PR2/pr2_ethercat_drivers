@@ -70,7 +70,7 @@ void EK1122::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
   d.hardware_id = serial;
   d.level = 0;
 
-  v.label = "Product code";
+  v.key = "Product code";
   str.str("");
   str << "EK1122 (" << sh_->get_product_code() << ")";
   v.value = str.str();

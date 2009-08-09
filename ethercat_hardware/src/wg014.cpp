@@ -57,7 +57,7 @@ int WG014::initialize(Actuator *, bool)
   return 0;
 }
 #define ADD_STRING_FMT(lab, fmt, ...) \
-  v.label = (lab); \
+  v.key = (lab); \
   { char buf[1024]; \
     snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
     v.value = buf; \

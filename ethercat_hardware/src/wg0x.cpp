@@ -866,14 +866,14 @@ string WG0X::safetyDisableString(uint8_t status)
 }
 
 #define ADD_STRING_FMT(lab, fmt, ...) \
-  v.label = (lab); \
+  v.key = (lab); \
   { char buf[1024]; \
     snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
     v.value = buf; \
   } \
   values_.push_back(v)
 #define ADD_STRING(lab, val) \
-  v.label = (lab); \
+  v.key = (lab); \
   v.value = (val); \
   values_.push_back(v)
 void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buffer)
