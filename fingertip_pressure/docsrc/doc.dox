@@ -127,7 +127,7 @@ $ rectangle_viz
 \subsubsection topics ROS topics
 
 Subscribes to:
-- \b "/pressure/&lt;gripper_motor_name&gt;" "in": [robot_msgs/PressureState] Raw
+- \b "/pressure/&lt;gripper_motor_name&gt;" "in": [pr2_msgs/PressureState] Raw
 	data from the pressure sensor
 
 - \b "/pressure/&lt;gripper_motor_name&gt;_info" "in": [fingertip_pressure/PressureInfo] Sensor calibration, geometry and tf frame.
@@ -170,7 +170,7 @@ Subscribes to:
 - none
 
 Publishes to:
-- \b "pressure/&lt;gripper_motor_name&gt;": [robot_msgs/PressureInfo] Simulated
+- \b "pressure/&lt;gripper_motor_name&gt;": [pr2_msgs/PressureInfo] Simulated
 	pressure sensor data.
 
 \subsubsection parameters ROS parameters

@@ -44,7 +44,7 @@ import math
 
 from fingertip_pressure.colormap import color255
 from fingertip_pressure.msg import PressureInfo
-from robot_msgs.msg import Vector3
+from geometry_msgs.msg import Vector3
 
 import wx
 import threading
