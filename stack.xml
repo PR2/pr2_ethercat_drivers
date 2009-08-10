@@ -9,5 +9,5 @@
   <url>http://pr.willowgarage.com/wiki/ethercat_drivers</url>
   <depend stack="ros"/> <!-- rospy, rostest, wxswig, roslaunch, pycrypto --> 
   <depend stack="visualization_core"/> <!-- visualization_msgs --> 
-  <depend stack="common_msgs"/> <!-- robot_msgs, geometry_msgs --> 
+  <depend stack="common_msgs"/> <!-- geometry_msgs --> 
 </stack>
