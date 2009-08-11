@@ -240,7 +240,7 @@ public:
   void program(WG0XActuatorInfo *);
   bool isProgrammed() { return actuator_info_.crc32_ != 0;}
 
-  void diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *);
+  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
 
 protected:
   uint8_t fw_major_;
@@ -303,7 +303,6 @@ private:
   static const int ACTUATOR_INFO_PAGE = 4095;
 
   // Diagnostic message values
-  vector<diagnostic_msgs::KeyValue> values_;
   string reason_;
   int level_;
   double voltage_error_, max_voltage_error_;

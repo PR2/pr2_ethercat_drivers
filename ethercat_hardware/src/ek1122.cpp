@@ -56,25 +56,15 @@ int EK1122::initialize(Actuator *, bool)
   ROS_DEBUG("Device #%02d: EK1122 (%#08x)", sh_->get_ring_position(), sh_->get_product_code());
   return 0;
 }
-void EK1122::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
+void EK1122::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *)
 {
-  vector<diagnostic_msgs::KeyValue> values;
-  diagnostic_msgs::KeyValue v;
-  
   stringstream str;
   str << "EtherCAT Device #" << setw(2) << setfill('0') << sh_->get_ring_position() << " (EK1122)";
   d.name = str.str();
-  d.message = "OK";
+  d.summary(0, "OK");
   char serial[32];
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", sh_->get_product_code()/ 100000 , sh_->get_product_code() % 100000, sh_->get_serial());
   d.hardware_id = serial;
-  d.level = 0;
 
-  v.key = "Product code";
-  str.str("");
-  str << "EK1122 (" << sh_->get_product_code() << ")";
-  v.value = str.str();
-  values.push_back(v);
-
-  d.set_values_vec(values);
+  d.addf("Product code", "EK1122 (%u)", sh_->get_product_code());
 }

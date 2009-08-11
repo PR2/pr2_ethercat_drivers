@@ -48,7 +48,7 @@ public:
   void computeCurrent(ActuatorCommand &command) {}
   void truncateCurrent(ActuatorCommand &command) {}
   bool verifyState(ActuatorState &, unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
-  void diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *);
+  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
 
   enum {PRODUCT_CODE = 6805014};
 };

@@ -56,31 +56,17 @@ int WG014::initialize(Actuator *, bool)
   ROS_DEBUG("Device #%02d: WG014 (%#08x)", sh_->get_ring_position(), sh_->get_product_code());
   return 0;
 }
-#define ADD_STRING_FMT(lab, fmt, ...) \
-  v.key = (lab); \
-  { char buf[1024]; \
-    snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    v.value = buf; \
-  } \
-  values.push_back(v)
 
-void WG014::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *)
+void WG014::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *)
 {
-  vector<diagnostic_msgs::KeyValue> values;
-  diagnostic_msgs::KeyValue v;
-
   stringstream str;
   str << "EtherCAT Device #" << setw(2) << setfill('0') << sh_->get_ring_position() << " (WG014)";
   d.name = str.str();
-  d.message = "OK";
+  d.summary(0, "OK");
   char serial[32];
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", sh_->get_product_code()/ 100000 , sh_->get_product_code() % 100000, sh_->get_serial());
   d.hardware_id = serial;
-  d.level = 0;
 
-
-  ADD_STRING_FMT("Product code", "WG014 (%d)", sh_->get_product_code());
-  ADD_STRING_FMT("Serial Number", "%s", serial);
-
-  d.set_values_vec(values);
+  d.addf("Product code", "WG014 (%d)", sh_->get_product_code());
+  d.addf("Serial Number", "%s", serial);
 }

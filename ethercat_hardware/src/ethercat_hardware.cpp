@@ -192,54 +192,37 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   values_.reserve(10);
 }
 
-#define ADD_STRING_FMT(lab, fmt, ...) \
-  v.key = (lab); \
-  { char buf[1024]; \
-    snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    v.value = buf; \
-  } \
-  values_.push_back(v)
-#define ADD_STRING(lab, val) \
-  v.key = (lab); \
-  v.value = (val); \
-  values_.push_back(v)
-
 void EthercatHardware::publishDiagnostics()
 {
   // Publish status of EtherCAT master
-  diagnostic_msgs::DiagnosticStatus status;
-  diagnostic_msgs::KeyValue v;
+  diagnostic_updater::DiagnosticStatusWrapper status;
   
-    values_.clear();
   statuses_.clear();
 
   status.name = "EtherCAT Master";
   if (halt_motors_)
   {
-    status.level = 2;
-    status.message = "Motors halted";
+    status.summary(2, "Motors halted");
   } else {
-    status.level = 0;
-    status.message = "OK";
+    status.summary(0, "OK");
   }
 
-  ADD_STRING("Motors halted", halt_motors_ ? "true" : "false");
-  ADD_STRING_FMT("EtherCAT devices", "%d", num_slaves_); 
-  ADD_STRING("Interface", interface_);
-  ADD_STRING_FMT("Reset state", "%d", reset_state_);
+  status.add("Motors halted", halt_motors_ ? "true" : "false");
+  status.addf("EtherCAT devices", "%d", num_slaves_); 
+  status.add("Interface", interface_);
+  status.addf("Reset state", "%d", reset_state_);
 
   // Roundtrip
   diagnostics_.max_roundtrip_ = std::max(diagnostics_.max_roundtrip_, 
        extract_result<tag::max>(diagnostics_.acc_));
-  ADD_STRING_FMT("Average roundtrip time (us)", "%.4f", extract_result<tag::mean>(diagnostics_.acc_) * 1e6);
+  status.addf("Average roundtrip time (us)", "%.4f", extract_result<tag::mean>(diagnostics_.acc_) * 1e6);
 
   accumulator_set<double, stats<tag::max, tag::mean> > blank;
   diagnostics_.acc_ = blank;
 
-  ADD_STRING_FMT("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
-  ADD_STRING_FMT("EtherCAT txandrx errors", "%d", diagnostics_.txandrx_errors_);
+  status.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
+  status.addf("EtherCAT txandrx errors", "%d", diagnostics_.txandrx_errors_);
 
-  status.set_values_vec(values_);
   statuses_.push_back(status);
 
   unsigned char *current = current_buffer_;

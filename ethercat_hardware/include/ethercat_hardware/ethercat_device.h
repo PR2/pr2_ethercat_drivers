@@ -44,6 +44,8 @@
 
 #include <hardware_interface/hardware_interface.h>
 
+#include <diagnostic_updater/DiagnosticStatusWrapper.h>
+
 #include <diagnostic_msgs/DiagnosticArray.h>
 
 #include <loki/Factory.h>
@@ -68,7 +70,7 @@ public:
   virtual void truncateCurrent(ActuatorCommand &command) = 0;
   virtual bool verifyState(ActuatorState &state, unsigned char *this_buffer, unsigned char *prev_buffer) = 0;
 
-  virtual void diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *) = 0;
+  virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *) = 0;
 
   EtherCAT_SlaveHandler *sh_;
   bool has_actuator_;

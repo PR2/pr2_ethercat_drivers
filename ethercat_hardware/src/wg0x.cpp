@@ -36,7 +36,6 @@
 
 #include <math.h>
 
-
 #include <ethercat_hardware/wg0x.h>
 
 #include <dll/ethercat_dll.h>
@@ -865,23 +864,9 @@ string WG0X::safetyDisableString(uint8_t status)
   return str;
 }
 
-#define ADD_STRING_FMT(lab, fmt, ...) \
-  v.key = (lab); \
-  { char buf[1024]; \
-    snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
-    v.value = buf; \
-  } \
-  values_.push_back(v)
-#define ADD_STRING(lab, val) \
-  v.key = (lab); \
-  v.value = (val); \
-  values_.push_back(v)
-void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buffer)
+void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
-  diagnostic_msgs::KeyValue v;
   WG0XStatus *status = (WG0XStatus *)(buffer + command_size_);
-
-  values_.clear();
 
   stringstream str;
   str << "EtherCAT Device (" << actuator_info_.name_ << ")";
@@ -892,33 +877,33 @@ void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buff
   d.hardware_id = serial;
   d.level = level_;
 
-  ADD_STRING("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
-  ADD_STRING("Name", actuator_info_.name_);
-  ADD_STRING_FMT("Position", "%02d", sh_->get_ring_position());
-  ADD_STRING_FMT("Product code",
+  d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
+  d.add("Name", actuator_info_.name_);
+  d.addf("Position", "%02d", sh_->get_ring_position());
+  d.addf("Product code",
         "WG0%d (%d) Firmware Revision %d.%02d, PCB Revision %c.%02d",
         sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
         sh_->get_product_code(), fw_major_, fw_minor_,
         'A' + board_major_, board_minor_);
 
-  ADD_STRING("Robot", actuator_info_.robot_name_);
-  ADD_STRING_FMT("Motor", "%s %s", actuator_info_.motor_make_, actuator_info_.motor_model_);
-  ADD_STRING("Serial Number", serial);
-  ADD_STRING_FMT("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
-  ADD_STRING_FMT("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
-  ADD_STRING_FMT("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
+  d.add("Robot", actuator_info_.robot_name_);
+  d.addf("Motor", "%s %s", actuator_info_.motor_make_, actuator_info_.motor_model_);
+  d.add("Serial Number", serial);
+  d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
+  d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
+  d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
 
-  ADD_STRING_FMT("SW Max Current", "%f", actuator_info_.max_current_);
-  ADD_STRING_FMT("Speed Constant", "%f", actuator_info_.speed_constant_);
-  ADD_STRING_FMT("Resistance", "%f", actuator_info_.resistance_);
-  ADD_STRING_FMT("Motor Torque Constant", "%f", actuator_info_.motor_torque_constant_);
-  ADD_STRING_FMT("Pulses Per Revolution", "%d", actuator_info_.pulses_per_revolution_);
-  ADD_STRING_FMT("Encoder Reduction", "%f\n", actuator_info_.encoder_reduction_);
+  d.addf("SW Max Current", "%f", actuator_info_.max_current_);
+  d.addf("Speed Constant", "%f", actuator_info_.speed_constant_);
+  d.addf("Resistance", "%f", actuator_info_.resistance_);
+  d.addf("Motor Torque Constant", "%f", actuator_info_.motor_torque_constant_);
+  d.addf("Pulses Per Revolution", "%d", actuator_info_.pulses_per_revolution_);
+  d.addf("Encoder Reduction", "%f\n", actuator_info_.encoder_reduction_);
 
-  ADD_STRING_FMT("Safety Disable Status", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_).c_str(), config_info_.safety_disable_status_);
-  ADD_STRING_FMT("Safety Disable Status Hold", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_hold_).c_str(), config_info_.safety_disable_status_hold_);
-  ADD_STRING_FMT("Safety Disable Count", "%d", config_info_.safety_disable_count_);
-  ADD_STRING_FMT("Watchdog Limit", "%dms\n", config_info_.watchdog_limit_);
+  d.addf("Safety Disable Status", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_).c_str(), config_info_.safety_disable_status_);
+  d.addf("Safety Disable Status Hold", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_hold_).c_str(), config_info_.safety_disable_status_hold_);
+  d.addf("Safety Disable Count", "%d", config_info_.safety_disable_count_);
+  d.addf("Watchdog Limit", "%dms\n", config_info_.watchdog_limit_);
 
   string mode, prefix;
   if (status->mode_) {
@@ -949,41 +934,39 @@ void WG0X::diagnostics(diagnostic_msgs::DiagnosticStatus &d, unsigned char *buff
   } else {
     mode = "OFF";
   }
-  ADD_STRING("Mode", mode);
-  ADD_STRING_FMT("Digital out", "%d", status->digital_out_);
-  ADD_STRING_FMT("Programmed pwm value", "%d", status->programmed_pwm_value_);
-  ADD_STRING_FMT("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
-  ADD_STRING_FMT("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
-  ADD_STRING_FMT("Timestamp", "%d", status->timestamp_);
-  ADD_STRING_FMT("Encoder count", "%d", status->encoder_count_);
-  ADD_STRING_FMT("Encoder index pos", "%d", status->encoder_index_pos_);
-  ADD_STRING_FMT("Num encoder_errors", "%d", status->num_encoder_errors_);
-  ADD_STRING_FMT("Encoder status", "%d", status->encoder_status_);
-  ADD_STRING_FMT("Calibration reading", "%d", status->calibration_reading_);
-  ADD_STRING_FMT("Last calibration rising edge", "%d", status->last_calibration_rising_edge_);
-  ADD_STRING_FMT("Last calibration falling edge", "%d", status->last_calibration_falling_edge_);
-  ADD_STRING_FMT("Board temperature", "%f", 0.0078125 * status->board_temperature_);
-  ADD_STRING_FMT("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
-  ADD_STRING_FMT("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
-  ADD_STRING_FMT("Motor voltage", "%f", status->motor_voltage_ * config_info_.nominal_voltage_scale_);
-  ADD_STRING_FMT("Current Loop Kp", "%d", config_info_.current_loop_kp_);
-  ADD_STRING_FMT("Current Loop Ki", "%d", config_info_.current_loop_ki_);
+  d.add("Mode", mode);
+  d.addf("Digital out", "%d", status->digital_out_);
+  d.addf("Programmed pwm value", "%d", status->programmed_pwm_value_);
+  d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
+  d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
+  d.addf("Timestamp", "%d", status->timestamp_);
+  d.addf("Encoder count", "%d", status->encoder_count_);
+  d.addf("Encoder index pos", "%d", status->encoder_index_pos_);
+  d.addf("Num encoder_errors", "%d", status->num_encoder_errors_);
+  d.addf("Encoder status", "%d", status->encoder_status_);
+  d.addf("Calibration reading", "%d", status->calibration_reading_);
+  d.addf("Last calibration rising edge", "%d", status->last_calibration_rising_edge_);
+  d.addf("Last calibration falling edge", "%d", status->last_calibration_falling_edge_);
+  d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
+  d.addf("Motor voltage", "%f", status->motor_voltage_ * config_info_.nominal_voltage_scale_);
+  d.addf("Current Loop Kp", "%d", config_info_.current_loop_kp_);
+  d.addf("Current Loop Ki", "%d", config_info_.current_loop_ki_);
 
-  ADD_STRING_FMT("Motor voltage estimate", "%f", voltage_estimate_);
-  ADD_STRING_FMT("Packet count", "%d", status->packet_count_);
+  d.addf("Motor voltage estimate", "%f", voltage_estimate_);
+  d.addf("Packet count", "%d", status->packet_count_);
 
-  ADD_STRING_FMT("Voltage Error", "%f", voltage_error_);
-  ADD_STRING_FMT("Max Voltage Error", "%f", max_voltage_error_);
-  ADD_STRING_FMT("Filtered Voltage Error", "%f", filtered_voltage_error_);
-  ADD_STRING_FMT("Max Filtered Voltage Error", "%f", max_filtered_voltage_error_);
-  ADD_STRING_FMT("Current Error", "%f", current_error_);
-  ADD_STRING_FMT("Max Current Error", "%f", max_current_error_);
-  ADD_STRING_FMT("Filtered Current Error", "%f", filtered_current_error_);
-  ADD_STRING_FMT("Max Filtered Current Error", "%f", max_filtered_current_error_);
+  d.addf("Voltage Error", "%f", voltage_error_);
+  d.addf("Max Voltage Error", "%f", max_voltage_error_);
+  d.addf("Filtered Voltage Error", "%f", filtered_voltage_error_);
+  d.addf("Max Filtered Voltage Error", "%f", max_filtered_voltage_error_);
+  d.addf("Current Error", "%f", current_error_);
+  d.addf("Max Current Error", "%f", max_current_error_);
+  d.addf("Filtered Current Error", "%f", filtered_current_error_);
+  d.addf("Max Filtered Current Error", "%f", max_filtered_current_error_);
 
-  ADD_STRING_FMT("Drops", "%d", drops_);
-  ADD_STRING_FMT("Consecutive Drops", "%d", consecutive_drops_);
-  ADD_STRING_FMT("Max Consecutive Drops", "%d", max_consecutive_drops_);
-
-  d.set_values_vec(values_);
+  d.addf("Drops", "%d", drops_);
+  d.addf("Consecutive Drops", "%d", consecutive_drops_);
+  d.addf("Max Consecutive Drops", "%d", max_consecutive_drops_);
 }
