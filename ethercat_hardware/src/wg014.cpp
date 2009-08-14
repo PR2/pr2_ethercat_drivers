@@ -67,6 +67,7 @@ void WG014::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", sh_->get_product_code()/ 100000 , sh_->get_product_code() % 100000, sh_->get_serial());
   d.hardware_id = serial;
 
+  d.clear();
   d.addf("Product code", "WG014 (%d)", sh_->get_product_code());
   d.addf("Serial Number", "%s", serial);
 }

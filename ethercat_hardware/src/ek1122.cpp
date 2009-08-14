@@ -66,5 +66,6 @@ void EK1122::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigne
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", sh_->get_product_code()/ 100000 , sh_->get_product_code() % 100000, sh_->get_serial());
   d.hardware_id = serial;
 
+  d.clear();
   d.addf("Product code", "EK1122 (%u)", sh_->get_product_code());
 }

@@ -877,6 +877,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.hardware_id = serial;
   d.level = level_;
 
+  d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
   d.add("Name", actuator_info_.name_);
   d.addf("Position", "%02d", sh_->get_ring_position());
