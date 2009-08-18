@@ -1,6 +1,12 @@
 <package>
 <description brief='Fingertip Pressure'>
-Package for publishing fingertip pressure sensor information.
+
+fintertip_pressure publishes ROS topics with information related to the PR2 fingertip pressure sensors. This information includes:
+<ul>
+  <li>Visualization of the pressure map in <a href="http://ros.org/wiki/rviz">Rviz</a> or in a standalone panel.</li>
+  <li>calibration data on the data such as scaling factors, zero points and reference frames. </li>
+</ul>
+
 </description>
 <author>Blaise Gassend (email: blaise@willowgarage.com)</author>
 <license>BSD</license>
