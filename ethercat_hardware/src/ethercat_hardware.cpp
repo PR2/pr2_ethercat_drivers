@@ -154,7 +154,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   // Create HardwareInterface
   hw_ = new HardwareInterface(num_actuators);
-  hw_->current_time_ = ros::Time::now().toSec();
+  hw_->current_time_ = ros::Time::now();
   last_published_ = hw_->current_time_;
 
   // Initialize slaves
@@ -312,13 +312,13 @@ void EthercatHardware::update(bool reset, bool halt)
     --reset_state_;
 
   // Update current time
-  hw_->current_time_ = ros::Time::now().toSec();
+  hw_->current_time_ = ros::Time::now();
 
   unsigned char *tmp = current_buffer_;
   current_buffer_ = last_buffer_;
   last_buffer_ = tmp;
 
-  if ((hw_->current_time_ - last_published_) > 1.0)
+  if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {
     last_published_ = hw_->current_time_;
     publishDiagnostics();

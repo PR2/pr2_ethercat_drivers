@@ -106,7 +106,7 @@ private:
     double max_roundtrip_;
     int txandrx_errors_;
   } diagnostics_;
-  double last_published_;
+  ros::Time last_published_;
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
