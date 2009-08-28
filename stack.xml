@@ -9,7 +9,7 @@
   <review status="unreviewed" notes=""/>
   <url>http://pr.willowgarage.com/wiki/pr2_ethercat_drivers</url>
   <depend stack="visualization_common"/> <!-- visualization_msgs --> 
-  <depend stack="mechanism"/> <!-- hardware_interface, realtime_tools --> 
+  <depend stack="pr2_mechanism"/> <!-- hardware_interface, realtime_tools --> 
   <depend stack="common"/> <!-- tinyxml --> 
   <depend stack="diagnostics"/> <!-- diagnostic_updater --> 
   <depend stack="pr2_common"/> <!-- pr2_msgs --> 
