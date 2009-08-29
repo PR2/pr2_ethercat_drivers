@@ -35,7 +35,7 @@
 #ifndef ETHERCAT_HARDWARE_H
 #define ETHERCAT_HARDWARE_H
 
-#include <hardware_interface/hardware_interface.h>
+#include <pr2_hardware_interface/hardware_interface.h>
 
 #include <al/ethercat_AL.h>
 #include <al/ethercat_master.h>

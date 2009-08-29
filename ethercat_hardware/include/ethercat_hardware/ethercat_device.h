@@ -42,7 +42,7 @@
 #include <ethercat/ethercat_defs.h>
 #include <al/ethercat_slave_handler.h>
 
-#include <hardware_interface/hardware_interface.h>
+#include <pr2_hardware_interface/hardware_interface.h>
 
 #include <diagnostic_updater/DiagnosticStatusWrapper.h>
 
