@@ -52,6 +52,7 @@
 #include <loki/Sequence.h>
 
 using namespace std;
+using namespace pr2_mechanism;
 
 class EthercatDevice
 {
