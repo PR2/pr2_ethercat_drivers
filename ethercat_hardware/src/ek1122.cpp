@@ -68,4 +68,6 @@ void EK1122::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigne
 
   d.clear();
   d.addf("Product code", "EK1122 (%u)", sh_->get_product_code());
+
+  EthercatDevice::ethercatDiagnostics(d, 4); // EK1122 has 4 ports (2 ethernet and 2 lvds)
 }

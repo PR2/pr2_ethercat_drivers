@@ -37,12 +37,17 @@
 
 #include <ros/console.h>
 
-static bool reg = DeviceFactory::Instance().Register(WG014::PRODUCT_CODE, deviceCreator<WG014>);
+bool reg014 = DeviceFactory::Instance().Register(WG014::PRODUCT_CODE, deviceCreator<WG014>);
 
 WG014::WG014(EtherCAT_SlaveHandler *sh, int &start_address) : EthercatDevice(sh)
 {
   sh->set_fmmu_config( new EtherCAT_FMMU_Config(0) );
   sh->set_pd_config( new EtherCAT_PD_Config(0) );
+
+  fw_major_ = (sh->get_revision() >> 8) & 0xff;
+  fw_minor_ = sh->get_revision() & 0xff;
+  board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
+  board_minor_ = (sh->get_revision() >> 16) & 0xff;
 }
 
 WG014::~WG014()
@@ -68,6 +73,13 @@ void WG014::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.hardware_id = serial;
 
   d.clear();
-  d.addf("Product code", "WG014 (%d)", sh_->get_product_code());
+  d.addf("Product code", "WG014 (%d), Ports %s, PCB Revision %c.%02d",
+         sh_->get_product_code(), 
+         ((fw_minor_==1) ? "J1-J3" : // WG014 has two ET1100 devices...
+          (fw_minor_==2) ? "J4-J6" : // One ET1100 handles port J1 to J3. The other, J4 to J6.
+          "J?-J?"),                  // The firmware minor revision deferentiates the two.
+         'A' + board_major_, board_minor_);
   d.addf("Serial Number", "%s", serial);
+
+  EthercatDevice::ethercatDiagnostics(d, 4); // WG014 has 4 ports
 }

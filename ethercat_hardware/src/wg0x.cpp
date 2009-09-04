@@ -238,10 +238,14 @@ int WG06::initialize(Actuator *actuator, bool allow_unprogrammed)
 
 int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
 {
-  ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d", sh_->get_ring_position(),
-         sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
-         sh_->get_product_code(), fw_major_, fw_minor_,
-         'A' + board_major_, board_minor_);
+  ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
+            sh_->get_ring_position(),
+            sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
+            sh_->get_product_code(), fw_major_, fw_minor_,
+            'A' + board_major_, board_minor_,
+            sh_->get_serial());
+
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
 
   if (sh_->get_product_code() == WG05::PRODUCT_CODE)
   {
@@ -262,7 +266,7 @@ int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
     }
   }
 
-  if (readMailbox(sh_, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_)) != 0)
+  if (readMailbox(&com, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_)) != 0)
   {
     ROS_FATAL("Unable to load configuration information");
     ROS_BREAK();
@@ -270,7 +274,7 @@ int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
   }
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
 
-  if (readEeprom(sh_) < 0)
+  if (readEeprom(&com) < 0)
   {
     ROS_FATAL("Unable to read actuator info from EEPROM\n");
     ROS_BREAK();
@@ -299,12 +303,14 @@ int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
   }
   else if (allow_unprogrammed)
   {
-    ROS_WARN("WARNING: Device #%02d is not programmed", sh_->get_ring_position());
+    ROS_WARN("WARNING: Device #%02d (%d%05d) is not programmed", 
+             sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     actuator_info_.crc32_ = 0;
   }
   else
   {
-    ROS_FATAL("Device #%02d: Invalid CRC32 in actuator_info_", sh_->get_ring_position());
+    ROS_FATAL("Device #%02d (%d%05d) : Invalid CRC32 in actuator_info_", 
+              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     ROS_BREAK();
     return -1;
   }
@@ -435,6 +441,8 @@ bool WG0X::verifyState(ActuatorState &state, unsigned char *this_buffer, unsigne
   int level = 0;
   string reason = "OK";
 
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+
   if (!(state.is_enabled_)) {
     goto end;
   }
@@ -466,7 +474,7 @@ bool WG0X::verifyState(ActuatorState &state, unsigned char *this_buffer, unsigne
   // Only read config info mailbox when we transition in/out of safety lockout
   if (bool(this_status->mode_ & MODE_SAFETY_LOCKOUT) != in_lockout_)
   {
-      readMailbox(sh_, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_));
+    readMailbox(&com, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_));
   }
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
   if (in_lockout_)
@@ -554,6 +562,7 @@ end:
   return rv;
 }
 
+/*
 int WG0X::readData(EtherCAT_SlaveHandler *sh, EC_UINT address, void* buffer, EC_UINT length)
 {
   unsigned char *p = (unsigned char *)buffer;
@@ -627,11 +636,12 @@ int WG0X::writeData(EtherCAT_SlaveHandler *sh, EC_UINT address, void const* buff
 
   return 0;
 }
+*/
 
-int WG0X::sendSpiCommand(EtherCAT_SlaveHandler *sh, WG0XSpiEepromCmd const * cmd)
+int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
 {
   // Send command
-  if (writeMailbox(sh, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, cmd, sizeof(*cmd)))
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, cmd, sizeof(*cmd)))
   {
     fprintf(stderr, "ERROR WRITING EEPROM COMMAND\n");
     return -1;
@@ -640,7 +650,7 @@ int WG0X::sendSpiCommand(EtherCAT_SlaveHandler *sh, WG0XSpiEepromCmd const * cmd
   for (int tries = 0; tries < 10; ++tries)
   {
     WG0XSpiEepromCmd stat;
-    if (readMailbox(sh, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &stat, sizeof(stat)))
+    if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &stat, sizeof(stat)))
     {
       fprintf(stderr, "ERROR READING EEPROM BUSY STATUS\n");
       return -1;
@@ -666,17 +676,17 @@ int WG0X::sendSpiCommand(EtherCAT_SlaveHandler *sh, WG0XSpiEepromCmd const * cmd
   return -1;
 }
 
-int WG0X::readEeprom(EtherCAT_SlaveHandler *sh)
+int WG0X::readEeprom(EthercatCom *com)
 {
   assert(sizeof(actuator_info_) == 264);
   WG0XSpiEepromCmd cmd;
   cmd.build_read(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(sh, &cmd)) {
+  if (sendSpiCommand(com, &cmd)) {
     fprintf(stderr, "ERROR SENDING SPI EEPROM READ COMMAND\n");
     return -1;
   }
   // Read buffered data in multiple chunks
-  if (readMailbox(sh, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) {
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) {
     fprintf(stderr, "ERROR READING BUFFERED EEPROM PAGE DATA\n");
     return -1;
   }
@@ -687,11 +697,12 @@ int WG0X::readEeprom(EtherCAT_SlaveHandler *sh)
 
 void WG0X::program(WG0XActuatorInfo *info)
 {
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
 
-  writeMailbox(sh_, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, info, sizeof(WG0XActuatorInfo));
+  writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, info, sizeof(WG0XActuatorInfo));
   WG0XSpiEepromCmd cmd;
   cmd.build_write(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(sh_, &cmd)) {
+  if (sendSpiCommand(&com, &cmd)) {
     fprintf(stderr, "ERROR SENDING SPI EEPROM WRITE COMMAND\n");
   }
 
@@ -699,7 +710,7 @@ void WG0X::program(WG0XActuatorInfo *info)
   memset(data, 0, sizeof(data));
   data[0] = 0xD7;
 
-  if (writeMailbox(sh_, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
+  if (writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
     fprintf(stderr, "ERROR WRITING EEPROM COMMAND BUFFER\n");
   }
 
@@ -707,23 +718,24 @@ void WG0X::program(WG0XActuatorInfo *info)
   { // Start arbitrary command
     WG0XSpiEepromCmd cmd;
     cmd.build_arbitrary(sizeof(data));
-    if (sendSpiCommand(sh_, &cmd)) {
+    if (sendSpiCommand(&com, &cmd)) {
       fprintf(stderr, "reading eeprom status failed");
     }
   }
 
 
-  if (readMailbox(sh_, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
+  if (readMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
     fprintf(stderr, "ERROR READING EEPROM COMMAND BUFFER\n");
   }
 }
 
-int WG0X::readMailbox(EtherCAT_SlaveHandler *sh, int address, void *data, EC_UINT length)
+int WG0X::readMailbox(EthercatCom *com, EC_UINT address, void *data, EC_UINT length)
 {
+
   // first (re)read current status mailbox data to prevent issues with
   // the status mailbox being full (and unread) from last command
   WG0XMbxCmd stat;
-  int result = readData(sh, MBX_STATUS_PHY_ADDR, &stat, sizeof(stat));
+  int result = readData(com, MBX_STATUS_PHY_ADDR, &stat, sizeof(stat), FIXED_ADDR);
 
   if ((result != 0) && (result != -2))
   {
@@ -737,7 +749,7 @@ int WG0X::readMailbox(EtherCAT_SlaveHandler *sh, int address, void *data, EC_UIN
   int tries;
   for (tries = 0; tries < 10; ++tries)
   {
-    int result = writeData(sh, MBX_COMMAND_PHY_ADDR, &cmd, sizeof(cmd));
+    int result = writeData(com, MBX_COMMAND_PHY_ADDR, &cmd, sizeof(cmd), FIXED_ADDR);
     if (result == -2)
     {
       // FPGA hasn't written responded with status data, wait a
@@ -764,7 +776,7 @@ int WG0X::readMailbox(EtherCAT_SlaveHandler *sh, int address, void *data, EC_UIN
 
   for (tries = 0; tries < 10; ++tries)
   {
-    int result = readData(sh, MBX_STATUS_PHY_ADDR, &stat, sizeof(stat));
+    int result = readData(com, MBX_STATUS_PHY_ADDR, &stat, sizeof(stat), FIXED_ADDR);
     if (result == -2)
     {
       // FPGA hasn't written responded with status data, wait a
@@ -800,7 +812,7 @@ int WG0X::readMailbox(EtherCAT_SlaveHandler *sh, int address, void *data, EC_UIN
 
 // Write <length> byte of <data> to <address> on FPGA local bus using the ethercat mailbox for communication
 // Returns 0 for success and non-zero for failure.
-int WG0X::writeMailbox(EtherCAT_SlaveHandler *sh, int address, void const *data, EC_UINT length)
+int WG0X::writeMailbox(EthercatCom *com, EC_UINT address, void const *data, EC_UINT length)
 {
   // Build mailbox message and write command
   {
@@ -809,7 +821,7 @@ int WG0X::writeMailbox(EtherCAT_SlaveHandler *sh, int address, void const *data,
     int tries;
     for (tries = 0; tries < 10; ++tries)
     {
-      int result = writeData(sh, MBX_COMMAND_PHY_ADDR, &cmd, sizeof(cmd));
+      int result = writeData(com, MBX_COMMAND_PHY_ADDR, &cmd, sizeof(cmd), FIXED_ADDR);
       if (result == -2)
       {
         // FPGA hasn't written responded with status data, wait a
@@ -871,11 +883,11 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   stringstream str;
   str << "EtherCAT Device (" << actuator_info_.name_ << ")";
   d.name = str.str();
-  d.message = reason_;
   char serial[32];
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
-  d.level = level_;
+
+  d.summary(level_, reason_);
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -970,4 +982,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Drops", "%d", drops_);
   d.addf("Consecutive Drops", "%d", consecutive_drops_);
   d.addf("Max Consecutive Drops", "%d", max_consecutive_drops_);
+
+  unsigned numPorts = (sh_->get_product_code()==WG06::PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
+  EthercatDevice::ethercatDiagnostics(d, numPorts); 
 }

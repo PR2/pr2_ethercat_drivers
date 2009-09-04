@@ -42,6 +42,7 @@
 #include <al/ethercat_slave_handler.h>
 
 #include "ethercat_hardware/ethercat_device.h"
+#include "ethercat_hardware/ethercat_com.h"
 
 #include <realtime_tools/realtime_publisher.h>
 
@@ -79,6 +80,13 @@ public:
    */
   void publishDiagnostics();
 
+  /*!
+   * \brief Collects diagnotics from all devices.
+   */
+  void collectDiagnostics();
+
+  void printCounters(std::ostream &os=std::cout); 
+
   HardwareInterface *hw_;
 
 private:
@@ -105,12 +113,14 @@ private:
     accumulator_set<double, stats<tag::max, tag::mean> > acc_;
     double max_roundtrip_;
     int txandrx_errors_;
+    unsigned device_count_;
   } diagnostics_;
   ros::Time last_published_;
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
-  
+
+  EthercatOobCom *oob_com_;  
 };
 
 #endif /* ETHERCAT_HARDWARE_H */

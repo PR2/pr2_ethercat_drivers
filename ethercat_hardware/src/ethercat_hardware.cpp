@@ -36,6 +36,7 @@
 
 #include <ethercat/ethercat_xenomai_drv.h>
 #include <dll/ethercat_dll.h>
+#include <dll/ethercat_device_addressed_telegram.h>
 
 EthercatHardware::EthercatHardware() :
   hw_(0), ni_(0), current_buffer_(0), last_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1)
@@ -82,6 +83,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     ROS_BREAK();
   }
 
+  oob_com_ = new EthercatOobCom(ni_);
+
   // Initialize Application Layer (AL)
   EtherCAT_DataLinkLayer::instance()->attach(ni_);
   if ((al_ = EtherCAT_AL::instance()) == NULL)
@@ -118,14 +121,18 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       ROS_BREAK();
     }
 
+    unsigned product_code = sh->get_product_code();
+    unsigned serial = sh->get_serial();
+    uint32_t revision = sh->get_revision();
+
     if ((slaves_[slave] = configSlave(sh)) != NULL)
     {
       if (!sh->to_state(EC_OP_STATE))
       {
-        int product_code = sh->get_product_code();
-        ROS_FATAL("Unable to initialize slave #%d, product code: %d (0x%X)", slave, product_code, product_code);
-        if (product_code)
-          ROS_FATAL("Note: 0xBADDBADD indicates that the device does not know its product code.");
+        ROS_FATAL("Cannot goto OP state for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+                  slave, product_code, product_code, serial, serial, revision, revision);
+        if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
+          ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
         ROS_BREAK();
       }
       num_actuators += slaves_[slave]->has_actuator_;
@@ -134,10 +141,10 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     else
     {
       uint32_t product_code = sh->get_product_code();
-      uint32_t revision = sh->get_revision();
-      ROS_FATAL("Unable to configure slave #%d, product code: %d (0x%X), revision: %d (0x%X)", slave, product_code, product_code, revision, revision);
-      if (product_code == 0xbaddbadd || revision == 0xbaddbadd)
-        ROS_FATAL("Note: 0xBADDBADD indicates that the device does not know its product code or revision.");
+      ROS_FATAL("Unable to configure slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+                slave, product_code, product_code, serial, serial, revision, revision);
+      if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
+        ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
       ROS_FATAL("Perhaps you should power-cycle the MCBs");
       ROS_BREAK();
     }
@@ -163,7 +170,9 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   {
     if (slaves_[slave]->initialize(slaves_[slave]->has_actuator_ ? hw_->actuators_[a] : NULL, allow_unprogrammed) < 0)
     {
-      ROS_FATAL("Unable to initialize slave #%d", slave);
+      EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
+      ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
+                slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
       ROS_BREAK();
     }
 
@@ -202,15 +211,21 @@ void EthercatHardware::publishDiagnostics()
   status.name = "EtherCAT Master";
   if (halt_motors_)
   {
-    status.summary(2, "Motors halted");
+    status.summary(status.ERROR, "Motors halted");
   } else {
-    status.summary(0, "OK");
+    status.summary(status.OK, "OK");
   }
 
   status.add("Motors halted", halt_motors_ ? "true" : "false");
-  status.addf("EtherCAT devices", "%d", num_slaves_); 
+  status.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
+  status.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
   status.add("Interface", interface_);
   status.addf("Reset state", "%d", reset_state_);
+
+  // Produce warning if number of devices changed after device initalization
+  if (num_slaves_ != diagnostics_.device_count_) {
+    status.mergeSummary(status.WARN, "Number of EtherCAT devices changed");
+  }
 
   // Roundtrip
   diagnostics_.max_roundtrip_ = std::max(diagnostics_.max_roundtrip_, 
@@ -221,7 +236,35 @@ void EthercatHardware::publishDiagnostics()
   diagnostics_.acc_ = blank;
 
   status.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
-  status.addf("EtherCAT txandrx errors", "%d", diagnostics_.txandrx_errors_);
+  status.addf("EtherCAT Process Data txandrx errors", "%d", diagnostics_.txandrx_errors_);
+
+  { // Publish ethercat network interface counters 
+    const struct netif_counters *c = &ni_->counters;
+    status.add("Input Thread",       ((ni_->is_stopped!=0) ? "Stopped" : "Running"));
+    status.addf("Sent Packets",        "%lld", c->sent);
+    status.addf("Received Packets",    "%lld", c->received);
+    status.addf("Collected Packets",   "%lld", c->collected);
+    status.addf("Dropped Packets",     "%lld", c->dropped);
+    status.addf("TX Errors",           "%lld", c->tx_error);
+    status.addf("TX Network Down",     "%lld", c->tx_net_down);
+    status.addf("TX Queue Full",       "%lld", c->tx_full);
+    status.addf("RX Runt Packet",      "%lld", c->rx_runt_pkt);
+    status.addf("RX Not EtherCAT",     "%lld", c->rx_not_ecat);
+    status.addf("RX Other EML",        "%lld", c->rx_other_eml);
+    status.addf("RX Bad Index",        "%lld", c->rx_bad_index);
+    status.addf("RX Bad Sequence",     "%lld", c->rx_bad_seqnum);
+    status.addf("RX Duplicate Sequence", "%lld", c->rx_dup_seqnum);    
+    status.addf("RX Duplicate Packet", "%lld", c->rx_dup_pkt);    
+    status.addf("RX Bad Order",        "%lld", c->rx_bad_order);    
+    status.addf("RX Late Packet",      "%lld", c->rx_late_pkt);
+    status.addf("RX Late Packet RTT",  "%lld", c->rx_late_pkt_rtt_us);
+    
+    double rx_late_pkt_rtt_us_avg = 0.0;
+    if (c->rx_late_pkt > 0) {
+      rx_late_pkt_rtt_us_avg = c->rx_late_pkt_rtt_us_sum/c->rx_late_pkt;
+    }
+    status.addf("RX Late Packet Avg RTT", "%f", rx_late_pkt_rtt_us_avg);
+  }
 
   statuses_.push_back(status);
 
@@ -290,6 +333,9 @@ void EthercatHardware::update(bool reset, bool halt)
   }
   diagnostics_.acc_(ros::Time::now().toSec() - start);
 
+  // Transmit new OOB data
+  oob_com_->tx();
+
   // Convert status back to HW Interface
   current = current_buffer_;
   last = last_buffer_;
@@ -339,3 +385,63 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
   {}
   return p;
 }
+
+
+void EthercatHardware::collectDiagnostics()
+{
+  if (NULL == oob_com_)
+    return;
+
+  { // Count number of devices 
+    EC_Logic *logic = EC_Logic::instance();
+    unsigned char p[1];
+    EC_UINT length = sizeof(p);
+    
+    // Build read telegram, use slave position
+    APRD_Telegram status(logic->get_idx(), // Index
+                         0, // Slave position on ethercat chain (auto increment address)
+                         0, // ESC physical memory address (start address)
+                         logic->get_wkc(), // Working counter
+                         length, // Data Length,
+                         p); // Buffer to put read result into
+    
+    // Put read telegram in ethercat/ethernet frame
+    EC_Ethernet_Frame frame(&status);    
+    oob_com_->txandrx(&frame);
+
+    // Worry about locking for single value?
+    diagnostics_.device_count_ = status.get_adp();
+  }
+
+  for (unsigned i = 0; i < num_slaves_; ++i)
+  {    
+    EthercatDevice * d(slaves_[i]);
+    d->collectDiagnostics(oob_com_);
+  }
+}
+
+
+// Prints (error) counter infomation of network interface driver
+void EthercatHardware::printCounters(std::ostream &os) 
+{  
+  const struct netif_counters &c(ni_->counters);      
+  os << "netif counters :" << endl
+     << " sent          = " << c.sent << endl
+     << " received      = " << c.received << endl
+     << " collected     = " << c.collected << endl
+     << " dropped       = " << c.dropped << endl
+     << " tx_error      = " << c.tx_error << endl
+     << " tx_net_down   = " << c.tx_net_down << endl
+     << " tx_full       = " << c.tx_full << endl
+     << " rx_runt_pkt   = " << c.rx_runt_pkt << endl
+     << " rx_not_ecat   = " << c.rx_not_ecat << endl
+     << " rx_other_eml  = " << c.rx_other_eml << endl
+     << " rx_bad_index  = " << c.rx_bad_index << endl
+     << " rx_bad_seqnum = " << c.rx_bad_seqnum << endl
+     << " rx_dup_seqnum = " << c.rx_dup_seqnum << endl
+     << " rx_dup_pkt    = " << c.rx_dup_pkt << endl
+     << " rx_bad_order  = " << c.rx_bad_order << endl
+     << " rx_late_pkt   = " << c.rx_late_pkt << endl;
+}
+
+

@@ -32,31 +32,62 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#ifndef WG014_H
-#define WG014_H
+#ifndef ETHERCAT_COM_H
+#define ETHERCAT_COM_H
 
-#include <ethercat_hardware/ethercat_device.h>
+#include <al/ethercat_AL.h>
+#include <al/ethercat_master.h>
+#include <al/ethercat_slave_handler.h>
+#include <dll/ethercat_dll.h>
+#include <pthread.h>
 
-class WG014 : public EthercatDevice
+class EthercatCom 
 {
-public:
-  WG014(EtherCAT_SlaveHandler *sh, int &start_address);
-  ~WG014();
-  int initialize(Actuator *, bool);
-  void convertCommand(ActuatorCommand &command, unsigned char *buffer) {}
-  void convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer) {}
-  void computeCurrent(ActuatorCommand &command) {}
-  void truncateCurrent(ActuatorCommand &command) {}
-  bool verifyState(ActuatorState &, unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
-  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
-
-  enum {PRODUCT_CODE = 6805014};
-
 protected:
-  uint8_t fw_major_;
-  uint8_t fw_minor_;
-  uint8_t board_major_;
-  uint8_t board_minor_;
+  EthercatCom() { }
+  
+public:
+  virtual bool txandrx(struct EtherCAT_Frame * frame)=0;
+
+  virtual ~EthercatCom() { }
 };
 
-#endif /* WG014_H */
+
+class EthercatDirectCom : public EthercatCom 
+{
+public:
+  EthercatDirectCom(EtherCAT_DataLinkLayer *dll);
+  ~EthercatDirectCom();
+  
+  bool txandrx(struct EtherCAT_Frame * frame);  
+
+protected:
+  EtherCAT_DataLinkLayer *dll_;
+};
+
+class EthercatOobCom : public EthercatCom 
+{
+public:
+  EthercatOobCom(struct netif *ni);
+  ~EthercatOobCom();
+  
+  bool txandrx(struct EtherCAT_Frame * frame);
+  
+  void tx();
+protected:
+  bool lock(unsigned line);
+  bool trylock(unsigned line);
+  bool unlock(unsigned line);
+  
+  struct netif *ni_;
+  pthread_mutex_t mutex_;
+  pthread_cond_t share_cond_;
+  pthread_cond_t busy_cond_;
+  enum {IDLE=0, READY_TO_SEND=1, WAITING_TO_RECV=2} state_;
+  EtherCAT_Frame *frame_;
+  int handle_;
+  unsigned line_;
+};
+
+
+#endif /* ETHERCAT_COM_H */

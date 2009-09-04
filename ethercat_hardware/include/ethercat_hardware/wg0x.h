@@ -250,13 +250,11 @@ protected:
 
 private:
   string safetyDisableString(uint8_t status);
-  int readEeprom(EtherCAT_SlaveHandler *sh);
-  int writeEeprom(EtherCAT_SlaveHandler *sh);
-  int sendSpiCommand(EtherCAT_SlaveHandler *sh, WG0XSpiEepromCmd const * cmd);
-  int writeMailbox(EtherCAT_SlaveHandler *sh, int address, void const *data, EC_UINT length);
-  int readMailbox(EtherCAT_SlaveHandler *sh, int address, void *data, EC_UINT length);
-  int writeData(EtherCAT_SlaveHandler *sh, EC_UINT address, void const* buffer, EC_UINT length);
-  int readData(EtherCAT_SlaveHandler *sh, EC_UINT address, void* buffer, EC_UINT length);
+  int readEeprom(EthercatCom *com);
+  int writeEeprom(EthercatCom *com);
+  int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
+  int writeMailbox(EthercatCom *com, EC_UINT address, void const *data, EC_UINT length);
+  int readMailbox(EthercatCom *com, EC_UINT address, void *data, EC_UINT length);
 
   static const int COMMAND_PHY_ADDR = 0x1000;
   static const int STATUS_PHY_ADDR = 0x2000;
