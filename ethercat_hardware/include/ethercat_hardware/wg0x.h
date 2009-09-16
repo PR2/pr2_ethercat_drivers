@@ -248,6 +248,7 @@ protected:
   uint8_t board_major_;
   uint8_t board_minor_;
 
+  WG0XActuatorInfo actuator_info_;
 private:
   string safetyDisableString(uint8_t status);
   int readEeprom(EthercatCom *com);
@@ -296,7 +297,6 @@ private:
 
   // Board configuration parameters
   WG0XConfigInfo config_info_;
-  WG0XActuatorInfo actuator_info_;
   double backemf_constant_;
   static const int ACTUATOR_INFO_PAGE = 4095;
 
@@ -329,8 +329,8 @@ public:
 struct WG06Pressure
 {
   uint32_t timestamp_;
-  uint16_t data0_[22];
-  uint16_t data1_[22];
+  uint16_t l_finger_tip_[22];
+  uint16_t r_finger_tip_[22];
   uint8_t pad_;
   uint8_t checksum_;
 } __attribute__((__packed__));

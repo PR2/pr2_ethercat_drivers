@@ -49,21 +49,21 @@ from pr2_msgs.msg import PressureState
 class pressureSimulator:
     def callback(self, pressurestate):
         #print "callback"
-        self.data0 = pressurestate.data0
-        self.data1 = pressurestate.data1
+        self.l_finger_tip = pressurestate.l_finger_tip
+        self.r_finger_tip = pressurestate.r_finger_tip
         self.datatimestamp = pressurestate.header.stamp
         self.dataready = True
 
     def publish(self):
         ps = PressureState()
         ps.header.stamp = rospy.get_rostime();
-        ps.data0 = []
-        ps.data1 = []
+        ps.l_finger_tip = []
+        ps.r_finger_tip = []
         t = rospy.get_time()
         for i in range(0,22):
             ph = .1 * t * (i / 22. + 1)
-            ps.data0.append(4000*(1+sin(ph)))
-            ps.data1.append(4000*(1+cos(ph)))
+            ps.l_finger_tip.append(4000*(1+sin(ph)))
+            ps.r_finger_tip.append(4000*(1+cos(ph)))
         self.pub.publish(ps)
 
     def __init__(self, dest):

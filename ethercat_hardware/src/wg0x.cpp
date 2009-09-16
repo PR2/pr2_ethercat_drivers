@@ -364,11 +364,11 @@ void WG06::convertState(ActuatorState &state, unsigned char *current_buffer, uns
     if (pressure_publisher_ && pressure_publisher_->trylock())
     {
       pressure_publisher_->msg_.header.stamp = ros::Time::now();
-      pressure_publisher_->msg_.set_data0_size(22);
-      pressure_publisher_->msg_.set_data1_size(22);
+      pressure_publisher_->msg_.set_l_finger_tip_size(22);
+      pressure_publisher_->msg_.set_r_finger_tip_size(22);
       for (int i = 0; i < 22; ++i ) {
-        pressure_publisher_->msg_.data0[i] = ((p->data0_[i] >> 8) & 0xff) | ((p->data0_[i] << 8) & 0xff00);
-        pressure_publisher_->msg_.data1[i] = ((p->data1_[i] >> 8) & 0xff) | ((p->data1_[i] << 8) & 0xff00);
+        pressure_publisher_->msg_.l_finger_tip[i] = ((p->l_finger_tip_[i] >> 8) & 0xff) | ((p->l_finger_tip_[i] << 8) & 0xff00);
+        pressure_publisher_->msg_.r_finger_tip[i] = ((p->r_finger_tip_[i] >> 8) & 0xff) | ((p->r_finger_tip_[i] << 8) & 0xff00);
       }
       pressure_publisher_->unlockAndPublish();
     }
@@ -380,17 +380,16 @@ void WG06::convertState(ActuatorState &state, unsigned char *current_buffer, uns
     WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(last_buffer + command_size_);
     int count = min(uint8_t(4), uint8_t(status->accel_count_ - last_status->accel_count_));
 
-    accel_publisher_->msg_.set_x_size(count);
-    accel_publisher_->msg_.set_y_size(count);
-    accel_publisher_->msg_.set_z_size(count);
+    accel_publisher_->msg_.header.frame_id = string(actuator_info_.name_) + "_accelerometer_link";
+    accel_publisher_->msg_.set_samples_size(count);
     for (int i = 0; i < count; ++i)
     {
       int32_t acc = status->accel_[count - i - 1];
       int range = (acc >> 30) & 3;
       float d = 1 << (8 - range);
-      accel_publisher_->msg_.x[i] = ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accel_publisher_->msg_.y[i] = ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accel_publisher_->msg_.z[i] = ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
+      accel_publisher_->msg_.samples[i].x = ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
+      accel_publisher_->msg_.samples[i].y = ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
+      accel_publisher_->msg_.samples[i].z = ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
     }
     accel_publisher_->unlockAndPublish();
   }

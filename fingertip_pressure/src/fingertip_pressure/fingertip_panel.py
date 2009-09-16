@@ -111,8 +111,8 @@ class GripperPressurePanel(wx.Panel):
         if self.new_message_ != None:
             #print 'newmsg'
             
-            self.panel0.new_message(self.new_message_.data0)
-            self.panel1.new_message(self.new_message_.data1)
+            self.panel0.new_message(self.new_message_.l_finger_tip)
+            self.panel1.new_message(self.new_message_.r_finger_tip)
             
             self.new_message_ = None
         

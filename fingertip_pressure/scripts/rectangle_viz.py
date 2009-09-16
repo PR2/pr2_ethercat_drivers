@@ -72,8 +72,8 @@ class pressureVisualizer:
     def callback(self, pressurestate):
         self.lock.acquire()
         #print "callback"
-        self.data0 = pressurestate.data0
-        self.data1 = pressurestate.data1
+        self.l_finger_tip = pressurestate.l_finger_tip
+        self.r_finger_tip = pressurestate.r_finger_tip
         self.datatimestamp = pressurestate.header.stamp
         self.dataready = True
         self.lock.release()
@@ -83,8 +83,8 @@ class pressureVisualizer:
             self.lock.acquire()
             #print 'publish'
             self.dataready = False
-            self.makeVisualization(self.data0, 0)
-            self.makeVisualization(self.data1, 1)
+            self.makeVisualization(self.l_finger_tip, 0)
+            self.makeVisualization(self.r_finger_tip, 1)
             self.lock.release()
 
     def makeVisualization(self, data, tipnum):
