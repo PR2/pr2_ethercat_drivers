@@ -39,7 +39,7 @@
 #include <dll/ethercat_device_addressed_telegram.h>
 
 EthercatHardware::EthercatHardware() :
-  hw_(0), ni_(0), current_buffer_(0), last_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1)
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1)
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -110,7 +110,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   slaves_ = new EthercatDevice*[num_slaves_];
 
   // Configure slaves
-  unsigned int num_actuators = 0;
   for (unsigned int slave = 0; slave < num_slaves_; ++slave)
   {
     EC_FixedStationAddress fsa(slave + 1);
@@ -135,7 +134,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
           ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
         ROS_BREAK();
       }
-      num_actuators += slaves_[slave]->has_actuator_;
       buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
     }
     else
@@ -152,23 +150,23 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   // Allocate buffers to send and receive commands
   buffers_ = new unsigned char[2 * buffer_size_];
-  current_buffer_ = buffers_;
-  last_buffer_ = buffers_ + buffer_size_;
+  this_buffer_ = buffers_;
+  prev_buffer_ = buffers_ + buffer_size_;
 
   // Make sure motors are disabled
-  memset(current_buffer_, 0, 2 * buffer_size_);
-  em_->txandrx_PD(buffer_size_, current_buffer_);
+  memset(this_buffer_, 0, 2 * buffer_size_);
+  em_->txandrx_PD(buffer_size_, this_buffer_);
 
   // Create HardwareInterface
-  hw_ = new HardwareInterface(num_actuators);
+  hw_ = new HardwareInterface();
   hw_->current_time_ = ros::Time::now();
   last_published_ = hw_->current_time_;
 
   // Initialize slaves
-  set<string> actuator_names;
-  for (unsigned int slave = 0, a = 0; slave < num_slaves_; ++slave)
+  //set<string> actuator_names;
+  for (unsigned int slave = 0; slave < num_slaves_; ++slave)
   {
-    if (slaves_[slave]->initialize(slaves_[slave]->has_actuator_ ? hw_->actuators_[a] : NULL, allow_unprogrammed) < 0)
+    if (slaves_[slave]->initialize(hw_, allow_unprogrammed) < 0)
     {
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
       ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
@@ -176,6 +174,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       ROS_BREAK();
     }
 
+#if 0
     // Check for duplicate actuator names
     if (slaves_[slave]->has_actuator_)
     {
@@ -192,7 +191,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
         }
       }
     }
-    a += slaves_[slave]->has_actuator_;
+#endif
   }
 
   // Initialize diagnostic data structures
@@ -268,7 +267,7 @@ void EthercatHardware::publishDiagnostics()
 
   statuses_.push_back(status);
 
-  unsigned char *current = current_buffer_;
+  unsigned char *current = this_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
     slaves_[s]->diagnostics(status, current);
@@ -286,10 +285,10 @@ void EthercatHardware::publishDiagnostics()
 
 void EthercatHardware::update(bool reset, bool halt)
 {
-  unsigned char *current, *last;
+  unsigned char *this_buffer, *prev_buffer;
 
   // Convert HW Interface commands to MCB-specific buffers
-  current = current_buffer_;
+  this_buffer = this_buffer_;
 
   if (halt)
     halt_motors_ = true;
@@ -301,57 +300,36 @@ void EthercatHardware::update(bool reset, bool halt)
     diagnostics_.max_roundtrip_ = 0;
   }
 
-  for (unsigned int s = 0, a = 0; s < num_slaves_; ++s)
+  for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    if (slaves_[s]->has_actuator_)
-    {
-      Actuator *act = hw_->actuators_[a];
-      slaves_[s]->computeCurrent(act->command_);
-      act->state_.last_requested_effort_ = act->command_.effort_;
-      act->state_.last_requested_current_ = act->command_.current_;
-      slaves_[s]->truncateCurrent(act->command_);
-      // Bringup motor boards, one per tick
-      if (halt_motors_ || (reset_state_ && (s < reset_state_)))
-      {
-        bool tmp = act->command_.enable_;
-        act->command_.enable_ = (s == (reset_state_/2)) ? true : false;
-        act->command_.current_ = 0;
-        slaves_[s]->convertCommand(act->command_, current);
-        act->command_.enable_ = tmp;
-      } else {
-        slaves_[s]->convertCommand(act->command_, current);
-      }
-      current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
-      ++a;
-    }
+    // Pack the command structures into the EtherCAT buffer
+    // Disable the motor if they are halted or coming out of reset
+    slaves_[s]->packCommand(this_buffer,
+        halt_motors_ || (reset_state_ && (s < reset_state_)),
+        !halt_motors_ && (s == (reset_state_ / 2)));
+    this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   // Transmit process data
-  double start = ros::Time::now().toSec();
-  if (!em_->txandrx_PD(buffer_size_, current_buffer_)) {
+  ros::Time start = ros::Time::now();
+  if (!em_->txandrx_PD(buffer_size_, this_buffer_)) {
     ++diagnostics_.txandrx_errors_;
   }
-  diagnostics_.acc_(ros::Time::now().toSec() - start);
+  diagnostics_.acc_((ros::Time::now() - start).toSec());
 
   // Transmit new OOB data
   oob_com_->tx();
 
   // Convert status back to HW Interface
-  current = current_buffer_;
-  last = last_buffer_;
-  for (unsigned int s = 0, a = 0; s < num_slaves_; ++s)
+  this_buffer = this_buffer_;
+  prev_buffer = prev_buffer_;
+  for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    if (slaves_[s]->has_actuator_)
-    {
-      Actuator *act = hw_->actuators_[a];
-      slaves_[s]->convertState(act->state_, current, last);
-      // Don't halt motors during a reset
-      if (!slaves_[s]->verifyState(act->state_, current, last) && !reset_state_)
-        halt_motors_ = true;
-      current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
-      last += slaves_[s]->command_size_ + slaves_[s]->status_size_;
-      ++a;
-    }
+    // Don't halt motors during a reset
+    if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_state_)
+      halt_motors_ = true;
+    this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+    prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   if (reset_state_)
@@ -360,9 +338,9 @@ void EthercatHardware::update(bool reset, bool halt)
   // Update current time
   hw_->current_time_ = ros::Time::now();
 
-  unsigned char *tmp = current_buffer_;
-  current_buffer_ = last_buffer_;
-  last_buffer_ = tmp;
+  unsigned char *tmp = this_buffer_;
+  this_buffer_ = prev_buffer_;
+  prev_buffer_ = tmp;
 
   if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {

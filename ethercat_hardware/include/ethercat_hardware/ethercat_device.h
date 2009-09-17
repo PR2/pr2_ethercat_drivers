@@ -127,18 +127,14 @@ protected:
 class EthercatDevice
 {
 public:
-  EthercatDevice(EtherCAT_SlaveHandler *sh, bool has_actuator = false, int command_size = 0, int status_size = 0);
+  EthercatDevice(EtherCAT_SlaveHandler *sh, int command_size = 0, int status_size = 0);
 
   virtual ~EthercatDevice();
 
-  virtual int initialize(Actuator *, bool allow_unprogrammed=0) = 0;
+  virtual int initialize(HardwareInterface *, bool allow_unprogrammed=0) = 0;
 
-  virtual void convertCommand(ActuatorCommand &command, unsigned char *buffer) = 0;
-  virtual void convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer) = 0;
-
-  virtual void computeCurrent(ActuatorCommand &command) = 0;
-  virtual void truncateCurrent(ActuatorCommand &command) = 0;
-  virtual bool verifyState(ActuatorState &state, unsigned char *this_buffer, unsigned char *prev_buffer) = 0;
+  virtual void packCommand(unsigned char *buffer, bool halt, bool reset) {}
+  virtual bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
 
   virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
 
@@ -173,7 +169,6 @@ public:
   }
 
   EtherCAT_SlaveHandler *sh_;
-  bool has_actuator_;
   unsigned int command_size_;
   unsigned int status_size_;
   

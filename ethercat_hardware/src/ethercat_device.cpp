@@ -259,9 +259,8 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
   }
 }
 
-EthercatDevice::EthercatDevice(EtherCAT_SlaveHandler *sh, bool has_actuator, int command_size, int status_size) :
+EthercatDevice::EthercatDevice(EtherCAT_SlaveHandler *sh, int command_size, int status_size) :
   sh_(sh), 
-  has_actuator_(has_actuator), 
   command_size_(command_size), 
   status_size_(status_size), 
   newDiagnosticsIndex_(0)

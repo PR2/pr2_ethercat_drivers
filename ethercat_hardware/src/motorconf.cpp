@@ -123,13 +123,12 @@ void init(char *interface)
 
   BOOST_FOREACH(WG0X *device, devices)
   {
-    Actuator a;
     if (!device) continue;
     if (!device->sh_->to_state(EC_OP_STATE))
     {
       fprintf(stderr, "Unable set device %d into OP_STATE", device->sh_->get_ring_position());
     }
-    device->initialize(&a, true);
+    device->initialize(NULL, true);
   }
 }
 

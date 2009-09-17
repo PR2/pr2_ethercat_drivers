@@ -212,23 +212,50 @@ WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, tr
   sh->set_pd_config(pd);
 }
 
-int WG06::initialize(Actuator *actuator, bool allow_unprogrammed)
+int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
 {
-  int retval = WG0X::initialize(actuator, allow_unprogrammed);
+  int retval = WG0X::initialize(hw, allow_unprogrammed);
   
   if (!retval && use_ros_)
   {
+    // Publish pressure sensor data as a ROS topic
     string topic = "pressure";
-    if (!actuator->name_.empty())
-      topic = topic + "/" + string(actuator->name_);
+    if (!actuator_.name_.empty())
+      topic = topic + "/" + string(actuator_.name_);
     pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
 
+    // Register accelerometer with HardwareInterface
+    for (int i = 0; i < 2; ++i) 
+    {
+      pressure_sensors_[i].state_.data_.resize(22);
+      pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
+      if (!hw->addPressureSensor(&pressure_sensors_[i]))
+      {
+          ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
+          ROS_BREAK();
+          return -1;
+      }
+    }
+
+    // Publish accelerometer data as a ROS topic, if firmware is recent enough
     if (fw_major_ >= 1)
     {
       topic = "/accelerometer/";
-      if (!actuator->name_.empty())
-        topic += actuator->name_;
+      if (!actuator_.name_.empty())
+        topic += actuator_.name_;
       accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
+
+      // Register accelerometer with HardwareInterface
+      {
+        accelerometer_.name_ = actuator_info_.name_;
+        if (!hw->addAccelerometer(&accelerometer_))
+        {
+            ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
+            ROS_BREAK();
+            return -1;
+        }
+      }
+
     }
 
   }
@@ -236,7 +263,7 @@ int WG06::initialize(Actuator *actuator, bool allow_unprogrammed)
   return retval;
 }
 
-int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
+int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
             sh_->get_ring_position(),
@@ -297,9 +324,32 @@ int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
       }
     }
 
-    actuator->name_ = actuator_info_.name_;
+    actuator_.name_ = actuator_info_.name_;
     backemf_constant_ = 1.0 / (actuator_info_.speed_constant_ * 2 * M_PI * 1.0/60);
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
+
+    // Register actuator with HardwareInterface
+    {
+      if (!hw->addActuator(&actuator_))
+      {
+          ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
+          ROS_BREAK();
+          return -1;
+      }
+    }
+
+    // Register digital out with HardwareInterface
+    {
+      digital_out_.name_ = actuator_info_.name_;
+      if (!hw->addDigitalOut(&digital_out_))
+      {
+          ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
+          ROS_BREAK();
+          return -1;
+      }
+    }
+
+
   }
   else if (allow_unprogrammed)
   {
@@ -331,33 +381,67 @@ int WG0X::initialize(Actuator *actuator, bool allow_unprogrammed)
   } \
 }
 
-void WG0X::convertCommand(ActuatorCommand &command, unsigned char *buffer)
+void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
+  ActuatorCommand &cmd = actuator_.command_;
+
+  // Override enable if motors are halted
+  bool tmp = cmd.enable_;
+  if (halt) {
+    cmd.enable_ = reset;
+    cmd.current_ = 0;
+  }
+
+  // Compute the current
+  cmd.current_ = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
+  actuator_.state_.last_requested_effort_ = cmd.effort_;
+  actuator_.state_.last_requested_current_ = cmd.current_;
+
+  // Truncate the current to limit
+  cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
+
+  // Pack command structures into EtherCAT buffer
+  WG0XCommand *c = (WG0XCommand *)buffer;
+  memset(c, 0, command_size_);
+  c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
+  c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
+  c->digital_out_ = digital_out_.command_.data_;
+  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+
+  // Restore enable
+  cmd.enable_ = tmp;
+}
+
+void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
+{
+  WG0X::packCommand(buffer, halt, reset);
+
   WG0XCommand *c = (WG0XCommand *)buffer;
 
-  memset(c, 0, command_size_);
+  if (accelerometer_.command_.range_ > 2 || 
+      accelerometer_.command_.range_ < 0)
+    accelerometer_.command_.range_ = 0;
 
-  c->programmed_current_ = int(command.current_ / config_info_.nominal_current_scale_);
-  c->mode_ = command.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
+  c->digital_out_ = (digital_out_.command_.data_ != 0) |
+    ((accelerometer_.command_.bandwidth_ & 0x7) << 1) | 
+    ((accelerometer_.command_.range_ & 0x3) << 4); 
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-  c->digital_out_ = command.digital_out_;
 }
 
-void WG0X::computeCurrent(ActuatorCommand &command)
-{
-  command.current_ = (command.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
-}
-
-void WG0X::truncateCurrent(ActuatorCommand &command)
-{
-  command.current_ = max(min(command.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
-}
-  
-void WG06::convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer)
+bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
 
-  WG06Pressure *p = (WG06Pressure *)(current_buffer + command_size_ + status_bytes);
+  WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
+
+  for (int i = 0; i < 22; ++i ) {
+    pressure_sensors_[0].state_.data_[i] =
+      ((p->l_finger_tip_[i] >> 8) & 0xff) |
+      ((p->l_finger_tip_[i] << 8) & 0xff00);
+    pressure_sensors_[1].state_.data_[i] =
+      ((p->r_finger_tip_[i] >> 8) & 0xff) |
+      ((p->r_finger_tip_[i] << 8) & 0xff00);
+  }
 
   if (p->timestamp_ != last_pressure_time_)
   {
@@ -367,43 +451,58 @@ void WG06::convertState(ActuatorState &state, unsigned char *current_buffer, uns
       pressure_publisher_->msg_.set_l_finger_tip_size(22);
       pressure_publisher_->msg_.set_r_finger_tip_size(22);
       for (int i = 0; i < 22; ++i ) {
-        pressure_publisher_->msg_.l_finger_tip[i] = ((p->l_finger_tip_[i] >> 8) & 0xff) | ((p->l_finger_tip_[i] << 8) & 0xff00);
-        pressure_publisher_->msg_.r_finger_tip[i] = ((p->r_finger_tip_[i] >> 8) & 0xff) | ((p->r_finger_tip_[i] << 8) & 0xff00);
+        pressure_publisher_->msg_.l_finger_tip[i] = pressure_sensors_[0].state_.data_[i];
+        pressure_publisher_->msg_.r_finger_tip[i] = pressure_sensors_[1].state_.data_[i];
       }
       pressure_publisher_->unlockAndPublish();
     }
   }
+  last_pressure_time_ = p->timestamp_;
 
-  if (accel_publisher_ && accel_publisher_->trylock())
+
+  if (accel_publisher_)
   {
-    WG06StatusWithAccel *status = (WG06StatusWithAccel *)(current_buffer + command_size_);
-    WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(last_buffer + command_size_);
+    WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
+    WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
     int count = min(uint8_t(4), uint8_t(status->accel_count_ - last_status->accel_count_));
-
-    accel_publisher_->msg_.header.frame_id = string(actuator_info_.name_) + "_accelerometer_link";
-    accel_publisher_->msg_.set_samples_size(count);
+    accelerometer_.state_.samples_.resize(count);
+    accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
     for (int i = 0; i < count; ++i)
     {
       int32_t acc = status->accel_[count - i - 1];
       int range = (acc >> 30) & 3;
       float d = 1 << (8 - range);
-      accel_publisher_->msg_.samples[i].x = ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accel_publisher_->msg_.samples[i].y = ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accel_publisher_->msg_.samples[i].z = ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].x = ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].y = ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].z = ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
     }
-    accel_publisher_->unlockAndPublish();
+
+    if (accel_publisher_->trylock())
+    {
+      accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
+      accel_publisher_->msg_.set_samples_size(count);
+      for (int i = 0; i < count; ++i)
+      {
+        accel_publisher_->msg_.samples[i].x = accelerometer_.state_.samples_[i].x;
+        accel_publisher_->msg_.samples[i].y = accelerometer_.state_.samples_[i].y;
+        accel_publisher_->msg_.samples[i].z = accelerometer_.state_.samples_[i].z;
+      }
+      accel_publisher_->unlockAndPublish();
+    }
   }
 
-  WG0X::convertState(state, current_buffer, last_buffer);
-  last_pressure_time_ = p->timestamp_;
+  return WG0X::unpackState(this_buffer, prev_buffer);
 }
 
-void WG0X::convertState(ActuatorState &state, unsigned char *this_buffer, unsigned char *prev_buffer)
+bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
+  ActuatorState &state = actuator_.state_;
   WG0XStatus *this_status, *prev_status;
 
   this_status = (WG0XStatus *)(this_buffer + command_size_);
   prev_status = (WG0XStatus *)(prev_buffer + command_size_);
+
+  digital_out_.state_.data_ = this_status->digital_out_;
 
   state.timestamp_ = this_status->timestamp_ / 1e+6;
   state.device_id_ = sh_->get_ring_position();
@@ -430,12 +529,14 @@ void WG0X::convertState(ActuatorState &state, unsigned char *this_buffer, unsign
   state.num_communication_errors_ = 0; // TODO: communication errors are no longer reported in the process data
 
   state.motor_voltage_ = this_status->motor_voltage_ * config_info_.nominal_voltage_scale_;
+
+  return verifyState(this_status, prev_status);
 }
 
-bool WG0X::verifyState(ActuatorState &state, unsigned char *this_buffer, unsigned char *prev_buffer)
+bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
+  ActuatorState &state = actuator_.state_;
   bool rv = true;
-  WG0XStatus *this_status, *prev_status;
   double expected_voltage;
   int level = 0;
   string reason = "OK";
@@ -447,9 +548,6 @@ bool WG0X::verifyState(ActuatorState &state, unsigned char *this_buffer, unsigne
   }
 
   expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
-
-  this_status = (WG0XStatus *)(this_buffer + command_size_);
-  prev_status = (WG0XStatus *)(prev_buffer + command_size_);
 
   if (this_status->timestamp_ == last_timestamp_ ||
       this_status->timestamp_ == last_last_timestamp_) {

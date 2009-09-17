@@ -42,12 +42,7 @@ class WG014 : public EthercatDevice
 public:
   WG014(EtherCAT_SlaveHandler *sh, int &start_address);
   ~WG014();
-  int initialize(Actuator *, bool);
-  void convertCommand(ActuatorCommand &command, unsigned char *buffer) {}
-  void convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer) {}
-  void computeCurrent(ActuatorCommand &command) {}
-  void truncateCurrent(ActuatorCommand &command) {}
-  bool verifyState(ActuatorState &, unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
+  int initialize(HardwareInterface *, bool);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
 
   enum {PRODUCT_CODE = 6805014};

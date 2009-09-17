@@ -100,8 +100,8 @@ private:
   EthercatDevice **slaves_;
   unsigned int num_slaves_;
 
-  unsigned char *current_buffer_;
-  unsigned char *last_buffer_;
+  unsigned char *this_buffer_;
+  unsigned char *prev_buffer_;
   unsigned char *buffers_;
   unsigned int buffer_size_;
 

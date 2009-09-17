@@ -56,7 +56,7 @@ WG014::~WG014()
   delete sh_->get_pd_config();
 }
 
-int WG014::initialize(Actuator *, bool)
+int WG014::initialize(HardwareInterface *, bool)
 {
   ROS_DEBUG("Device #%02d: WG014 (%#08x)", sh_->get_ring_position(), sh_->get_product_code());
   return 0;

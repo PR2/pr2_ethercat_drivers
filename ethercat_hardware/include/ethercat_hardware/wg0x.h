@@ -228,14 +228,11 @@ public:
   WG0X(EtherCAT_SlaveHandler *sh, int &start_address);
   virtual ~WG0X();
 
-  virtual int initialize(Actuator *, bool allow_unprogrammed=true);
+  virtual int initialize(HardwareInterface *, bool allow_unprogrammed=true);
 
-  void convertCommand(ActuatorCommand &command, unsigned char *buffer);
-  virtual void convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer);
+  void packCommand(unsigned char *buffer, bool halt, bool reset);
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
 
-  void computeCurrent(ActuatorCommand &command);
-  void truncateCurrent(ActuatorCommand &command);
-  bool verifyState(ActuatorState &state, unsigned char *this_buffer, unsigned char *prev_buffer);
 
   void program(WG0XActuatorInfo *);
   bool isProgrammed() { return actuator_info_.crc32_ != 0;}
@@ -249,7 +246,11 @@ protected:
   uint8_t board_minor_;
 
   WG0XActuatorInfo actuator_info_;
+
+  pr2_mechanism::Actuator actuator_;
+  pr2_mechanism::DigitalOut digital_out_;
 private:
+  bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   string safetyDisableString(uint8_t status);
   int readEeprom(EthercatCom *com);
   int writeEeprom(EthercatCom *com);
@@ -340,14 +341,18 @@ class WG06 : public WG0X
 public:
   WG06(EtherCAT_SlaveHandler *sh, int &addr) : WG0X(sh, addr), use_ros_(true), last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
   ~WG06();
-  int initialize(Actuator *, bool allow_unprogrammed=true);
-  void convertState(ActuatorState &state, unsigned char *current_buffer, unsigned char *last_buffer);
+  int initialize(HardwareInterface *, bool allow_unprogrammed=true);
+  void packCommand(unsigned char *buffer, bool halt, bool reset);
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
   {
     PRODUCT_CODE = 6805006
   };
   bool use_ros_;
 private:
+  pr2_mechanism::PressureSensor pressure_sensors_[2];
+  pr2_mechanism::Accelerometer accelerometer_;
+
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
