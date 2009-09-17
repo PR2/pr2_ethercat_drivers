@@ -1,0 +1,22 @@
+<library path="lib/libethercat_hardware" >
+  <class name="6805005" type="WG05" base_class_type="EthercatDevice">
+    <description>
+      WG05 - Generic Motor Control Board
+    </description>
+  </class>
+  <class name="6805006" type="WG06" base_class_type="EthercatDevice">
+    <description>
+      WG06 - Gripper Motor Control Board
+    </description>
+  </class>
+  <class name="6805014" type="WG014" base_class_type="EthercatDevice">
+    <description>
+      WG014 - EtherCAT Hub
+    </description>
+  </class>
+  <class name="73542738" type="EK1122" base_class_type="EthercatDevice">
+    <description>
+      EK1122 - Beckhoff EtherCAT Hub
+    </description>
+  </class>
+</library>
