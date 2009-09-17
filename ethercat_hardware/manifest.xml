@@ -10,13 +10,14 @@ Package for creating a hardware interface to the robot using the EtherCAT motor 
 <depend package="pr2_hardware_interface"/>
 <depend package="eml"/>
 <depend package="tinyxml"/>
-<depend package="loki"/>
 <depend package="roscpp" />
 <depend package="realtime_tools" />
 <depend package="diagnostic_msgs" />
 <depend package="diagnostic_updater" />
+<depend package="pluginlib" />
 <export>
-  <cpp cflags="-I${prefix}/include" lflags="-L${prefix}/lib -lethercat_hardware -Wl,-rpath,${prefix}/lib -lloki"/>
+  <cpp cflags="-I${prefix}/include" lflags="-L${prefix}/lib -lethercat_hardware -Wl,-rpath,${prefix}/lib"/>
+  <ethercat_hardware plugin="${prefix}/ethercat_device_plugin.xml" />
 </export>
 <repository>http://pr.willowgarage.com/repos</repository>
 </package>

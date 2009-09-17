@@ -40,7 +40,7 @@
 class WG014 : public EthercatDevice
 {
 public:
-  WG014(EtherCAT_SlaveHandler *sh, int &start_address);
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   ~WG014();
   int initialize(HardwareInterface *, bool);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);

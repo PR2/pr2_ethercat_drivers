@@ -50,6 +50,9 @@
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/max.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
+
+#include <pluginlib/class_loader.h>
+
 using namespace boost::accumulators;
 
 class EthercatHardware
@@ -121,6 +124,8 @@ private:
   vector<diagnostic_msgs::KeyValue> values_;
 
   EthercatOobCom *oob_com_;  
+
+  pluginlib::ClassLoader<EthercatDevice> device_loader_;
 };
 
 #endif /* ETHERCAT_HARDWARE_H */

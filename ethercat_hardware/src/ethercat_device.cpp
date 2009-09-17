@@ -259,12 +259,13 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
   }
 }
 
-EthercatDevice::EthercatDevice(EtherCAT_SlaveHandler *sh, int command_size, int status_size) :
-  sh_(sh), 
-  command_size_(command_size), 
-  status_size_(status_size), 
-  newDiagnosticsIndex_(0)
+void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
+  sh_ = sh;
+  command_size_ = 0;
+  status_size_ = 0;
+  newDiagnosticsIndex_ = 0;
+
   int error = pthread_mutex_init(&newDiagnosticsIndexLock_, NULL);
   if (error != 0) {
     ROS_FATAL("Initializing indexLock failed : %s", strerror(error));

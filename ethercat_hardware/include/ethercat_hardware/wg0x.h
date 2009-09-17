@@ -225,7 +225,7 @@ struct WG0XCommand
 class WG0X : public EthercatDevice
 {
 public:
-  WG0X(EtherCAT_SlaveHandler *sh, int &start_address);
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   virtual ~WG0X();
 
   virtual int initialize(HardwareInterface *, bool allow_unprogrammed=true);
@@ -320,7 +320,6 @@ private:
 class WG05 : public WG0X
 {
 public:
-  WG05(EtherCAT_SlaveHandler *sh, int &addr) : WG0X(sh, addr) {}
   enum
   {
     PRODUCT_CODE = 6805005
@@ -339,7 +338,7 @@ struct WG06Pressure
 class WG06 : public WG0X
 {
 public:
-  WG06(EtherCAT_SlaveHandler *sh, int &addr) : WG0X(sh, addr), use_ros_(true), last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
+  WG06() : use_ros_(true), last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
   ~WG06();
   int initialize(HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);

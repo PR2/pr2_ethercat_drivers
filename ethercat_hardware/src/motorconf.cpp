@@ -92,7 +92,7 @@ void init(char *interface)
     exit(-1);
   }
 
-  static int startAddress = 0x00010000;
+  static int start_address = 0x00010000;
 
   for (unsigned int slave = 0; slave < num_slaves; ++slave)
   {
@@ -106,12 +106,14 @@ void init(char *interface)
 
     if (sh->get_product_code() == WG05::PRODUCT_CODE)
     {
-      WG05 *dev = new WG05(sh, startAddress);
+      WG05 *dev = new WG05();
+      dev->construct(sh, start_address);
       devices.push_back(dev);
     }
     else if (sh->get_product_code() == WG06::PRODUCT_CODE)
     {
-      WG06 *dev = new WG06(sh, startAddress);
+      WG06 *dev = new WG06();
+      dev->construct(sh, start_address);
       dev->use_ros_ = false;
       devices.push_back(dev);
     }

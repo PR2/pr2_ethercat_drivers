@@ -39,7 +39,7 @@
 #include <dll/ethercat_device_addressed_telegram.h>
 
 EthercatHardware::EthercatHardware() :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1)
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -352,15 +352,15 @@ void EthercatHardware::update(bool reset, bool halt)
 EthercatDevice *
 EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 {
-  static int startAddress = 0x00010000;
+  static int start_address = 0x00010000;
 
   EthercatDevice *p = NULL;
-  try
-  {
-    p = DeviceFactory::Instance().CreateObject(sh->get_product_code(), sh, startAddress);
+  stringstream str;
+  str << sh->get_product_code();
+  p = device_loader_.createClassInstance(str.str());
+  if (p) {
+    p->construct(sh, start_address);
   }
-  catch (Loki::DefaultFactoryError<unsigned int, EthercatDevice>::Exception)
-  {}
   return p;
 }
 

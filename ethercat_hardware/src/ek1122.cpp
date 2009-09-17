@@ -37,10 +37,11 @@
 
 #include <ros/console.h>
 
-static bool reg = DeviceFactory::Instance().Register(EK1122::PRODUCT_CODE, deviceCreator<EK1122>);
+PLUGINLIB_REGISTER_CLASS(73542738, EK1122, EthercatDevice);
 
-EK1122::EK1122(EtherCAT_SlaveHandler *sh, int &start_address) : EthercatDevice(sh)
+void EK1122::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
+  EthercatDevice::construct(sh, start_address);
   sh->set_fmmu_config( new EtherCAT_FMMU_Config(0) );
   sh->set_pd_config( new EtherCAT_PD_Config(0) );
 }

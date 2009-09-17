@@ -37,10 +37,11 @@
 
 #include <ros/console.h>
 
-bool reg014 = DeviceFactory::Instance().Register(WG014::PRODUCT_CODE, deviceCreator<WG014>);
+PLUGINLIB_REGISTER_CLASS(6805014, WG014, EthercatDevice);
 
-WG014::WG014(EtherCAT_SlaveHandler *sh, int &start_address) : EthercatDevice(sh)
+void WG014::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
+  EthercatDevice::construct(sh, start_address);
   sh->set_fmmu_config( new EtherCAT_FMMU_Config(0) );
   sh->set_pd_config( new EtherCAT_PD_Config(0) );
 

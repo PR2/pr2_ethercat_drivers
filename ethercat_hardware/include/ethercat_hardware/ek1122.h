@@ -40,7 +40,7 @@
 class EK1122 : public EthercatDevice
 {
 public:
-  EK1122(EtherCAT_SlaveHandler *sh, int &start_address);
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   ~EK1122();
   int initialize(HardwareInterface *, bool);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);

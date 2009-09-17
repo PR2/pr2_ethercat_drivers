@@ -50,8 +50,7 @@
 
 #include <ethercat_hardware/ethercat_com.h>
 
-#include <loki/Factory.h>
-#include <loki/Sequence.h>
+#include <pluginlib/class_list_macros.h>
 
 using namespace std;
 using namespace pr2_mechanism;
@@ -127,7 +126,7 @@ protected:
 class EthercatDevice
 {
 public:
-  EthercatDevice(EtherCAT_SlaveHandler *sh, int command_size = 0, int status_size = 0);
+  virtual void construct(EtherCAT_SlaveHandler *sh, int &start_address);
 
   virtual ~EthercatDevice();
 
@@ -183,15 +182,5 @@ public:
   EthercatDeviceDiagnostics deviceDiagnostics[2];
   pthread_mutex_t diagnosticsLock_;  
 };
-
-
-typedef Loki::SingletonHolder
-<
-  Loki::Factory< EthercatDevice, EC_UDINT, Loki::Seq<EtherCAT_SlaveHandler *, int&> >,
-  Loki::CreateUsingNew,
-  Loki::LongevityLifetime::DieAsSmallObjectChild
-> DeviceFactory;
-
-template< class T> T* deviceCreator(EtherCAT_SlaveHandler *sh, int &addr) {return new T(sh, addr);}
 
 #endif /* ETHERCAT_DEVICE_H */

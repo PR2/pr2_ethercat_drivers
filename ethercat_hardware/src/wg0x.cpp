@@ -45,8 +45,8 @@
 
 #include <boost/crc.hpp>
 
-bool reg05 = DeviceFactory::Instance().Register(WG05::PRODUCT_CODE, deviceCreator<WG05> );
-bool reg06 = DeviceFactory::Instance().Register(WG06::PRODUCT_CODE, deviceCreator<WG06> );
+PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
+PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
 
 static unsigned int rotateRight8(unsigned in)
 {
@@ -110,9 +110,10 @@ WG06::~WG06()
   if (accel_publisher_) delete accel_publisher_;
 }
 
-
-WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, true)
+void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
+  EthercatDevice::construct(sh, start_address);
+
   reason_ = "OK";
   level_ = 0;
 
@@ -146,7 +147,7 @@ WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, tr
   }
 
   EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
-  (*fmmu)[0] = EC_FMMU(startAddress, // Logical start address
+  (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
                        command_size_,// Logical length
                        0x00, // Logical StartBit
                        0x07, // Logical EndBit
@@ -156,9 +157,9 @@ WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, tr
                        true, // Write Enable
                        true); // Enable
 
-  startAddress += command_size_;
+  start_address += command_size_;
 
-  (*fmmu)[1] = EC_FMMU(startAddress, // Logical start address
+  (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
                        base_status, // Logical length
                        0x00, // Logical StartBit
                        0x07, // Logical EndBit
@@ -168,11 +169,11 @@ WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, tr
                        false, // Write Enable
                        true); // Enable
 
-  startAddress += base_status;
+  start_address += base_status;
 
   if (isWG06)
   {
-    (*fmmu)[2] = EC_FMMU(startAddress, // Logical start address
+    (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
                          sizeof(WG06Pressure), // Logical length
                          0x00, // Logical StartBit
                          0x07, // Logical EndBit
@@ -182,7 +183,7 @@ WG0X::WG0X(EtherCAT_SlaveHandler *sh, int &startAddress) : EthercatDevice(sh, tr
                          false, // Write Enable
                          true); // Enable
 
-    startAddress += sizeof(WG06Pressure);
+    start_address += sizeof(WG06Pressure);
   }
   sh->set_fmmu_config(fmmu);
 
@@ -229,7 +230,7 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
     {
       pressure_sensors_[i].state_.data_.resize(22);
       pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
-      if (!hw->addPressureSensor(&pressure_sensors_[i]))
+      if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
       {
           ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
           ROS_BREAK();
@@ -248,7 +249,7 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
       // Register accelerometer with HardwareInterface
       {
         accelerometer_.name_ = actuator_info_.name_;
-        if (!hw->addAccelerometer(&accelerometer_))
+        if (hw && !hw->addAccelerometer(&accelerometer_))
         {
             ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
             ROS_BREAK();
@@ -330,7 +331,7 @@ int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
 
     // Register actuator with HardwareInterface
     {
-      if (!hw->addActuator(&actuator_))
+      if (hw && !hw->addActuator(&actuator_))
       {
           ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
           ROS_BREAK();
@@ -341,7 +342,7 @@ int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
     // Register digital out with HardwareInterface
     {
       digital_out_.name_ = actuator_info_.name_;
-      if (!hw->addDigitalOut(&digital_out_))
+      if (hw && !hw->addDigitalOut(&digital_out_))
       {
           ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
           ROS_BREAK();
