@@ -47,6 +47,7 @@
 
 PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
 PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
+PLUGINLIB_REGISTER_CLASS(6805021, WG021, EthercatDevice);
 
 static unsigned int rotateRight8(unsigned in)
 {
@@ -135,6 +136,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   board_minor_ = (sh->get_revision() >> 16) & 0xff;
 
   bool isWG06 = sh_->get_product_code() == WG06::PRODUCT_CODE;
+  bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
   unsigned int base_status = sizeof(WG0XStatus);
 
   command_size_ = sizeof(WG0XCommand);
@@ -144,6 +146,11 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
     if (fw_major_ >= 1)
       status_size_ = base_status = sizeof(WG06StatusWithAccel);
     status_size_ += sizeof(WG06Pressure);
+  }
+  else if (isWG021)
+  {
+    status_size_ = base_status = sizeof(WG021Status);
+    command_size_ = sizeof(WG021Command);
   }
 
   EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
@@ -659,82 +666,6 @@ end:
   }
   return rv;
 }
-
-/*
-int WG0X::readData(EtherCAT_SlaveHandler *sh, EC_UINT address, void* buffer, EC_UINT length)
-{
-  unsigned char *p = (unsigned char *)buffer;
-  EtherCAT_DataLinkLayer *dll = EtherCAT_DataLinkLayer::instance();
-  EC_Logic *logic = EC_Logic::instance();
-
-  // Build read telegram, use slave position
-  APRD_Telegram status(logic->get_idx(), // Index
-                       -sh->get_ring_position(), // Slave position on ethercat chain (auto increment address)
-                       address, // ESC physical memory address (start address)
-                       logic->get_wkc(), // Working counter
-                       length, // Data Length,
-                       p); // Buffer to put read result into
-
-  // Put read telegram in ethercat/ethernet frame
-  EC_Ethernet_Frame frame(&status);
-
-  // Send/Recv data from slave
-  if (!dll->txandrx(&frame))
-  {
-    status.set_wkc(logic->get_wkc());
-    status.set_idx(logic->get_idx());
-    if (!dll->txandrx(&frame))
-    {
-      return -1;
-    }
-  }
-
-  // In some cases (clearing status mailbox) this is expected to occur
-  if (status.get_wkc() != 1)
-  {
-    return -2;
-  }
-
-  return 0;
-}
-
-// Writes <length> amount of data from ethercat slave <sh_hub> from physical address <address> to <buffer>
-int WG0X::writeData(EtherCAT_SlaveHandler *sh, EC_UINT address, void const* buffer, EC_UINT length)
-{
-  unsigned char *p = (unsigned char *)buffer;
-  EtherCAT_DataLinkLayer *m_dll_instance = EtherCAT_DataLinkLayer::instance();
-  EC_Logic *m_logic_instance = EC_Logic::instance();
-
-  // Build write telegram, use slave position
-  APWR_Telegram command(m_logic_instance->get_idx(), // Index
-                        -sh->get_ring_position(), // Slave position on ethercat chain (auto increment address) (
-                        address, // ESC physical memory address (start address)
-                        m_logic_instance->get_wkc(), // Working counter
-                        length, // Data Length,
-                        p); // Buffer to put read result into
-
-  // Put read telegram in ethercat/ethernet frame
-  EC_Ethernet_Frame frame(&command);
-
-  // Send/Recv data from slave
-  if (!m_dll_instance->txandrx(&frame))
-  {
-    command.set_wkc(m_logic_instance->get_wkc());
-    command.set_idx(m_logic_instance->get_idx());
-    if (!m_dll_instance->txandrx(&frame))
-    {
-      return -1;
-    }
-  }
-
-  if (command.get_wkc() != 1)
-  {
-    return -2;
-  }
-
-  return 0;
-}
-*/
 
 int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
 {

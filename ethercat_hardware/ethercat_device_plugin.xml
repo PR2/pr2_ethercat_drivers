@@ -9,6 +9,11 @@
       WG06 - Gripper Motor Control Board
     </description>
   </class>
+  <class name="6805021" type="WG021" base_class_type="EthercatDevice">
+    <description>
+      WG021 - LED Projector Board
+    </description>
+  </class>
   <class name="6805014" type="WG014" base_class_type="EthercatDevice">
     <description>
       WG014 - EtherCAT Hub

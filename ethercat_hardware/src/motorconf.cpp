@@ -117,6 +117,12 @@ void init(char *interface)
       dev->use_ros_ = false;
       devices.push_back(dev);
     }
+    else if (sh->get_product_code() == WG021::PRODUCT_CODE)
+    {
+      WG021 *dev = new WG021();
+      dev->construct(sh, start_address);
+      devices.push_back(dev);
+    }
     else
     {
       devices.push_back(NULL);

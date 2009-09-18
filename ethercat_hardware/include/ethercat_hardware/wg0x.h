@@ -212,6 +212,33 @@ struct WG06StatusWithAccel
   uint8_t checksum_;
 }__attribute__ ((__packed__));
 
+struct WG021Status
+{
+  uint8_t mode_;
+  uint8_t digital_out_;
+  int16_t pad1_;
+  int16_t programmed_current_;
+  int16_t measured_current_;
+  uint32_t timestamp_;
+  uint8_t config0_;
+  uint8_t config1_;
+  uint8_t config2_;
+  uint8_t pad2_;
+  uint32_t pad3_;
+  uint16_t pad4_;
+  uint8_t pad5_;
+  uint8_t output_status_;
+  uint32_t output_start_timestamp_;
+  uint32_t output_stop_timestamp_;
+  uint16_t board_temperature_;
+  uint16_t bridge_temperature_;
+  uint16_t supply_voltage_;
+  int16_t led_voltage_;
+  uint16_t packet_count_;
+  uint8_t pad_;
+  uint8_t checksum_;
+}__attribute__ ((__packed__));
+
 struct WG0XCommand
 {
   uint8_t mode_;
@@ -219,6 +246,20 @@ struct WG0XCommand
   int16_t programmed_pwm;
   int16_t programmed_current_;
   uint8_t pad_;
+  uint8_t checksum_;
+}__attribute__ ((__packed__));
+
+struct WG021Command
+{
+  uint8_t mode_;
+  uint8_t digital_out_;
+  uint16_t pad1_;
+  int16_t programmed_current_;
+  int16_t pad2_;
+  int32_t pad3_;
+  uint8_t config0_;
+  uint8_t config1_;
+  uint8_t config2_;
   uint8_t checksum_;
 }__attribute__ ((__packed__));
 
@@ -355,6 +396,16 @@ private:
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
+};
+
+class WG021 : public WG0X
+{
+public:
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
+  enum
+  {
+    PRODUCT_CODE = 6805021
+  };
 };
 
 #endif /* WG0X_H */

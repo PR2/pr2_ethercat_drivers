@@ -62,14 +62,8 @@ EthercatHardware::~EthercatHardware()
   {
     close_socket(ni_);
   }
-  if (buffers_)
-  {
-    delete[] buffers_;
-  }
-  if (hw_)
-  {
-    delete hw_;
-  }
+  delete[] buffers_;
+  delete hw_;
   publisher_.stop();
 }
 
