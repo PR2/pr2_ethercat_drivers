@@ -271,11 +271,53 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
   return retval;
 }
 
+int WG021::initialize(HardwareInterface *hw, bool allow_unprogrammed)
+{
+  int retval = WG0X::initialize(hw, allow_unprogrammed);
+
+  // Register digital outs with HardwareInterface
+  struct {
+    DigitalOut *d;
+    string name;
+  } digital_outs[] = {
+    {&digital_out_A_, "_digital_out_A"},
+    {&digital_out_B_, "_digital_out_B"},
+    {&digital_out_I_, "_digital_out_I"},
+    {&digital_out_M_, "_digital_out_M"},
+    {&digital_out_L0_, "_digital_out_L0"},
+    {&digital_out_L1_, "_digital_out_L1"},
+  };
+
+  for (size_t i = 0; i < sizeof(digital_outs)/sizeof(digital_outs[0]); ++i)
+  {
+    digital_outs[i].d->name_ = string(actuator_info_.name_) + digital_outs[i].name;
+    if (hw && !hw->addDigitalOut(digital_outs[i].d))
+    {
+        ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_outs[i].d->name_.c_str(), sh_->get_ring_position());
+        ROS_BREAK();
+        return -1;
+    }
+  }
+
+  // Register projector with HardwareInterface
+  {
+    projector_.name_ = actuator_info_.name_;
+    if (hw && !hw->addProjector(&projector_))
+    {
+        ROS_FATAL("A projector of the name '%s' already exists.  Device #%02d has a duplicate name", projector_.name_.c_str(), sh_->get_ring_position());
+        ROS_BREAK();
+        return -1;
+    }
+  }
+
+  return retval;
+}
+
 int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
             sh_->get_ring_position(),
-            sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
+            sh_->get_product_code() % 100,
             sh_->get_product_code(), fw_major_, fw_minor_,
             'A' + board_major_, board_minor_,
             sh_->get_serial());
@@ -1138,9 +1180,9 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
   d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
   d.addf("Timestamp", "%d", status->timestamp_);
-  d.addf("Config 0", "%d", status->config0_);
-  d.addf("Config 1", "%d", status->config1_);
-  d.addf("Config 2", "%d", status->config2_);
+  d.addf("Config 0", "%#02x", status->config0_);
+  d.addf("Config 1", "%#02x", status->config1_);
+  d.addf("Config 2", "%#02x", status->config2_);
   d.addf("Output Status", "%d", status->output_status_);
   d.addf("Output Start Timestamp", "%d", status->output_start_timestamp_);
   d.addf("Output Stop Timestamp", "%d", status->output_stop_timestamp_);
@@ -1150,5 +1192,5 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("LED voltage", "%f", status->led_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Packet count", "%d", status->packet_count_);
 
-  EthercatDevice::ethercatDiagnostics(d, 1); 
+  EthercatDevice::ethercatDiagnostics(d, 2); 
 }

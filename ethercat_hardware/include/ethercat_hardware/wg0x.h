@@ -404,12 +404,31 @@ class WG021 : public WG0X
 public:
   WG021() : projector_(digital_out_A_, digital_out_B_, digital_out_I_, digital_out_M_, digital_out_L0_, digital_out_L1_) {}
   void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
+  int initialize(HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   enum
   {
     PRODUCT_CODE = 6805021
+  };
+  enum
+  {
+    PROJECTOR_CONFIG_ENABLE = 8,
+    PROJECTOR_CONFIG_ENABLE_ENABLED = 8,
+    PROJECTOR_CONFIG_ENABLE_DISABLED = 0,
+
+    PROJECTOR_CONFIG_ACTION = 4,
+    PROJECTOR_CONFIG_ACTION_ON = 4,
+    PROJECTOR_CONFIG_ACTION_OFF = 0,
+
+    PROJECTOR_CONFIG_POLARITY = 2,
+    PROJECTOR_CONFIG_POLARITY_ACTIVE_HIGH = 2,
+    PROJECTOR_CONFIG_POLARITY_ACTIVE_LOW = 0,
+
+    PROJECTOR_CONFIG_STATE = 1,
+    PROJECTOR_CONFIG_STATE_HIGH = 1,
+    PROJECTOR_CONFIG_STATE_LOW = 0
   };
 private:
   pr2_mechanism::DigitalOut digital_out_A_;
