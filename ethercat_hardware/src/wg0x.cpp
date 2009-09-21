@@ -436,6 +436,35 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 }
 
+void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
+{
+  ProjectorCommand &cmd = projector_.command_;
+
+  // Override enable if motors are halted
+  bool tmp = cmd.enable_;
+  if (halt) {
+    cmd.enable_ = reset;
+    cmd.current_ = 0;
+  }
+
+  // Truncate the current to limit
+  projector_.state_.last_requested_current_ = cmd.current_;
+  cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
+
+  // Pack command structures into EtherCAT buffer
+  WG021Command *c = (WG021Command *)buffer;
+  memset(c, 0, command_size_);
+  c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
+  c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
+  c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
+  c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
+  c->config2_ = ((cmd.L0_ & 0xf) << 4) | ((cmd.L1_ & 0xf) << 0);
+  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+
+  // Restore enable
+  cmd.enable_ = tmp;
+}
+
 bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
@@ -665,6 +694,32 @@ end:
     reason_ = reason;
   }
   return rv;
+}
+
+bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
+{
+  ProjectorState &state = projector_.state_;
+  WG021Status *this_status, *prev_status;
+
+  this_status = (WG021Status *)(this_buffer + command_size_);
+  prev_status = (WG021Status *)(prev_buffer + command_size_);
+
+  state.timestamp_ = this_status->timestamp_ / 1e+6;
+  state.on_to_off_timestamp_ = this_status->output_stop_timestamp_ / 1e+6;
+  state.off_to_on_timestamp_ = this_status->output_start_timestamp_ / 1e+6;
+
+  state.A_ = ((this_status->config0_ >> 4) & 0xf);
+  state.B_ = ((this_status->config0_ >> 0) & 0xf);
+  state.I_ = ((this_status->config1_ >> 4) & 0xf);
+  state.M_ = ((this_status->config1_ >> 0) & 0xf);
+  state.L0_ = ((this_status->config2_ >> 4) & 0xf);
+  state.L0_ = ((this_status->config2_ >> 0) & 0xf);
+
+  state.last_commanded_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
+  state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
+
+
+  return true;
 }
 
 int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
@@ -1014,4 +1069,86 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 
   unsigned numPorts = (sh_->get_product_code()==WG06::PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
   EthercatDevice::ethercatDiagnostics(d, numPorts); 
+}
+
+void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  WG021Status *status = (WG021Status *)(buffer + command_size_);
+
+  stringstream str;
+  str << "EtherCAT Device (" << actuator_info_.name_ << ")";
+  d.name = str.str();
+  char serial[32];
+  snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
+  d.hardware_id = serial;
+
+  d.summary(level_, reason_);
+
+  d.clear();
+  d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
+  d.add("Name", actuator_info_.name_);
+  d.addf("Position", "%02d", sh_->get_ring_position());
+  d.addf("Product code",
+        "WG021 (%d) Firmware Revision %d.%02d, PCB Revision %c.%02d",
+        sh_->get_product_code(), fw_major_, fw_minor_,
+        'A' + board_major_, board_minor_);
+
+  d.add("Robot", actuator_info_.robot_name_);
+  d.add("Serial Number", serial);
+  d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
+  d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
+  d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
+
+  d.addf("Safety Disable Status", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_).c_str(), config_info_.safety_disable_status_);
+  d.addf("Safety Disable Status Hold", "%s (%02x)", safetyDisableString(config_info_.safety_disable_status_hold_).c_str(), config_info_.safety_disable_status_hold_);
+  d.addf("Safety Disable Count", "%d", config_info_.safety_disable_count_);
+  d.addf("Watchdog Limit", "%dms\n", config_info_.watchdog_limit_);
+
+  string mode, prefix;
+  if (status->mode_) {
+    if (status->mode_ & MODE_ENABLE) {
+      mode += prefix + "ENABLE";
+      prefix = ", ";
+    }
+    if (status->mode_ & MODE_CURRENT) {
+      mode += prefix + "CURRENT";
+      prefix = ", ";
+    }
+    if (status->mode_ & MODE_UNDERVOLTAGE) {
+      mode += prefix + "UNDERVOLTAGE";
+      prefix = ", ";
+    }
+    if (status->mode_ & MODE_SAFETY_RESET) {
+      mode += prefix + "SAFETY_RESET";
+      prefix = ", ";
+    }
+    if (status->mode_ & MODE_SAFETY_LOCKOUT) {
+      mode += prefix + "SAFETY_LOCKOUT";
+      prefix = ", ";
+    }
+    if (status->mode_ & MODE_RESET) {
+      mode += prefix + "RESET";
+      prefix = ", ";
+    }
+  } else {
+    mode = "OFF";
+  }
+  d.add("Mode", mode);
+  d.addf("Digital out", "%d", status->digital_out_);
+  d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
+  d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
+  d.addf("Timestamp", "%d", status->timestamp_);
+  d.addf("Config 0", "%d", status->config0_);
+  d.addf("Config 1", "%d", status->config1_);
+  d.addf("Config 2", "%d", status->config2_);
+  d.addf("Output Status", "%d", status->output_status_);
+  d.addf("Output Start Timestamp", "%d", status->output_start_timestamp_);
+  d.addf("Output Stop Timestamp", "%d", status->output_stop_timestamp_);
+  d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
+  d.addf("LED voltage", "%f", status->led_voltage_ * config_info_.nominal_voltage_scale_);
+  d.addf("Packet count", "%d", status->packet_count_);
+
+  EthercatDevice::ethercatDiagnostics(d, 1); 
 }

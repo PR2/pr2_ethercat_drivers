@@ -287,12 +287,27 @@ protected:
   uint8_t board_minor_;
 
   WG0XActuatorInfo actuator_info_;
+  WG0XConfigInfo config_info_;
 
   pr2_mechanism::Actuator actuator_;
   pr2_mechanism::DigitalOut digital_out_;
+
+  enum
+  {
+    MODE_OFF = 0x00,
+    MODE_ENABLE = (1 << 0),
+    MODE_CURRENT = (1 << 1),
+    MODE_SAFETY_RESET = (1 << 4),
+    MODE_SAFETY_LOCKOUT = (1 << 5),
+    MODE_UNDERVOLTAGE = (1 << 6),
+    MODE_RESET = (1 << 7)
+  };
+
+  string reason_;
+  int level_;
+  string safetyDisableString(uint8_t status);
 private:
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
-  string safetyDisableString(uint8_t status);
   int readEeprom(EthercatCom *com);
   int writeEeprom(EthercatCom *com);
   int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
@@ -306,17 +321,6 @@ private:
   static const int MBX_COMMAND_SIZE = 512;
   static const int MBX_STATUS_PHY_ADDR = 0x2400;
   static const int MBX_STATUS_SIZE = 512;
-
-  enum
-  {
-    MODE_OFF = 0x00,
-    MODE_ENABLE = (1 << 0),
-    MODE_CURRENT = (1 << 1),
-    MODE_SAFETY_RESET = (1 << 4),
-    MODE_SAFETY_LOCKOUT = (1 << 5),
-    MODE_UNDERVOLTAGE = (1 << 6),
-    MODE_RESET = (1 << 7)
-  };
 
   enum
   {
@@ -338,13 +342,10 @@ private:
   };
 
   // Board configuration parameters
-  WG0XConfigInfo config_info_;
   double backemf_constant_;
   static const int ACTUATOR_INFO_PAGE = 4095;
 
   // Diagnostic message values
-  string reason_;
-  int level_;
   double voltage_error_, max_voltage_error_;
   double filtered_voltage_error_, max_filtered_voltage_error_;
   double current_error_, max_current_error_;
@@ -401,11 +402,23 @@ private:
 class WG021 : public WG0X
 {
 public:
+  WG021() : projector_(digital_out_A_, digital_out_B_, digital_out_I_, digital_out_M_, digital_out_L0_, digital_out_L1_) {}
   void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
+  void packCommand(unsigned char *buffer, bool halt, bool reset);
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
+  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   enum
   {
     PRODUCT_CODE = 6805021
   };
+private:
+  pr2_mechanism::DigitalOut digital_out_A_;
+  pr2_mechanism::DigitalOut digital_out_B_;
+  pr2_mechanism::DigitalOut digital_out_I_;
+  pr2_mechanism::DigitalOut digital_out_M_;
+  pr2_mechanism::DigitalOut digital_out_L0_;
+  pr2_mechanism::DigitalOut digital_out_L1_;
+  pr2_mechanism::Projector projector_;
 };
 
 #endif /* WG0X_H */
