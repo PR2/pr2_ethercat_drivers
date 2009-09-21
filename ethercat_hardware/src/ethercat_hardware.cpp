@@ -74,6 +74,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((ni_ = init_ec(interface)) == NULL)
   {
     ROS_FATAL("Unable to initialize interface: %s", interface);
+    sleep(1);
     ROS_BREAK();
   }
 
@@ -84,6 +85,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((al_ = EtherCAT_AL::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize Application Layer (AL): %p", al_);
+    sleep(1);
     ROS_BREAK();
   }
 
@@ -91,6 +93,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (num_slaves_ == 0)
   {
     ROS_FATAL("Unable to locate any slaves");
+    sleep(1);
     ROS_BREAK();
   }
 
@@ -98,6 +101,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((em_ = EtherCAT_Master::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize EtherCAT_Master: %p", em_);
+    sleep(1);
     ROS_BREAK();
   }
 
@@ -111,6 +115,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (sh == NULL)
     {
       ROS_FATAL("Unable to get slave handler #%d", slave);
+      sleep(1);
       ROS_BREAK();
     }
 
@@ -138,6 +143,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
         ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
       ROS_FATAL("Perhaps you should power-cycle the MCBs");
+      sleep(1);
       ROS_BREAK();
     }
   }
@@ -165,6 +171,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
       ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
                 slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
+      sleep(1);
       ROS_BREAK();
     }
 
@@ -181,6 +188,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
         else
         {
           ROS_FATAL("Device #%02d: actuator name already in use: '%s'", a, hw_->actuators_[a]->name_.c_str());
+          sleep(1);
           ROS_BREAK();
         }
       }
