@@ -1078,7 +1078,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Programmed pwm value", "%d", status->programmed_pwm_value_);
   d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
   d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
-  d.addf("Timestamp", "%d", status->timestamp_);
+  d.addf("Timestamp", "%u", status->timestamp_);
   d.addf("Encoder count", "%d", status->encoder_count_);
   d.addf("Encoder index pos", "%d", status->encoder_index_pos_);
   d.addf("Num encoder_errors", "%d", status->num_encoder_errors_);
@@ -1179,13 +1179,13 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Digital out", "%d", status->digital_out_);
   d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
   d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
-  d.addf("Timestamp", "%d", status->timestamp_);
+  d.addf("Timestamp", "%u", status->timestamp_);
   d.addf("Config 0", "%#02x", status->config0_);
   d.addf("Config 1", "%#02x", status->config1_);
   d.addf("Config 2", "%#02x", status->config2_);
-  d.addf("Output Status", "%d", status->output_status_);
-  d.addf("Output Start Timestamp", "%d", status->output_start_timestamp_);
-  d.addf("Output Stop Timestamp", "%d", status->output_stop_timestamp_);
+  d.addf("Output Status", "%#02x", status->output_status_);
+  d.addf("Output Start Timestamp", "%u", status->output_start_timestamp_);
+  d.addf("Output Stop Timestamp", "%u", status->output_stop_timestamp_);
   d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
   d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
   d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
