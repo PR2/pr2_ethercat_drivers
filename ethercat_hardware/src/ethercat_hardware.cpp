@@ -38,6 +38,9 @@
 #include <dll/ethercat_dll.h>
 #include <dll/ethercat_device_addressed_telegram.h>
 
+#include <net/if.h>
+#include <sys/ioctl.h>
+
 EthercatHardware::EthercatHardware() :
   hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
@@ -69,6 +72,39 @@ EthercatHardware::~EthercatHardware()
 
 void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 {
+  // open temporary socket to use with ioctl
+  int sock = socket(PF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    int error = errno;
+    ROS_FATAL("Couldn't open temp socket : %s", strerror(error));
+    sleep(1);
+    ROS_BREAK();    
+  }
+  
+  struct ifreq ifr;
+  strncpy(ifr.ifr_name, interface, IFNAMSIZ);
+  if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+    int error = errno;
+    ROS_FATAL("Cannot get interface flags for %s: %s", interface, strerror(error));
+    sleep(1);
+    ROS_BREAK();
+  }
+
+  close(sock);
+  sock = -1;
+
+  if (!(ifr.ifr_flags & IFF_UP)) {
+    ROS_FATAL("Interface %s is not UP. Try : ifup %s", interface, interface);
+    sleep(1);
+    ROS_BREAK();
+  }
+  if (!(ifr.ifr_flags & IFF_RUNNING)) {
+    ROS_FATAL("Interface %s is not RUNNING. Is cable plugged in and device powered?", interface);
+    sleep(1);
+    ROS_BREAK();
+  }
+
+
   // Initialize network interface
   interface_ = interface;
   if ((ni_ = init_ec(interface)) == NULL)
