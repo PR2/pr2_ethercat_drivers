@@ -747,8 +747,12 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   prev_status = (WG021Status *)(prev_buffer + command_size_);
 
   state.timestamp_ = this_status->timestamp_ / 1e+6;
-  state.on_to_off_timestamp_ = this_status->output_stop_timestamp_ / 1e+6;
-  state.off_to_on_timestamp_ = this_status->output_start_timestamp_ / 1e+6;
+  state.falling_timestamp_ = this_status->output_stop_timestamp_ / 1e+6;
+  state.rising_timestamp_ = this_status->output_start_timestamp_ / 1e+6;
+
+  state.output_ = (this_status->output_status_ & 0x1) == 0x1;
+  state.falling_timestamp_valid_ = (this_status->output_status_ & 0x8) == 0x8;
+  state.rising_timestamp_valid_ = (this_status->output_status_ & 0x4) == 0x4;
 
   state.A_ = ((this_status->config0_ >> 4) & 0xf);
   state.B_ = ((this_status->config0_ >> 0) & 0xf);
