@@ -496,6 +496,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   // Pack command structures into EtherCAT buffer
   WG021Command *c = (WG021Command *)buffer;
   memset(c, 0, command_size_);
+  c->digital_out_ = digital_out_.command_.data_;
   c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
   c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
   c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
