@@ -44,12 +44,13 @@
 #include <al/ethercat_slave_handler.h>
 
 #include <ethercat_hardware/wg0x.h>
+#include <ethercat_hardware/wg014.h>
 
 #include <boost/crc.hpp>
 #include <boost/foreach.hpp>
 
 
-vector<WG0X *> devices;
+vector<EthercatDevice *> devices;
 
 typedef pair<string, string> ActuatorPair;
 map<string, string> actuators;
@@ -123,13 +124,19 @@ void init(char *interface)
       dev->construct(sh, start_address);
       devices.push_back(dev);
     }
+    else if (sh->get_product_code() == WG014::PRODUCT_CODE)
+    {
+      WG014 *dev = new WG014();
+      dev->construct(sh, start_address);
+      devices.push_back(dev);
+    }
     else
     {
       devices.push_back(NULL);
     }
   }
 
-  BOOST_FOREACH(WG0X *device, devices)
+  BOOST_FOREACH(EthercatDevice *device, devices)
   {
     if (!device) continue;
     if (!device->sh_->to_state(EC_OP_STATE))
@@ -142,14 +149,22 @@ void init(char *interface)
 
 void programDevice(int device, WG0XActuatorInfo &config, char *name)
 {
+ 
   if (devices[device])
   {
-    ROS_INFO("Programming device %d, to be named: %s\n", device, name);
-    strcpy(config.name_, name);
-    boost::crc_32_type crc32;
-    crc32.process_bytes(&config, sizeof(config)-sizeof(config.crc32_));
-    config.crc32_ = crc32.checksum();
-    devices[device]->program(&config);
+    WG0X *wg = dynamic_cast<WG0X *>(devices[device]);
+    if (wg) {
+      ROS_INFO("Programming device %d, to be named: %s\n", device, name);
+      strcpy(config.name_, name);
+      boost::crc_32_type crc32;
+      crc32.process_bytes(&config, sizeof(config)-sizeof(config.crc32_));
+      config.crc32_ = crc32.checksum();
+      wg->program(&config);
+    }
+    else
+    {
+      ROS_FATAL("The device a position #%d is not programmable", device);
+    }
   }
   else
   {
