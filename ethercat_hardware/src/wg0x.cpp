@@ -747,6 +747,8 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
 
+  digital_out_.state_.data_ = this_status->digital_out_;
+
   state.timestamp_us_ = this_status->timestamp_;
   state.falling_timestamp_us_ = this_status->output_stop_timestamp_;
   state.rising_timestamp_us_ = this_status->output_start_timestamp_;
