@@ -325,6 +325,9 @@ void EthercatHardware::update(bool reset, bool halt)
 {
   unsigned char *this_buffer, *prev_buffer;
 
+  // Update current time
+  hw_->current_time_ = ros::Time::now();
+
   // Convert HW Interface commands to MCB-specific buffers
   this_buffer = this_buffer_;
 
@@ -372,9 +375,6 @@ void EthercatHardware::update(bool reset, bool halt)
 
   if (reset_state_)
     --reset_state_;
-
-  // Update current time
-  hw_->current_time_ = ros::Time::now();
 
   unsigned char *tmp = this_buffer_;
   this_buffer_ = prev_buffer_;
