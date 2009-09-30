@@ -216,7 +216,8 @@ struct WG021Status
 {
   uint8_t mode_;
   uint8_t digital_out_;
-  int16_t pad1_;
+  uint8_t general_config_;
+  uint8_t pad1_;
   int16_t programmed_current_;
   int16_t measured_current_;
   uint32_t timestamp_;
@@ -253,7 +254,8 @@ struct WG021Command
 {
   uint8_t mode_;
   uint8_t digital_out_;
-  uint16_t pad1_;
+  uint8_t general_config_;
+  uint8_t pad1_;
   int16_t programmed_current_;
   int16_t pad2_;
   int32_t pad3_;

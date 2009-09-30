@@ -503,6 +503,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
   c->config2_ = ((cmd.L0_ & 0xf) << 4) | ((cmd.L1_ & 0xf) << 0);
+  c->general_config_ = cmd.pulse_replicator_ == true;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 
   // Restore enable
@@ -764,6 +765,7 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.M_ = ((this_status->config1_ >> 0) & 0xf);
   state.L0_ = ((this_status->config2_ >> 4) & 0xf);
   state.L0_ = ((this_status->config2_ >> 0) & 0xf);
+  state.pulse_replicator_ = (this_status->general_config_ & 0x1) == 0x1;
 
   state.last_commanded_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
