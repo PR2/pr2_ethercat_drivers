@@ -74,7 +74,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
  #include <stdlib.h>
  
  #define ETHERCAT_DEVICE_NAME_MAX_LENGTH 256
-@@ -50,20 +51,90 @@
+@@ -50,20 +51,91 @@
  #define externC extern "C"
  #else
  
@@ -162,6 +162,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
 +  uint64_t rx_dup_pkt;
 +  uint64_t rx_bad_order;
 +  uint64_t rx_late_pkt;         // Count of all late packets
++  uint64_t sw_dropped;          // packets that were dropped by software (for testing purposes)
 +  uint64_t rx_late_pkt_rtt_us;  // Round trip time (in microseconds) of last late packet arrival
 +  uint64_t rx_late_pkt_rtt_us_sum; // Sum of rtt's of all late packets (for calculating average)
 +};
@@ -169,7 +170,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
  /// Generic ethercat interface towards lower level drivers. 
  /** It should be readily re-implemented for different OSes such as
      RTAI, linux, ...     etc. (For the ease of porting the interface
-@@ -75,12 +146,68 @@
+@@ -75,12 +147,76 @@
        packages/io/eth/current/src/ethercatmaster/eth_drv.c
        and mapped in eth_drv_init()
     */
@@ -192,6 +193,11 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
 +  /** May block, returns true if correct frame is recieved 
 +   */
 +  BOOL (* rx)(struct EtherCAT_Frame * frame, struct netif * netif, int handle);
++
++  /// Drop frame 
++  /** Like rx(), but does not fill in frame with result, useful for testing
++   */
++  BOOL (* drop)(struct EtherCAT_Frame * frame, struct netif * netif, int handle);
 +
 +  /// Recieve frame
 +  /** Will not block, returns true if correct frame is recieved 
@@ -236,6 +242,9 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
 +
 +  // Timeout for recieve in microseconds.
 +  int timeout_us;
++
++  // private variable
++  void* private_data;
  };
  
  #endif // __netif_h__
@@ -415,6 +424,56 @@ Index: include/al/ethercat_slave_conf.h
    /// Get configuration of Sync Man channel 0 and 1 for MBX
    /** @return pointer to config in case of complex slave, or NULL for
        a simple slave
+Index: include/al/ethercat_FSM.h
+===================================================================
+--- include/al/ethercat_FSM.h	(revision 36)
++++ include/al/ethercat_FSM.h	(working copy)
+@@ -114,6 +114,7 @@
+       - EC_OP_STATE = 0x08
+   */
+   virtual bool to_state(EC_ESM * a_ESM, EC_State a_state) = 0;  
++  virtual EC_State get_state( ) const = 0;
+  protected:
+   static EC_ESM_InitState initState;
+   static EC_ESM_PreOpState preopState;
+@@ -146,6 +147,8 @@
+       - EC_OP_STATE = 0x08
+   */
+   bool to_state(EC_State a_state){ return (m_esm_state->to_state(this,a_state)); }
++  
++  EC_State get_state() { return m_esm_state->get_state(); } 
+ 
+   virtual ~EC_ESM(){};
+   
+@@ -165,24 +168,28 @@
+ class EC_ESM_InitState : public EC_ESM_State
+ {
+  public:
++  virtual EC_State get_state( ) const;
+   virtual bool to_state(EC_ESM * a_ESM, EC_State a_state);
+ };
+ 
+ class EC_ESM_PreOpState : public EC_ESM_State
+ {
+  public:
++  virtual EC_State get_state( ) const;
+   virtual bool to_state(EC_ESM * a_ESM, EC_State a_state);
+ };
+ 
+ class EC_ESM_SafeOpState : public EC_ESM_State
+ {
+  public:
++  virtual EC_State get_state( ) const;
+   virtual bool to_state(EC_ESM * a_ESM, EC_State a_state);
+ };
+ 
+ class EC_ESM_OpState : public EC_ESM_State
+ {
+  public:
++  virtual EC_State get_state( ) const;
+   virtual bool to_state(EC_ESM * a_ESM, EC_State a_state);
+ };
+ 
 Index: include/al/ethercat_mbx.h
 ===================================================================
 --- include/al/ethercat_mbx.h	(revision 36)
@@ -456,7 +515,7 @@ Index: include/al/ethercat_slave_handler.h
 ===================================================================
 --- include/al/ethercat_slave_handler.h	(revision 36)
 +++ include/al/ethercat_slave_handler.h	(working copy)
-@@ -65,22 +65,29 @@
+@@ -65,22 +65,34 @@
    EtherCAT_SlaveHandler(EC_UINT a_ring_position,
  			EC_UDINT a_product_code,
  			EC_UDINT a_revision,
@@ -477,6 +536,8 @@ Index: include/al/ethercat_slave_handler.h
 +  /// Get serial
 +  EC_UDINT get_serial() const { return m_serial; };
  
++  /// Returns and increments sequence number used for duplication mailbox write dectition
++  EC_USINT get_mbx_counter();
   protected:
  
    /// Position in the EtherCAT logical Ring
@@ -484,6 +545,9 @@ Index: include/al/ethercat_slave_handler.h
 +
 +  /// Serial
 +  EC_UDINT m_serial;
++
++  /// Sequence number for duplicate mailbox write detection
++  EC_USINT m_mbx_counter;
  };
  
  
@@ -837,7 +901,15 @@ Index: src/al/ethercat_FSM.cxx
        return succeed;
      }
  	 nanosleep( &sleept, 0);
-@@ -234,7 +234,7 @@
+@@ -219,6 +219,7 @@
+   EC_Ethernet_Frame fmmu_frame(&fmmu_tg);
+   unsigned int i = 0;
+   
++  assert(m_SH->get_fmmu_config() != NULL);
+   while ((succeed == true) && (i < m_SH->get_fmmu_config()->get_num_used_fmmus()))
+     {
+       (*(m_SH->get_fmmu_config()))[i].dump(fmmu_data);
+@@ -234,7 +235,7 @@
  
    if (succeed == false) 
      {
@@ -846,7 +918,7 @@ Index: src/al/ethercat_FSM.cxx
        return false;
      }
    
-@@ -264,7 +264,7 @@
+@@ -264,7 +265,7 @@
      }
    if (succeed == false) 
      {
@@ -855,6 +927,59 @@ Index: src/al/ethercat_FSM.cxx
        return false;
      }
    
+@@ -316,6 +317,12 @@
+ 
+ // ==================================================
+ 
++EC_State
++EC_ESM_InitState::get_state( ) const
++{
++  return EC_INIT_STATE;
++}
++
+ bool
+ EC_ESM_InitState::to_state(EC_ESM * a_ESM, EC_State a_state)
+ {
+@@ -349,6 +356,12 @@
+   return succeed;
+ }
+ 
++EC_State
++EC_ESM_PreOpState::get_state( ) const
++{
++  return EC_PREOP_STATE;
++}
++
+ bool
+ EC_ESM_PreOpState::to_state(EC_ESM * a_ESM, EC_State a_state)
+ {
+@@ -379,6 +392,12 @@
+   return succeed;
+ }
+ 
++EC_State
++EC_ESM_SafeOpState::get_state( ) const
++{
++  return EC_SAFEOP_STATE;
++}
++
+ bool
+ EC_ESM_SafeOpState::to_state(EC_ESM * a_ESM, EC_State a_state)
+ {
+@@ -409,6 +428,13 @@
+   return succeed;
+ }
+ 
++EC_State
++EC_ESM_OpState::get_state( ) const
++{
++  return EC_OP_STATE;
++}
++
++
+ bool
+ EC_ESM_OpState::to_state(EC_ESM * a_ESM, EC_State a_state)
+ {
 Index: src/al/ethercat_process_data.cxx
 ===================================================================
 --- src/al/ethercat_process_data.cxx	(revision 36)
@@ -975,7 +1100,12 @@ Index: src/al/ethercat_slave_handler.cxx
 ===================================================================
 --- src/al/ethercat_slave_handler.cxx	(revision 36)
 +++ src/al/ethercat_slave_handler.cxx	(working copy)
-@@ -36,6 +36,7 @@
+@@ -32,10 +32,12 @@
+ 
+  
+ #include "al/ethercat_slave_handler.h"
++#include <assert.h>
+ 
  EtherCAT_SlaveHandler::EtherCAT_SlaveHandler(EC_UINT a_ring_position,
  					     EC_UDINT a_product_code,
  					     EC_UDINT a_revision,
@@ -983,13 +1113,14 @@ Index: src/al/ethercat_slave_handler.cxx
  					     EC_FixedStationAddress a_station_address,
  					     EtherCAT_FMMU_Config * a_fmmu_config,
  					     EtherCAT_PD_Config * a_pd_config,
-@@ -47,14 +48,16 @@
+@@ -47,17 +49,29 @@
  			 a_fmmu_config,
  			 a_pd_config,
  			 a_mbx_config),
 -    m_ring_position(a_ring_position)
 +    m_ring_position(a_ring_position),
-+    m_serial(a_serial)
++    m_serial(a_serial),
++    m_mbx_counter(0)
  {}
  
  EtherCAT_SlaveHandler::EtherCAT_SlaveHandler(EC_UINT a_ring_position,
@@ -999,10 +1130,22 @@ Index: src/al/ethercat_slave_handler.cxx
      EtherCAT_SlaveConfig(*a_sconf),
 -    m_ring_position(a_ring_position)
 +    m_ring_position(a_ring_position),
-+    m_serial(a_serial)
++    m_serial(a_serial),
++    m_mbx_counter(0)
  {}
  
  EtherCAT_SlaveHandler::~EtherCAT_SlaveHandler(){}
+ 
+ 
++EC_USINT EtherCAT_SlaveHandler::get_mbx_counter()
++{
++  m_mbx_counter = 1+(m_mbx_counter % 7);
++  assert(m_mbx_counter>0);
++  assert(m_mbx_counter<=7);
++  return m_mbx_counter;
++}
+ 
++
 Index: src/al/ethercat_AL.cxx
 ===================================================================
 --- src/al/ethercat_AL.cxx	(revision 36)
@@ -1455,7 +1598,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	return ret;
  }
  
-@@ -142,112 +259,769 @@
+@@ -142,112 +259,807 @@
  	unsigned char  data [MAX_ETH_DATA];
  };
  
@@ -2120,6 +2263,43 @@ Index: src/arch/posix/ethercat_posix_drv.c
 -static pthread_mutex_t txandrx_mut;
  
 -static bool ec_rtdm_txandrx(struct EtherCAT_Frame * frame, struct netif * netif) {
++  
++// Drops a packet that has been sent with ec_posix_tx()
++// Returns true for success, false for errors
++static BOOL ec_posix_drop(struct EtherCAT_Frame * frame, struct netif * ni, int handle) 
++{
++  assert(ni != NULL);
++  assert(frame != NULL);
++  char errbuf[ERRBUF_LEN];        
++  
++  // Find rx mutex for outstanding packet
++  struct outstanding_pkt *pkt;
++  int error = pthread_mutex_lock(&ni->txandrx_mut);
++  assert(error==0);
++  pkt = low_level_lookup(frame, ni, handle); 
++   
++  // Bad handle, double rx, etc...
++  if (pkt == NULL) {
++    pthread_mutex_unlock(&ni->txandrx_mut);
++    return FALSE; 
++  }
++ 
++  BOOL success = low_level_release(frame, ni, handle);
++ 
++  if (success) {
++    ++ni->counters.sw_dropped;
++  }    
++   
++  error = pthread_mutex_unlock(&ni->txandrx_mut);
++  if (error != 0) {
++    ec_log(EC_LOG_FATAL, "%s: error unlocking mutex : %s\n", 
++           __func__, my_strerror(error,errbuf,sizeof(errbuf)));
++  }
++ 
++  return success;
++}
++ 
++
 +// Receives a packet that has been sent with ec_posix_tx()
 +// Returns TRUE for success, FALSE for errors or timeout.
 +static BOOL ec_posix_rx(struct EtherCAT_Frame * frame, struct netif * ni, int handle) 
@@ -2247,6 +2427,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +  ni->txandrx_once = ec_posix_txandrx_once;
 +  ni->tx = ec_posix_tx;
 +  ni->rx = ec_posix_rx;
++  ni->drop = ec_posix_drop;
 +  ni->rx_nowait = ec_posix_rx_nowait;
 +
  	ni->socket_private = sock;
