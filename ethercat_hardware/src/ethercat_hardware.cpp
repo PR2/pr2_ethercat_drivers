@@ -210,26 +210,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       sleep(1);
       ROS_BREAK();
     }
-
-#if 0
-    // Check for duplicate actuator names
-    if (slaves_[slave]->has_actuator_)
-    {
-      if (!actuator_names.insert(hw_->actuators_[a]->name_).second)
-      {
-        if (allow_unprogrammed)
-        {
-          ROS_WARN("Device #%02d: actuator name already in use: '%s'", a, hw_->actuators_[a]->name_.c_str());
-        }
-        else
-        {
-          ROS_FATAL("Device #%02d: actuator name already in use: '%s'", a, hw_->actuators_[a]->name_.c_str());
-          sleep(1);
-          ROS_BREAK();
-        }
-      }
-    }
-#endif
   }
 
   // Initialize diagnostic data structures
