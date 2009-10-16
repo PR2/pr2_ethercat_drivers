@@ -676,9 +676,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     //Something is wrong with the encoder, the motor, or the motor board
 
     //Disable motors
-    // TODO: don't disable motors for voltage error until all motor
-    // parameters are properly configured
-    //rv = false;
+    rv = false;
 
     const double epsilon = 0.001;
     //Try to diagnose further
