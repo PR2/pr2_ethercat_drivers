@@ -220,7 +220,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   sh->set_pd_config(pd);
 }
 
-int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
+int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   int retval = WG0X::initialize(hw, allow_unprogrammed);
   
@@ -232,7 +232,7 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
       topic = topic + "/" + string(actuator_.name_);
     pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
 
-    // Register accelerometer with HardwareInterface
+    // Register accelerometer with pr2_hardware_interface::HardwareInterface
     for (int i = 0; i < 2; ++i) 
     {
       pressure_sensors_[i].state_.data_.resize(22);
@@ -253,7 +253,7 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
         topic += actuator_.name_;
       accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
 
-      // Register accelerometer with HardwareInterface
+      // Register accelerometer with pr2_hardware_interface::HardwareInterface
       {
         accelerometer_.name_ = actuator_info_.name_;
         if (hw && !hw->addAccelerometer(&accelerometer_))
@@ -271,13 +271,13 @@ int WG06::initialize(HardwareInterface *hw, bool allow_unprogrammed)
   return retval;
 }
 
-int WG021::initialize(HardwareInterface *hw, bool allow_unprogrammed)
+int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   int retval = WG0X::initialize(hw, allow_unprogrammed);
 
-  // Register digital outs with HardwareInterface
+  // Register digital outs with pr2_hardware_interface::HardwareInterface
   struct {
-    DigitalOut *d;
+    pr2_hardware_interface::DigitalOut *d;
     string name;
   } digital_outs[] = {
     {&digital_out_A_, "_digital_out_A"},
@@ -299,7 +299,7 @@ int WG021::initialize(HardwareInterface *hw, bool allow_unprogrammed)
     }
   }
 
-  // Register projector with HardwareInterface
+  // Register projector with pr2_hardware_interface::HardwareInterface
   {
     projector_.name_ = actuator_info_.name_;
     if (hw && !hw->addProjector(&projector_))
@@ -313,7 +313,7 @@ int WG021::initialize(HardwareInterface *hw, bool allow_unprogrammed)
   return retval;
 }
 
-int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
+int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
             sh_->get_ring_position(),
@@ -378,7 +378,7 @@ int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
     backemf_constant_ = 1.0 / (actuator_info_.speed_constant_ * 2 * M_PI * 1.0/60);
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
 
-    // Register actuator with HardwareInterface
+    // Register actuator with pr2_hardware_interface::HardwareInterface
     {
       if (hw && !hw->addActuator(&actuator_))
       {
@@ -388,7 +388,7 @@ int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
       }
     }
 
-    // Register digital out with HardwareInterface
+    // Register digital out with pr2_hardware_interface::HardwareInterface
     {
       digital_out_.name_ = actuator_info_.name_;
       if (hw && !hw->addDigitalOut(&digital_out_))
@@ -433,7 +433,7 @@ int WG0X::initialize(HardwareInterface *hw, bool allow_unprogrammed)
 
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
-  ActuatorCommand &cmd = actuator_.command_;
+  pr2_hardware_interface::ActuatorCommand &cmd = actuator_.command_;
 
   // Override enable if motors are halted
   bool tmp = cmd.enable_;
@@ -480,7 +480,7 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 
 void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
-  ProjectorCommand &cmd = projector_.command_;
+  pr2_hardware_interface::ProjectorCommand &cmd = projector_.command_;
 
   // Override enable if motors are halted
   bool tmp = cmd.enable_;
@@ -577,7 +577,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
-  ActuatorState &state = actuator_.state_;
+  pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   WG0XStatus *this_status, *prev_status;
 
   this_status = (WG0XStatus *)(this_buffer + command_size_);
@@ -616,7 +616,7 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
 bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
-  ActuatorState &state = actuator_.state_;
+  pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   bool rv = true;
   double expected_voltage;
   int level = 0;
@@ -740,7 +740,7 @@ end:
 
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
-  ProjectorState &state = projector_.state_;
+  pr2_hardware_interface::ProjectorState &state = projector_.state_;
   WG021Status *this_status, *prev_status;
 
   this_status = (WG021Status *)(this_buffer + command_size_);

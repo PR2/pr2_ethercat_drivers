@@ -193,8 +193,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   memset(this_buffer_, 0, 2 * buffer_size_);
   em_->txandrx_PD(buffer_size_, this_buffer_);
 
-  // Create HardwareInterface
-  hw_ = new HardwareInterface();
+  // Create pr2_hardware_interface::HardwareInterface
+  hw_ = new pr2_hardware_interface::HardwareInterface();
   hw_->current_time_ = ros::Time::now();
   last_published_ = hw_->current_time_;
 

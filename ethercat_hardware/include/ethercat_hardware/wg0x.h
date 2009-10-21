@@ -271,7 +271,7 @@ public:
   void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   virtual ~WG0X();
 
-  virtual int initialize(HardwareInterface *, bool allow_unprogrammed=true);
+  virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
 
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
@@ -291,8 +291,8 @@ protected:
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
 
-  pr2_mechanism::Actuator actuator_;
-  pr2_mechanism::DigitalOut digital_out_;
+  pr2_hardware_interface::Actuator actuator_;
+  pr2_hardware_interface::DigitalOut digital_out_;
 
   enum
   {
@@ -384,7 +384,7 @@ class WG06 : public WG0X
 public:
   WG06() : use_ros_(true), last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
   ~WG06();
-  int initialize(HardwareInterface *, bool allow_unprogrammed=true);
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
@@ -393,8 +393,8 @@ public:
   };
   bool use_ros_;
 private:
-  pr2_mechanism::PressureSensor pressure_sensors_[2];
-  pr2_mechanism::Accelerometer accelerometer_;
+  pr2_hardware_interface::PressureSensor pressure_sensors_[2];
+  pr2_hardware_interface::Accelerometer accelerometer_;
 
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
@@ -406,7 +406,7 @@ class WG021 : public WG0X
 public:
   WG021() : projector_(digital_out_A_, digital_out_B_, digital_out_I_, digital_out_M_, digital_out_L0_, digital_out_L1_) {}
   void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
-  int initialize(HardwareInterface *, bool allow_unprogrammed=true);
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
@@ -433,13 +433,13 @@ public:
     PROJECTOR_CONFIG_STATE_LOW = 0
   };
 private:
-  pr2_mechanism::DigitalOut digital_out_A_;
-  pr2_mechanism::DigitalOut digital_out_B_;
-  pr2_mechanism::DigitalOut digital_out_I_;
-  pr2_mechanism::DigitalOut digital_out_M_;
-  pr2_mechanism::DigitalOut digital_out_L0_;
-  pr2_mechanism::DigitalOut digital_out_L1_;
-  pr2_mechanism::Projector projector_;
+  pr2_hardware_interface::DigitalOut digital_out_A_;
+  pr2_hardware_interface::DigitalOut digital_out_B_;
+  pr2_hardware_interface::DigitalOut digital_out_I_;
+  pr2_hardware_interface::DigitalOut digital_out_M_;
+  pr2_hardware_interface::DigitalOut digital_out_L0_;
+  pr2_hardware_interface::DigitalOut digital_out_L1_;
+  pr2_hardware_interface::Projector projector_;
 };
 
 #endif /* WG0X_H */

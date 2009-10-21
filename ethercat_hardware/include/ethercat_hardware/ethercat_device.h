@@ -53,8 +53,6 @@
 #include <pluginlib/class_list_macros.h>
 
 using namespace std;
-using namespace pr2_mechanism;
-
 
 struct et1x00_error_counters
 {
@@ -130,7 +128,7 @@ public:
 
   virtual ~EthercatDevice();
 
-  virtual int initialize(HardwareInterface *, bool allow_unprogrammed=0) = 0;
+  virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=0) = 0;
 
   virtual void packCommand(unsigned char *buffer, bool halt, bool reset) {}
   virtual bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}

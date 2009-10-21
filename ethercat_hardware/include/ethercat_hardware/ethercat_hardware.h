@@ -90,7 +90,7 @@ public:
 
   void printCounters(std::ostream &os=std::cout); 
 
-  HardwareInterface *hw_;
+  pr2_hardware_interface::HardwareInterface *hw_;
 
 private:
   struct netif *ni_;

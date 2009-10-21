@@ -42,7 +42,7 @@ class EK1122 : public EthercatDevice
 public:
   void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   ~EK1122();
-  int initialize(HardwareInterface *, bool);
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
 
   enum {PRODUCT_CODE = 0x4622c52};
