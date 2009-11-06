@@ -149,6 +149,11 @@ void init(char *interface)
 
 void programDevice(int device, WG0XActuatorInfo &config, char *name)
 {
+  uint32_t num_slaves = EtherCAT_AL::instance()->get_num_slaves();
+  if ((device >= (int)num_slaves) || (device < 0)) {
+    ROS_FATAL("Invalid device number %d.  Must be value between 0 and %d", device, num_slaves-1);
+    return;
+  }
  
   if (devices[device])
   {
@@ -260,15 +265,6 @@ void parseConfig(TiXmlElement *config)
 
 int main(int argc, char *argv[])
 {
-  // Must run as root
-  if (geteuid() != 0)
-  {
-    fprintf(stderr, "You must run as root!\n");
-    exit(-1);
-  }
-
-  // Keep the kernel from swapping us out
-  mlockall(MCL_CURRENT | MCL_FUTURE);
 
   // Set log level to DEBUG to allow device information to be displayed to
   // output by default
@@ -345,6 +341,16 @@ int main(int argc, char *argv[])
 
   if (!g_options.interface_)
     Usage("You must specify a network interface");
+
+  // Must run as root
+  if (geteuid() != 0)
+  {
+    fprintf(stderr, "You must run as root!\n");
+    exit(-1);
+  }
+
+  // Keep the kernel from swapping us out
+  mlockall(MCL_CURRENT | MCL_FUTURE);
 
   init(g_options.interface_);
 
