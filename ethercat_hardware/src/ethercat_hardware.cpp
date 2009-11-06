@@ -42,7 +42,7 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware() :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(), "motor_state", 1, true), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -67,6 +67,7 @@ EthercatHardware::~EthercatHardware()
   }
   delete[] buffers_;
   delete hw_;
+  motor_publisher_.stop();
   publisher_.stop();
 }
 
@@ -304,6 +305,7 @@ void EthercatHardware::publishDiagnostics()
 void EthercatHardware::update(bool reset, bool halt)
 {
   unsigned char *this_buffer, *prev_buffer;
+  bool old_halt_motors = halt_motors_;
 
   // Update current time
   hw_->current_time_ = ros::Time::now();
@@ -364,6 +366,13 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     last_published_ = hw_->current_time_;
     publishDiagnostics();
+  }
+
+  if (halt_motors_ != old_halt_motors)
+  {
+    motor_publisher_.lock();
+    motor_publisher_.msg_.halted = halt_motors_;
+    motor_publisher_.unlockAndPublish();
   }
 }
 
