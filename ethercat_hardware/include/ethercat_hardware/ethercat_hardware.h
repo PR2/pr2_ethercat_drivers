@@ -53,7 +53,7 @@
 
 #include <pluginlib/class_loader.h>
 
-#include <pr2_msgs/MotorState.h>
+#include <std_msgs/Int8.h>
 
 using namespace boost::accumulators;
 
@@ -113,7 +113,7 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
-  realtime_tools::RealtimePublisher<pr2_msgs::MotorState> motor_publisher_;
+  realtime_tools::RealtimePublisher<std_msgs::Int8> motor_publisher_;
   realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
   struct {
     accumulator_set<double, stats<tag::max, tag::mean> > acc_;

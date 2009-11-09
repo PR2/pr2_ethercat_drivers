@@ -371,7 +371,7 @@ void EthercatHardware::update(bool reset, bool halt)
   if (halt_motors_ != old_halt_motors)
   {
     motor_publisher_.lock();
-    motor_publisher_.msg_.halted = halt_motors_;
+    motor_publisher_.msg_.data = halt_motors_;
     motor_publisher_.unlockAndPublish();
   }
 }
