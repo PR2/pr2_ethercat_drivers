@@ -439,21 +439,21 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   bool tmp = cmd.enable_;
   if (halt) {
     cmd.enable_ = reset;
-    cmd.current_ = 0;
+    cmd.effort_ = 0;
   }
 
   // Compute the current
-  cmd.current_ = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
+  double current = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
   actuator_.state_.last_requested_effort_ = cmd.effort_;
-  actuator_.state_.last_requested_current_ = cmd.current_;
+  actuator_.state_.last_requested_current_ = current;
 
   // Truncate the current to limit
-  cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
+  current = max(min(current, actuator_info_.max_current_), -actuator_info_.max_current_);
 
   // Pack command structures into EtherCAT buffer
   WG0XCommand *c = (WG0XCommand *)buffer;
   memset(c, 0, command_size_);
-  c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
+  c->programmed_current_ = int(current / config_info_.nominal_current_scale_);
   c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
   c->digital_out_ = digital_out_.command_.data_;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
