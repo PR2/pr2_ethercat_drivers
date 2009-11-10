@@ -444,8 +444,8 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
 
   // Compute the current
   double current = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
-  actuator_.state_.last_requested_effort_ = cmd.effort_;
-  actuator_.state_.last_requested_current_ = current;
+  actuator_.state_.last_commanded_effort_ = cmd.effort_;
+  actuator_.state_.last_commanded_current_ = current;
 
   // Truncate the current to limit
   current = max(min(current, actuator_info_.max_current_), -actuator_info_.max_current_);
@@ -490,7 +490,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   }
   
   // Truncate the current to limit
-  projector_.state_.last_requested_current_ = cmd.current_;
+  projector_.state_.last_commanded_current_ = cmd.current_;
   cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
 
   // Pack command structures into EtherCAT buffer
@@ -600,10 +600,10 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.is_enabled_ = this_status->mode_ != MODE_OFF;
   state.run_stop_hit_ = (this_status->mode_ & MODE_UNDERVOLTAGE) != 0;
 
-  state.last_commanded_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
+  state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
 
-  state.last_commanded_effort_ = this_status->programmed_current_ * config_info_.nominal_current_scale_ * actuator_info_.motor_torque_constant_ * actuator_info_.encoder_reduction_;
+  state.last_executed_effort_ = this_status->programmed_current_ * config_info_.nominal_current_scale_ * actuator_info_.motor_torque_constant_ * actuator_info_.encoder_reduction_;
   state.last_measured_effort_ = this_status->measured_current_ * config_info_.nominal_current_scale_ * actuator_info_.motor_torque_constant_ * actuator_info_.encoder_reduction_;
 
   state.num_encoder_errors_ = this_status->num_encoder_errors_;
@@ -707,13 +707,13 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   }
 
   //Check current-loop performance
-  double last_commanded_current;
-  last_commanded_current =  prev_status->programmed_current_ * config_info_.nominal_current_scale_;
-  current_error_ = fabs(state.last_measured_current_ - last_commanded_current);
+  double last_executed_current;
+  last_executed_current =  prev_status->programmed_current_ * config_info_.nominal_current_scale_;
+  current_error_ = fabs(state.last_measured_current_ - last_executed_current);
 
   max_current_error_ = max(current_error_, max_current_error_);
 
-  if ((last_commanded_current > 0 ?
+  if ((last_executed_current > 0 ?
          prev_status->programmed_pwm_value_ < 0x2c00 :
          prev_status->programmed_pwm_value_ > -0x2c00))
   {
@@ -764,7 +764,7 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.L0_ = ((this_status->config2_ >> 0) & 0xf);
   state.pulse_replicator_ = (this_status->general_config_ & 0x1) == 0x1;
 
-  state.last_commanded_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
+  state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
 
 
