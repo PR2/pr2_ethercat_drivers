@@ -42,7 +42,7 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware() :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(), "motor_state", 1, true), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(), "motors_halted", 1, true), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -198,6 +198,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   hw_ = new pr2_hardware_interface::HardwareInterface();
   hw_->current_time_ = ros::Time::now();
   last_published_ = hw_->current_time_;
+  motor_last_published_ = hw_->current_time_;
 
   // Initialize slaves
   //set<string> actuator_names;
@@ -368,8 +369,10 @@ void EthercatHardware::update(bool reset, bool halt)
     publishDiagnostics();
   }
 
-  if (halt_motors_ != old_halt_motors)
+  if (halt_motors_ != old_halt_motors ||
+      (hw_->current_time_ - motor_last_published_) > ros::Duration(1.0))
   {
+    motor_last_published_ = hw_->current_time_;
     motor_publisher_.lock();
     motor_publisher_.msg_.data = halt_motors_;
     motor_publisher_.unlockAndPublish();

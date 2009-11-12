@@ -122,6 +122,7 @@ private:
     unsigned device_count_;
   } diagnostics_;
   ros::Time last_published_;
+  ros::Time motor_last_published_;
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
