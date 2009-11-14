@@ -724,7 +724,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   if (filtered_current_error_ > 0.2)
   {
     //complain and shut down
-    //rv = false;
+    rv = false;
     reason = "Current loop error too large (MCB failing to hit desired current)";
     level = 2;
   }
@@ -767,6 +767,13 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
 
+  in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
+  if (in_lockout_)
+  {
+    reason_ = "Safety Lockout";
+    level_ = 2;
+    return false;
+  }
 
   return true;
 }

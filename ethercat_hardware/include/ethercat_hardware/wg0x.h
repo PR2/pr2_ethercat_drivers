@@ -308,6 +308,7 @@ protected:
   string reason_;
   int level_;
   string safetyDisableString(uint8_t status);
+  bool in_lockout_;
 private:
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   int readEeprom(EthercatCom *com);
@@ -358,7 +359,6 @@ private:
   int drops_;
   int consecutive_drops_;
   int max_consecutive_drops_;
-  bool in_lockout_;
 };
 
 class WG05 : public WG0X
