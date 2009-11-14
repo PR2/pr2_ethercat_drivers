@@ -46,6 +46,7 @@ EthercatHardware::EthercatHardware() :
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
+  diagnostics_.device_count_ = 0;
 }
 
 EthercatHardware::~EthercatHardware()
