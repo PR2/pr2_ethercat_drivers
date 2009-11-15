@@ -300,6 +300,7 @@ void EthercatHardware::publishDiagnostics()
   if (publisher_.trylock())
   {
     publisher_.msg_.set_status_vec(statuses_);
+    publisher_.msg_.header.stamp = ros::Time::now();
     publisher_.unlockAndPublish();
   }
 }
