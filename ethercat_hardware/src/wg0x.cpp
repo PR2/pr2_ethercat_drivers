@@ -739,11 +739,16 @@ end:
 
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
+  bool rv = true;
   pr2_hardware_interface::ProjectorState &state = projector_.state_;
-  WG021Status *this_status, *prev_status;
 
+  WG021Status *this_status, *prev_status;
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
+
+  if (!(this_status->mode_ & MODE_ENABLE)) {
+    goto end;
+  }
 
   digital_out_.state_.data_ = this_status->digital_out_;
 
@@ -771,10 +776,12 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   {
     reason_ = "Safety Lockout";
     level_ = 2;
-    return false;
+    rv = false;
+    goto end;
   }
 
-  return true;
+end:
+  return rv;
 }
 
 int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
