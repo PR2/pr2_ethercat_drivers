@@ -607,7 +607,6 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.last_measured_effort_ = this_status->measured_current_ * config_info_.nominal_current_scale_ * actuator_info_.motor_torque_constant_ * actuator_info_.encoder_reduction_;
 
   state.num_encoder_errors_ = this_status->num_encoder_errors_;
-  state.num_communication_errors_ = 0; // TODO: communication errors are no longer reported in the process data
 
   state.motor_voltage_ = this_status->motor_voltage_ * config_info_.nominal_voltage_scale_;
 
