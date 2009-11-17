@@ -725,7 +725,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   if (filtered_current_error_ > 0.2)
   {
     //complain and shut down
-    rv = false;
+    //rv = false;
     reason = "Current loop error too large (MCB failing to hit desired current)";
     level = 2;
   }
