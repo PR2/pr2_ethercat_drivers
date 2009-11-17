@@ -308,6 +308,8 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
         ROS_BREAK();
         return -1;
     }
+    projector_.command_.enable_ = true;
+    projector_.command_.current_ = 0;
   }
 
   return retval;
