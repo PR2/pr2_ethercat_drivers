@@ -389,7 +389,13 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
   EthercatDevice *p = NULL;
   stringstream str;
   str << sh->get_product_code();
-  p = device_loader_.createClassInstance(str.str());
+  try {
+    p = device_loader_.createClassInstance(str.str());
+  }
+  catch (pluginlib::LibraryLoadException &e)
+  {
+    p = NULL;
+  }
   if (p) {
     p->construct(sh, start_address);
   }
