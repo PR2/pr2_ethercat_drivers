@@ -380,18 +380,18 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     backemf_constant_ = 1.0 / (actuator_info_.speed_constant_ * 2 * M_PI * 1.0/60);
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
 
-    // Register actuator with pr2_hardware_interface::HardwareInterface
+    bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
+    if (!isWG021)
     {
+      // Register actuator with pr2_hardware_interface::HardwareInterface
       if (hw && !hw->addActuator(&actuator_))
       {
           ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
           ROS_BREAK();
           return -1;
       }
-    }
 
-    // Register digital out with pr2_hardware_interface::HardwareInterface
-    {
+      // Register digital out with pr2_hardware_interface::HardwareInterface
       digital_out_.name_ = actuator_info_.name_;
       if (hw && !hw->addDigitalOut(&digital_out_))
       {
@@ -400,8 +400,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           return -1;
       }
     }
-
-
   }
   else if (allow_unprogrammed)
   {
