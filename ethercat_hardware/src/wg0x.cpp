@@ -610,7 +610,7 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.last_calibration_rising_edge_ = double(this_status->last_calibration_rising_edge_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
   state.last_calibration_falling_edge_ = double(this_status->last_calibration_falling_edge_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
   state.is_enabled_ = this_status->mode_ != MODE_OFF;
-  state.run_stop_hit_ = (this_status->mode_ & MODE_UNDERVOLTAGE) != 0;
+  state.halted_ = (this_status->mode_ & MODE_UNDERVOLTAGE) != 0;
 
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
