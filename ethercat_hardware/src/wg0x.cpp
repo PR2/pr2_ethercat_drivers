@@ -444,6 +444,11 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
     cmd.effort_ = 0;
   }
 
+  if (reset) {
+    level_ = 0;
+    reason_ = "OK";
+  }
+
   // Compute the current
   double current = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
   actuator_.state_.last_commanded_effort_ = cmd.effort_;
@@ -491,6 +496,11 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
     cmd.current_ = 0;
   }
   
+  if (reset) {
+    level_ = 0;
+    reason_ = "OK";
+  }
+
   // Truncate the current to limit
   projector_.state_.last_commanded_current_ = cmd.current_;
   cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
@@ -727,11 +737,12 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     //complain and shut down
     //rv = false;
     reason = "Current loop error too large (MCB failing to hit desired current)";
-    level = 2;
+    level = 1;
   }
 
 end:
-  if (level_ != 1)
+  // Only report the first error, until motor is reset.
+  if (level && level_ == 0)
   {
     level_ = level;
     reason_ = reason;
