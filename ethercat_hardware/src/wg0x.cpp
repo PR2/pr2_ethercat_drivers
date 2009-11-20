@@ -390,15 +390,15 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           ROS_BREAK();
           return -1;
       }
+    }
 
-      // Register digital out with pr2_hardware_interface::HardwareInterface
-      digital_out_.name_ = actuator_info_.name_;
-      if (hw && !hw->addDigitalOut(&digital_out_))
-      {
-          ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
-          ROS_BREAK();
-          return -1;
-      }
+    // Register digital out with pr2_hardware_interface::HardwareInterface
+    digital_out_.name_ = actuator_info_.name_;
+    if (hw && !hw->addDigitalOut(&digital_out_))
+    {
+        ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
+        ROS_BREAK();
+        return -1;
     }
   }
   else if (allow_unprogrammed)
