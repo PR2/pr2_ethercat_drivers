@@ -571,6 +571,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     if (accel_publisher_->trylock())
     {
       accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
+      accel_publisher_->msg_.header.stamp = ros::Time::now();
       accel_publisher_->msg_.set_samples_size(count);
       for (int i = 0; i < count; ++i)
       {
