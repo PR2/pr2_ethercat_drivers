@@ -42,15 +42,18 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware() :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(), "motors_halted", 1, true), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(), "motors_halted", 1, true), publisher_(ros::NodeHandle(), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
   diagnostics_.device_count_ = 0;
+  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardware::diagnosticsThreadFunc, this));
 }
 
 EthercatHardware::~EthercatHardware()
 {
+  diagnostics_thread_.interrupt();
+  diagnostics_thread_.join();
   if (slaves_)
   {
     for (uint32_t i = 0; i < num_slaves_; ++i)
@@ -67,6 +70,7 @@ EthercatHardware::~EthercatHardware()
     close_socket(ni_);
   }
   delete[] buffers_;
+  delete[] diagnostics_buffer_;
   delete hw_;
   motor_publisher_.stop();
   publisher_.stop();
@@ -190,6 +194,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   buffers_ = new unsigned char[2 * buffer_size_];
   this_buffer_ = buffers_;
   prev_buffer_ = buffers_ + buffer_size_;
+  diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Make sure motors are disabled
   memset(this_buffer_, 0, 2 * buffer_size_);
@@ -219,6 +224,22 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   publisher_.msg_.status.reserve(num_slaves_ + 1);
   statuses_.reserve(num_slaves_ + 1);
   values_.reserve(10);
+}
+
+void EthercatHardware::diagnosticsThreadFunc()
+{
+  try {
+    while (1) {
+      boost::unique_lock<boost::mutex> lock(diagnostics_mutex_);
+      while (!diagnostics_ready_) {
+        diagnostics_cond_.wait(lock);
+      }
+      diagnostics_ready_ = false;
+      publishDiagnostics();
+    }
+  } catch (boost::thread_interrupted const&) {
+    return;
+  }
 }
 
 void EthercatHardware::publishDiagnostics()
@@ -288,7 +309,7 @@ void EthercatHardware::publishDiagnostics()
 
   statuses_.push_back(status);
 
-  unsigned char *current = this_buffer_;
+  unsigned char *current = diagnostics_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
     slaves_[s]->diagnostics(status, current);
@@ -368,7 +389,9 @@ void EthercatHardware::update(bool reset, bool halt)
   if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {
     last_published_ = hw_->current_time_;
-    publishDiagnostics();
+    memcpy(diagnostics_buffer_, this_buffer_, buffer_size_);
+    diagnostics_ready_ = true;
+    diagnostics_cond_.notify_one();
   }
 
   if (halt_motors_ != old_halt_motors ||

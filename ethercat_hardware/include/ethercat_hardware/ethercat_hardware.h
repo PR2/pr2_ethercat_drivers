@@ -51,6 +51,10 @@
 #include <boost/accumulators/statistics/max.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
 
+#include <boost/thread/thread.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/condition_variable.hpp>
+
 #include <pluginlib/class_loader.h>
 
 #include <std_msgs/Bool.h>
@@ -95,6 +99,8 @@ public:
   pr2_hardware_interface::HardwareInterface *hw_;
 
 private:
+  void diagnosticsThreadFunc();
+
   struct netif *ni_;
   string interface_;
 
@@ -108,6 +114,7 @@ private:
   unsigned char *this_buffer_;
   unsigned char *prev_buffer_;
   unsigned char *buffers_;
+  unsigned char *diagnostics_buffer_;
   unsigned int buffer_size_;
 
   bool halt_motors_;
@@ -121,6 +128,11 @@ private:
     int txandrx_errors_;
     unsigned device_count_;
   } diagnostics_;
+  boost::condition_variable diagnostics_cond_;
+  boost::mutex diagnostics_mutex_;
+  boost::thread diagnostics_thread_;
+  bool diagnostics_ready_;
+
   ros::Time last_published_;
   ros::Time motor_last_published_;
   
