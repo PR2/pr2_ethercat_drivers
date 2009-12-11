@@ -10,4 +10,5 @@ rosbuild_add_library(ethercat_hardware src/ethercat_hardware.cpp src/ethercat_co
 rosbuild_remove_compile_flags(ethercat_hardware -W)
 
 rosbuild_add_executable(motorconf src/motorconf.cpp src/ethercat_hardware.cpp src/ethercat_com.cpp src/ethercat_device.cpp src/wg0x.cpp src/ek1122.cpp src/wg014.cpp)
+rosbuild_link_boost (motorconf system)
 rosbuild_remove_compile_flags(motorconf -W)
