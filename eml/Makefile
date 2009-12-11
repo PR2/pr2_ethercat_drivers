@@ -23,6 +23,10 @@ installed: wiped $(SOURCE_DIR)/unpacked Makefile
 	cp -R $(SOURCE_DIR)/lib $(SOURCE_DIR)/include $(CURDIR)/eml
 	touch installed
 
+wiped: Makefile 
+	make wipe 
+	touch wiped 
+
 clean:
 	rm -rf eml installed
 
