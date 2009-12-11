@@ -6,7 +6,7 @@ An Open Source implementation of the EtherCAT protocol
 
 </description>
 <author>Tom Panis, Klaas Gadeyne, Bob Koninckx</author>
-<license>GPL</license>
+<license>binary only</license>
 <review status="3rdparty" notes=""/>
 <url>http://ethercatmaster.berlios.de/</url>
 <export>
