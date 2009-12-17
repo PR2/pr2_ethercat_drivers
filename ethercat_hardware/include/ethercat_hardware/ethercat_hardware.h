@@ -120,7 +120,7 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
-  realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_, motor_publisher_deprecated_;
+  realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
   realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
   struct {
     accumulator_set<double, stats<tag::max, tag::mean> > acc_;

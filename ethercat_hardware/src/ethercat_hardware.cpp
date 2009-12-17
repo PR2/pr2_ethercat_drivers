@@ -42,7 +42,7 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware(const std::string& name) :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), motor_publisher_deprecated_(ros::NodeHandle(), "motors_halted", 1, true), publisher_(ros::NodeHandle(name), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), publisher_(ros::NodeHandle(name), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -73,7 +73,6 @@ EthercatHardware::~EthercatHardware()
   delete[] diagnostics_buffer_;
   delete hw_;
   motor_publisher_.stop();
-  motor_publisher_deprecated_.stop();
   publisher_.stop();
 }
 
@@ -402,9 +401,6 @@ void EthercatHardware::update(bool reset, bool halt)
     motor_publisher_.lock();
     motor_publisher_.msg_.data = halt_motors_;
     motor_publisher_.unlockAndPublish();
-    motor_publisher_deprecated_.lock();
-    motor_publisher_deprecated_.msg_.data = halt_motors_;
-    motor_publisher_deprecated_.unlockAndPublish();
   }
 }
 
