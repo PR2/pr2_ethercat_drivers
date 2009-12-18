@@ -47,7 +47,7 @@ EthercatDirectCom::~EthercatDirectCom()
   dll_ = NULL;
 }
 
-bool EthercatDirectCom::txandrx(struct EtherCAT_Frame * frame)
+bool EthercatDirectCom::txandrx_once(struct EtherCAT_Frame * frame)
 {
   assert(frame!=NULL);
   int handle = dll_->tx(frame);
@@ -56,6 +56,10 @@ bool EthercatDirectCom::txandrx(struct EtherCAT_Frame * frame)
   return dll_->rx(frame, handle);
 }
 
+bool EthercatDirectCom::txandrx(struct EtherCAT_Frame * frame)
+{
+  return dll_->txandrx(frame);
+}
 
 EthercatOobCom::EthercatOobCom(struct netif *ni) : 
   ni_(ni),
@@ -139,7 +143,7 @@ bool EthercatOobCom::unlock(unsigned line)
 
 // OOB replacement for netif->txandrx()
 // Returns true for success, false for dropped packet
-bool EthercatOobCom::txandrx(struct EtherCAT_Frame * frame)
+bool EthercatOobCom::txandrx_once(struct EtherCAT_Frame * frame)
 {
   assert(frame != NULL);
 
@@ -175,6 +179,16 @@ bool EthercatOobCom::txandrx(struct EtherCAT_Frame * frame)
   return success;
 }
 
+bool EthercatOobCom::txandrx(struct EtherCAT_Frame * frame)
+{
+  static const unsigned MAX_TRIES=10;
+  for (unsigned tries=0; tries<MAX_TRIES; ++tries) {
+    if (this->txandrx_once(frame)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Called by RT control loop to send oob data
 void EthercatOobCom::tx()

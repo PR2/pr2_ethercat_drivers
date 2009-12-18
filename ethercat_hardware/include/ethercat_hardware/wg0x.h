@@ -41,6 +41,8 @@
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
 
+enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
+
 struct WG0XMbxHdr
 {
   uint16_t address_;
@@ -50,13 +52,13 @@ struct WG0XMbxHdr
     struct
     {
       uint16_t length_:12;
-      uint16_t pad_:3;
+      uint16_t seqnum_: 3;  // bits[14:12] sequence number, 0=disable, 1-7 normal sequence number
       uint16_t write_nread_:1;
     }__attribute__ ((__packed__));
   };
   uint8_t checksum_;
 
-  void build(uint16_t address, uint16_t length, bool write_nread);
+  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum);
   bool verifyChecksum(void) const;
 }__attribute__ ((__packed__));
 
@@ -68,7 +70,7 @@ struct WG0XMbxCmd
   uint8_t data_[MBX_DATA_SIZE];
   uint8_t checksum_;
 
-  void build(unsigned address, unsigned length, bool write_nread, void const* data);
+  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data);
 }__attribute__ ((__packed__));
 
 struct WG0XSpiEepromCmd
@@ -112,6 +114,122 @@ struct WG0XSpiEepromCmd
   static const unsigned SPI_COMMAND_ADDR = 0x0230;
   static const unsigned SPI_BUFFER_ADDR = 0xF400;
 }__attribute__ ((__packed__));
+
+
+// Syncmanger control register 0x804+N*8
+struct SyncManControl {
+  union {
+    uint8_t raw;
+    struct {
+      uint8_t mode            : 2;
+      uint8_t direction       : 2;
+      uint8_t ecat_irq_enable : 1;
+      uint8_t pdi_irq_enable  : 1;
+      uint8_t watchdog_enable : 1;
+      uint8_t res1            : 1;
+    } __attribute__ ((__packed__));      
+  } __attribute__ ((__packed__));
+  //static const unsigned BASE_ADDR=0x804;
+  //static unsigned base_addr(unsigned num);
+  //void print(std::ostream &os=std::cout) const;
+} __attribute__ ((__packed__));
+
+// Syncmanger status register 0x805+N*8
+struct SyncManStatus {
+  union {
+    uint8_t raw;
+    struct {
+      uint8_t interrupt_write : 1;
+      uint8_t interrupt_read  : 1;
+      uint8_t res1            : 1;
+      uint8_t mailbox_status  : 1;
+      uint8_t buffer_status   : 2;
+      uint8_t res2            : 2;
+    } __attribute__ ((__packed__));      
+  } __attribute__ ((__packed__));
+  //static const unsigned BASE_ADDR=0x805;
+  //static unsigned base_addr(unsigned num);
+  //void print(std::ostream &os=std::cout) const;
+} __attribute__ ((__packed__));
+
+// Syncmanger activation register 0x806+N*8
+struct SyncManActivate {
+  union {
+    uint8_t raw;
+    struct {
+      uint8_t enable : 1;
+      uint8_t repeat_request : 1;
+      uint8_t res4 : 4;
+      uint8_t ecat_latch_event : 1;
+      uint8_t pdi_latch_event : 1;
+    } __attribute__ ((__packed__));      
+  } __attribute__ ((__packed__));
+  static const unsigned BASE_ADDR=0x806;
+  static unsigned baseAddress(unsigned num);
+  //void print(std::ostream &os=std::cout) const;  
+  bool writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const;
+} __attribute__ ((__packed__));
+
+// Syncmanger PDI control register 0x807+N*8
+struct SyncManPDIControl {
+  union {
+    uint8_t raw;
+    struct {
+      uint8_t deactivate : 1;
+      uint8_t repeat_ack : 1;
+      uint8_t res6 : 6;
+    } __attribute__ ((__packed__));
+  } __attribute__ ((__packed__));      
+  //static const unsigned BASE_ADDR=0x807;
+  //static unsigned base_addr(unsigned num);
+  //void print(std::ostream &os=std::cout) const;
+} __attribute__ ((__packed__));
+
+
+// For SyncManager settings REG 0x800+8*N
+struct SyncMan {
+  union {
+    uint8_t raw[8];
+    struct {
+      uint16_t start_addr;
+      uint16_t length;
+      SyncManControl control;
+      SyncManStatus status;
+      SyncManActivate activate;
+      SyncManPDIControl pdi_control;
+    } __attribute__ ((__packed__));
+  } __attribute__ ((__packed__));
+  
+  // Base address for first syncmanager
+  static const unsigned BASE_ADDR=0x800;
+  // Base address of Nth syncmanager for N=0-7
+  static unsigned baseAddress(unsigned num);
+  
+  bool readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num);
+  //void print(unsigned num, std::ostream &os=std::cout) const;
+} __attribute__ ((__packed__));
+
+
+struct WG0XSafetyDisableStatus
+{
+  uint8_t safety_disable_status_;
+  uint8_t safety_disable_status_hold_;
+  uint8_t safety_disable_count_;
+  static const unsigned BASE_ADDR = 0xA1;
+} __attribute__ ((__packed__));
+
+
+struct WG0XSafetyDisableCounters
+{
+  uint8_t undervoltage_count_;
+  uint8_t over_current_count_;
+  uint8_t board_over_temp_count_;
+  uint8_t bridge_over_temp_count_;
+  uint8_t operate_disable_count_;
+  uint8_t watchdog_disable_count_;
+  static const unsigned BASE_ADDR = 0x223;
+} __attribute__ ((__packed__));
+
 
 struct WG0XConfigInfo
 {
@@ -265,10 +383,41 @@ struct WG021Command
   uint8_t checksum_;
 }__attribute__ ((__packed__));
 
+struct MbxDiagnostics 
+{
+  MbxDiagnostics();
+  uint32_t write_errors_;
+  uint32_t read_errors_;
+  uint32_t lock_errors_;
+  uint32_t retries_;
+  uint32_t retry_errors_;
+};
+
+struct WG0XDiagnostics 
+{
+  WG0XDiagnostics();
+  void update(const WG0XSafetyDisableStatus &new_status, const WG0XSafetyDisableCounters &new_counters);
+
+  bool valid_;
+  WG0XSafetyDisableStatus safety_disable_status_;
+  WG0XSafetyDisableCounters safety_disable_counters_;  
+  
+  uint32_t safety_disable_total_;
+  uint32_t undervoltage_total_;
+  uint32_t over_current_total_;
+  uint32_t board_over_temp_total_;
+  uint32_t bridge_over_temp_total_;
+  uint32_t operate_disable_total_;
+  uint32_t watchdog_disable_total_;
+
+  uint32_t lock_errors_;
+};
+
 class WG0X : public EthercatDevice
 {
 public:
   void construct(EtherCAT_SlaveHandler *sh, int &start_address);
+  WG0X();
   virtual ~WG0X();
 
   virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
@@ -281,6 +430,7 @@ public:
   bool isProgrammed() { return actuator_info_.crc32_ != 0;}
 
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
+  virtual void collectDiagnostics(EthercatCom *com);
 
 protected:
   uint8_t fw_major_;
@@ -309,21 +459,51 @@ protected:
   int level_;
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
-private:
+
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   int readEeprom(EthercatCom *com);
   int writeEeprom(EthercatCom *com);
   int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
-  int writeMailbox(EthercatCom *com, EC_UINT address, void const *data, EC_UINT length);
-  int readMailbox(EthercatCom *com, EC_UINT address, void *data, EC_UINT length);
 
-  static const int COMMAND_PHY_ADDR = 0x1000;
-  static const int STATUS_PHY_ADDR = 0x2000;
-  static const int PRESSURE_PHY_ADDR = 0x2200;
-  static const int MBX_COMMAND_PHY_ADDR = 0x1400;
-  static const int MBX_COMMAND_SIZE = 512;
-  static const int MBX_STATUS_PHY_ADDR = 0x2400;
-  static const int MBX_STATUS_SIZE = 512;
+  int writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length);
+  int readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length);  
+
+  void publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
+  void publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
+
+private:
+  // Each WG0X device can only support one mailbox operation at a time
+  bool lockMailbox();
+  void unlockMailbox();
+  pthread_mutex_t mailbox_lock_;
+  MbxDiagnostics mailbox_diagnostics_;
+  MbxDiagnostics mailbox_publish_diagnostics_;
+
+  // Mailbox helper functions
+  int writeMailbox_(EthercatCom *com, unsigned address, void const *data, unsigned length);
+  int readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length);  
+  bool verifyDeviceStateForMailboxOperation();
+  bool clearReadMailbox(EthercatCom *com);
+  bool waitForReadMailboxReady(EthercatCom *com);
+  bool waitForWriteMailboxReady(EthercatCom *com);
+  bool readMailboxRepeatRequest(EthercatCom *com);
+  bool _readMailboxRepeatRequest(EthercatCom *com);
+  bool writeMailboxInternal(EthercatCom *com, void const *data, unsigned length);
+  bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
+  void diagnoseMailboxError(EthercatCom *com);
+
+  static const unsigned COMMAND_PHY_ADDR = 0x1000;
+  static const unsigned STATUS_PHY_ADDR = 0x2000;
+  static const unsigned PRESSURE_PHY_ADDR = 0x2200;
+  static const unsigned MBX_COMMAND_PHY_ADDR = 0x1400;
+  static const unsigned MBX_COMMAND_SIZE = 512;
+  static const unsigned MBX_STATUS_PHY_ADDR = 0x2400;
+  static const unsigned MBX_STATUS_SIZE = 512;
+
+  static const unsigned PDO_COMMAND_SYNCMAN_NUM = 0;
+  static const unsigned PDO_STATUS_SYNCMAN_NUM  = 1;
+  static const unsigned MBX_COMMAND_SYNCMAN_NUM = 2;
+  static const unsigned MBX_STATUS_SYNCMAN_NUM  = 3;
 
   enum
   {
@@ -359,6 +539,13 @@ private:
   int drops_;
   int consecutive_drops_;
   int max_consecutive_drops_;
+
+  bool lockWG0XDiagnostics();
+  bool tryLockWG0XDiagnostics();
+  void unlockWG0XDiagnostics();
+  pthread_mutex_t wg0x_diagnostics_lock_;
+  WG0XDiagnostics wg0x_publish_diagnostics_;
+  WG0XDiagnostics wg0x_collect_diagnostics_;
 };
 
 class WG05 : public WG0X

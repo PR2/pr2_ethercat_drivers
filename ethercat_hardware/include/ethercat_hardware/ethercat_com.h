@@ -48,6 +48,7 @@ protected:
   
 public:
   virtual bool txandrx(struct EtherCAT_Frame * frame)=0;
+  virtual bool txandrx_once(struct EtherCAT_Frame * frame)=0;
 
   virtual ~EthercatCom() { }
 };
@@ -60,6 +61,7 @@ public:
   ~EthercatDirectCom();
   
   bool txandrx(struct EtherCAT_Frame * frame);  
+  bool txandrx_once(struct EtherCAT_Frame * frame);
 
 protected:
   EtherCAT_DataLinkLayer *dll_;
@@ -72,6 +74,7 @@ public:
   ~EthercatOobCom();
   
   bool txandrx(struct EtherCAT_Frame * frame);
+  bool txandrx_once(struct EtherCAT_Frame * frame);
   
   void tx();
 protected:

@@ -137,7 +137,7 @@ public:
 
   void ethercatDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned numPorts);
 
-  void collectDiagnostics(EthercatCom *com);
+  virtual void collectDiagnostics(EthercatCom *com);
 
   enum AddrMode {FIXED_ADDR=0, POSITIONAL_ADDR=1};
 

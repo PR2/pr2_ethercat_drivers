@@ -166,7 +166,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
     EC_Ethernet_Frame frame(&nprd_telegram);
     
     // Send/Recv data from slave
-    if (!com->txandrx(&frame)) {
+    if (!com->txandrx_once(&frame)) {
       // no response - broken link to device
       goto end;
     }
@@ -348,7 +348,7 @@ int EthercatDevice::readWriteData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  
   EC_Ethernet_Frame frame(telegram);
   
   // Send/Recv data from slave
-  if (!com->txandrx(&frame)) {
+  if (!com->txandrx_once(&frame)) {
     return -1;
   }
 
