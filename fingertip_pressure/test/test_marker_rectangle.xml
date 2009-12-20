@@ -1,8 +1,8 @@
 <launch>
   <!-- Bring up the nodes we want to test. -->
-  <node pkg="fingertip_pressure" type="sim_sensor.py" />
-  <node pkg="fingertip_pressure" type="sensor_info.py" />
-  <node pkg="fingertip_pressure" type="rectangle_viz.py" />
+  <node pkg="fingertip_pressure" name="sim_sensor" type="sim_sensor.py" />
+  <node pkg="fingertip_pressure" name="sensor_info" type="sensor_info.py" />
+  <node pkg="fingertip_pressure" name="rectangle_viz" type="rectangle_viz.py" />
   
   <!-- Test for publication of 'scan' topic -->
   <!-- Run hztest -->
