@@ -839,6 +839,9 @@ end:
     reason_ = reason;
   }
   actuator_.state_.halted_ = !rv;
+  if (actuator_.state_.halted_)
+    this_status->measured_current_ = 0;
+
   return rv;
 }
 
