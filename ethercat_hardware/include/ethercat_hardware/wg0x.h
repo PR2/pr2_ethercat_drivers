@@ -459,6 +459,7 @@ protected:
   int level_;
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
+  uint16_t max_bridge_temperature_, max_board_temperature_;
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   int readEeprom(EthercatCom *com);

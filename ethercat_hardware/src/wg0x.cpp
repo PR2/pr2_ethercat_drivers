@@ -226,6 +226,8 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   drops_ = 0;
   consecutive_drops_ = 0;
   max_consecutive_drops_ = 0;
+  max_board_temperature_ = 0;
+  max_bridge_temperature_ = 0;
   in_lockout_ = false;
 
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
@@ -734,6 +736,9 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   if (!(state.is_enabled_)) {
     goto end;
   }
+
+  max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
+  max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
   expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
 
@@ -2057,7 +2062,9 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Last calibration rising edge", "%d", status->last_calibration_rising_edge_);
   d.addf("Last calibration falling edge", "%d", status->last_calibration_falling_edge_);
   d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Max board temperature", "%f", 0.0078125 * max_board_temperature_);
   d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Max bridge temperature", "%f", 0.0078125 * max_bridge_temperature_);
   d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Motor voltage", "%f", status->motor_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Current Loop Kp", "%d", config_info_.current_loop_kp_);
@@ -2155,7 +2162,9 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Output Start Timestamp", "%u", status->output_start_timestamp_);
   d.addf("Output Stop Timestamp", "%u", status->output_stop_timestamp_);
   d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Max board temperature", "%f", 0.0078125 * max_board_temperature_);
   d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Max bridge temperature", "%f", 0.0078125 * max_bridge_temperature_);
   d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("LED voltage", "%f", status->led_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Packet count", "%d", status->packet_count_);
