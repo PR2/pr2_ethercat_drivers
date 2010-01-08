@@ -507,7 +507,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   }
   else
   {
-    ROS_FATAL("Device #%02d (%d%05d) : Invalid CRC32 in actuator_info_", 
+    ROS_FATAL("Device #%02d (%d%05d) is not programmed, aborting...", 
               sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     ROS_BREAK();
     return -1;
