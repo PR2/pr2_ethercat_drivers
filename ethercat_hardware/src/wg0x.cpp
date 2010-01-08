@@ -837,8 +837,8 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   }
 
 end:
-  // Only report the first error, until motor is reset.
-  if (level && level_ == 0)
+  // Report the most severe error, until motor is reset.
+  if (level > level_)
   {
     level_ = level;
     reason_ = reason;
