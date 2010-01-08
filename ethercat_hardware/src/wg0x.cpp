@@ -856,10 +856,6 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
 
-  if (!(this_status->mode_ & MODE_ENABLE)) {
-    goto end;
-  }
-
   digital_out_.state_.data_ = this_status->digital_out_;
 
   state.timestamp_us_ = this_status->timestamp_;
@@ -880,6 +876,9 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
+
+  max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
+  max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
   if (in_lockout_)
