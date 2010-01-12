@@ -226,6 +226,8 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   drops_ = 0;
   consecutive_drops_ = 0;
   max_consecutive_drops_ = 0;
+  max_board_temperature_ = 0;
+  max_bridge_temperature_ = 0;
   in_lockout_ = false;
 
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
@@ -507,7 +509,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   }
   else
   {
-    ROS_FATAL("Device #%02d (%d%05d) : Invalid CRC32 in actuator_info_", 
+    ROS_FATAL("Device #%02d (%d%05d) is not programmed, aborting...", 
               sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     ROS_BREAK();
     return -1;
@@ -735,6 +737,9 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
+  max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
+  max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
+
   expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
 
   if (this_status->timestamp_ == last_timestamp_ ||
@@ -773,13 +778,14 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   max_filtered_voltage_error_ = max(filtered_voltage_error_, max_filtered_voltage_error_);
 
   // Check back-EMF consistency
-  if(filtered_voltage_error_ > 6)
+  if(filtered_voltage_error_ > 10)
   {
     reason = "Problem with the MCB, motor, encoder, or actuator model.";
     //Something is wrong with the encoder, the motor, or the motor board
 
     //Disable motors
-    //rv = false;
+    rv = false;
+    level = 2;
 
     const double epsilon = 0.001;
     //Try to diagnose further
@@ -787,25 +793,18 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     if (fabs(state.velocity_) < epsilon)
     {
       reason += " Velocity near zero - check for encoder error.";
-      level = 1;
     }
     //measured_current_ ~= 0 -> motor open-circuit likely
     else if (fabs(state.last_measured_current_) < epsilon)
     {
       reason += " Current near zero - check for unconnected motor leads.";
-      level = 1;
     }
     //motor_voltage_ ~= 0 -> motor short-circuit likely
     else if (fabs(voltage_estimate_) < epsilon)
     {
       reason += " Voltage near zero - check for short circuit.";
-      level = 1;
     }
-    //else -> current-sense failure likely
-    else
-    {
-      level = 1;
-    }
+    goto end;
   }
 
   //Check current-loop performance
@@ -823,25 +822,23 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
   }
 
-  if (filtered_current_error_ > 0.2)
+  if (filtered_current_error_ > 0.5)
   {
     //complain and shut down
-    //rv = false;
+    rv = false;
     reason = "Current loop error too large (MCB failing to hit desired current)";
-    level = 1;
+    level = 2;
+    goto end;
   }
 
 end:
-  // Only report the first error, until motor is reset.
-  if (level && level_ == 0)
+  // Report the most severe error, until motor is reset.
+  if (level > level_)
   {
     level_ = level;
     reason_ = reason;
   }
   actuator_.state_.halted_ = !rv;
-  if (actuator_.state_.halted_)
-    this_status->measured_current_ = 0;
-
   return rv;
 }
 
@@ -853,10 +850,6 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   WG021Status *this_status, *prev_status;
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
-
-  if (!(this_status->mode_ & MODE_ENABLE)) {
-    goto end;
-  }
 
   digital_out_.state_.data_ = this_status->digital_out_;
 
@@ -878,6 +871,9 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
+
+  max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
+  max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
   if (in_lockout_)
@@ -2060,7 +2056,9 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Last calibration rising edge", "%d", status->last_calibration_rising_edge_);
   d.addf("Last calibration falling edge", "%d", status->last_calibration_falling_edge_);
   d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Max board temperature", "%f", 0.0078125 * max_board_temperature_);
   d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Max bridge temperature", "%f", 0.0078125 * max_bridge_temperature_);
   d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Motor voltage", "%f", status->motor_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Current Loop Kp", "%d", config_info_.current_loop_kp_);
@@ -2158,7 +2156,9 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Output Start Timestamp", "%u", status->output_start_timestamp_);
   d.addf("Output Stop Timestamp", "%u", status->output_stop_timestamp_);
   d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
+  d.addf("Max board temperature", "%f", 0.0078125 * max_board_temperature_);
   d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
+  d.addf("Max bridge temperature", "%f", 0.0078125 * max_bridge_temperature_);
   d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("LED voltage", "%f", status->led_voltage_ * config_info_.nominal_voltage_scale_);
   d.addf("Packet count", "%d", status->packet_count_);

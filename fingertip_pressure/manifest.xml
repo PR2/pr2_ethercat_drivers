@@ -18,5 +18,8 @@ fintertip_pressure publishes ROS topics with information related to the PR2 fing
 <depend package='visualization_msgs' />
 <depend package='rostest' />
 <depend package='wxswig' />
+<export>
+  <cpp cflags="-I${prefix}/msg/cpp"/>
+</export>
 <repository>http://pr.willowgarage.com/repos</repository>
 </package>
