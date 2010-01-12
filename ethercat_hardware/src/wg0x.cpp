@@ -892,26 +892,46 @@ end:
 void WG0X::collectDiagnostics(EthercatCom *com)
 {
   //Collect safety disable information through mailbox  
-  bool success = true;
+  bool success = false;
 
   // Have parent collect diagnositcs
   EthercatDevice::collectDiagnostics(com);
 
+  // Send a packet with both a Fixed address read (NPRW) to device to make sure it is present in chain.
+  // This avoids wasting time trying to read mailbox of device that it not present on chain.
+  {
+    EC_Logic *logic = EC_Logic::instance();
+    unsigned char buf[1];
+    EC_UINT address = 0x0000;
+    NPRD_Telegram nprd_telegram(logic->get_idx(),
+                                sh_->get_station_address(),
+                                address,
+                                0 /*working counter*/,
+                                sizeof(buf),
+                                buf);
+    EC_Ethernet_Frame frame(&nprd_telegram);
+    if (!com->txandrx_once(&frame)) {
+      goto end;
+    }
+  }
+ 
   WG0XSafetyDisableStatus s;
   if (readMailbox(com, s.BASE_ADDR, &s, sizeof(s)) != 0) {
-    success = false;
+    goto end;
   }
     
   WG0XSafetyDisableCounters c;
   if (readMailbox(com, c.BASE_ADDR, &c, sizeof(c)) != 0) {
-    success = false;
+    goto end;
   }
- 
+  
+  success = true;
+
+ end:
   if (!lockWG0XDiagnostics()) {
     wg0x_collect_diagnostics_.valid_ = false;   // change this even if we did't get the lock
     return;
   }
-
 
   wg0x_collect_diagnostics_.valid_ = success;   
   if (success) {
