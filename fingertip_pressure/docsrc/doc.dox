@@ -17,6 +17,10 @@ the edges and a 3x5 array on the front. \b fingertip_pressure provides nodes
 to facilitate the visualization and interpretation of the fingertip pressure
 sensor data.
 
+\section API Stability
+
+This API has not been reviewed and should be considered unstable.
+
 \section rosapi ROS API
 
 List of nodes:
