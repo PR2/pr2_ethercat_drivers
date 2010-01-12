@@ -52,8 +52,12 @@
 
 vector<EthercatDevice *> devices;
 
-typedef pair<string, string> ActuatorPair;
-map<string, string> actuators;
+struct Actuator {
+  string motor;
+  string board;
+};
+typedef pair<string, Actuator> ActuatorPair;
+map<string, Actuator> actuators;
 
 typedef pair<string, WG0XActuatorInfo> MotorPair;
 map<string, WG0XActuatorInfo> motors;
@@ -147,7 +151,19 @@ void init(char *interface)
   }
 }
 
-void programDevice(int device, WG0XActuatorInfo &config, char *name)
+string boardName(EthercatDevice *d)
+{
+  if (dynamic_cast<WG021 *>(d)) {
+    return "wg021";
+  } else if (dynamic_cast<WG06 *>(d)) {
+    return "wg006";
+  } else if (dynamic_cast<WG05 *>(d)) {
+    return "wg005";
+  }
+  return "unknown";
+}
+
+void programDevice(int device, WG0XActuatorInfo &config, char *name, string expected_board)
 {
   uint32_t num_slaves = EtherCAT_AL::instance()->get_num_slaves();
   if ((device >= (int)num_slaves) || (device < 0)) {
@@ -158,7 +174,13 @@ void programDevice(int device, WG0XActuatorInfo &config, char *name)
   if (devices[device])
   {
     WG0X *wg = dynamic_cast<WG0X *>(devices[device]);
+
     if (wg) {
+      string board = boardName(devices[device]);
+      if (expected_board != board) {
+        ROS_FATAL("Device #%02d is a %s, but %s expects a %s\n", device, board.c_str(), name, expected_board.c_str());
+        return;
+      }
       ROS_INFO("Programming device %d, to be named: %s\n", device, name);
       strcpy(config.name_, name);
       boost::crc_32_type crc32;
@@ -187,6 +209,7 @@ static struct
   int device_;
   string motor_;
   string actuators_;
+  string board_;
 } g_options;
 
 void Usage(string msg = "")
@@ -194,6 +217,7 @@ void Usage(string msg = "")
   fprintf(stderr, "Usage: %s [options]\n", g_options.program_name_);
   fprintf(stderr, " -i, --interface <i>    Use the network interface <i>\n");
   fprintf(stderr, " -d, --device <d>       Select the device to program\n");
+  fprintf(stderr, " -b, --board <b>        Set the expected board type (wg005, wg006, wg021)\n");
   fprintf(stderr, " -p, --program          Program a motor control board\n");
   fprintf(stderr, " -n, --name <n>         Set the name of the motor control board to <n>\n");
   fprintf(stderr, "     Known actuator names:\n");
@@ -232,8 +256,10 @@ void parseConfig(TiXmlElement *config)
        elt = elt->NextSiblingElement("actuator"))
   {
     const char *name = elt->Attribute("name");
-    const char *motor = elt->Attribute("motor");
-    actuators[name] = motor;
+    struct Actuator a;
+    a.motor = elt->Attribute("motor");
+    a.board = elt->Attribute("board");
+    actuators[name] = a;
   }
 
   WG0XActuatorInfo info;
@@ -276,6 +302,7 @@ int main(int argc, char *argv[])
   g_options.program_name_ = argv[0];
   g_options.device_ = -1;
   g_options.help_ = false;
+  g_options.board_ = "";
   while (1)
   {
     static struct option long_options[] = {
@@ -283,12 +310,13 @@ int main(int argc, char *argv[])
       {"interface", required_argument, 0, 'i'},
       {"name", required_argument, 0, 'n'},
       {"device", required_argument, 0, 'd'},
+      {"board", required_argument, 0, 'b'},
       {"motor", required_argument, 0, 'm'},
       {"program", no_argument, 0, 'p'},
       {"actuators", no_argument, 0, 'a'},
     };
     int option_index = 0;
-    int c = getopt_long(argc, argv, "d:hi:m:n:pa:", long_options, &option_index);
+    int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:", long_options, &option_index);
     if (c == -1) break;
     switch (c)
     {
@@ -297,6 +325,9 @@ int main(int argc, char *argv[])
         break;
       case 'd':
         g_options.device_ = atoi(optarg);
+        break;
+      case 'b':
+        g_options.board_ = optarg;
         break;
       case 'i':
         g_options.interface_ = optarg;
@@ -356,20 +387,25 @@ int main(int argc, char *argv[])
 
   if (g_options.program_)
   {
+    string board = "wg005";
     if (!g_options.name_)
       Usage("You must specify a name");
     if (g_options.motor_ == "")
     {
       if (actuators.find(g_options.name_) == actuators.end())
         Usage("No default motor for this name");
-      g_options.motor_ = actuators[g_options.name_];
+      g_options.motor_ = actuators[g_options.name_].motor;
+      board = actuators[g_options.name_].board;
+    }
+    if (g_options.board_ != "") {
+      board = g_options.board_;
     }
     if (g_options.device_ == -1)
       Usage("You must specify a device #");
     if (motors.find(g_options.motor_) == motors.end())
       Usage("You must specify a valid motor");
 
-    programDevice(g_options.device_, motors[g_options.motor_], g_options.name_);
+    programDevice(g_options.device_, motors[g_options.motor_], g_options.name_, board);
   }
 
   return 0;
