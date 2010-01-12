@@ -778,13 +778,14 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   max_filtered_voltage_error_ = max(filtered_voltage_error_, max_filtered_voltage_error_);
 
   // Check back-EMF consistency
-  if(filtered_voltage_error_ > 6)
+  if(filtered_voltage_error_ > 10)
   {
     reason = "Problem with the MCB, motor, encoder, or actuator model.";
     //Something is wrong with the encoder, the motor, or the motor board
 
     //Disable motors
-    //rv = false;
+    rv = false;
+    level = 2;
 
     const double epsilon = 0.001;
     //Try to diagnose further
@@ -792,25 +793,18 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     if (fabs(state.velocity_) < epsilon)
     {
       reason += " Velocity near zero - check for encoder error.";
-      level = 1;
     }
     //measured_current_ ~= 0 -> motor open-circuit likely
     else if (fabs(state.last_measured_current_) < epsilon)
     {
       reason += " Current near zero - check for unconnected motor leads.";
-      level = 1;
     }
     //motor_voltage_ ~= 0 -> motor short-circuit likely
     else if (fabs(voltage_estimate_) < epsilon)
     {
       reason += " Voltage near zero - check for short circuit.";
-      level = 1;
     }
-    //else -> current-sense failure likely
-    else
-    {
-      level = 1;
-    }
+    goto end;
   }
 
   //Check current-loop performance
@@ -828,12 +822,13 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
   }
 
-  if (filtered_current_error_ > 0.2)
+  if (filtered_current_error_ > 0.5)
   {
     //complain and shut down
-    //rv = false;
+    rv = false;
     reason = "Current loop error too large (MCB failing to hit desired current)";
-    level = 1;
+    level = 2;
+    goto end;
   }
 
 end:
