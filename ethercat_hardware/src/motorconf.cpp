@@ -49,6 +49,8 @@
 #include <boost/crc.hpp>
 #include <boost/foreach.hpp>
 
+#include <net/if.h>
+#include <sys/ioctl.h>
 
 vector<EthercatDevice *> devices;
 
@@ -64,6 +66,34 @@ map<string, WG0XActuatorInfo> motors;
 
 void init(char *interface)
 {
+  // open temporary socket to use with ioctl
+  int sock = socket(PF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    int error = errno;
+    fprintf(stderr,"Couldn't open temp socket : %s", strerror(error));
+    exit(-1);
+  }
+  
+  struct ifreq ifr;
+  strncpy(ifr.ifr_name, interface, IFNAMSIZ);
+  if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+    int error = errno;
+    fprintf(stderr,"Cannot get interface flags for %s: %s\n", interface, strerror(error));
+    exit(-1);
+  }
+
+  close(sock);
+  sock = -1;
+
+  if (!(ifr.ifr_flags & IFF_UP)) {
+    fprintf(stderr,"Interface %s is not UP. Try : ifup %s\n", interface, interface);
+    exit(-1);
+  }
+  if (!(ifr.ifr_flags & IFF_RUNNING)) {
+    fprintf(stderr,"Interface %s is not RUNNING. Is cable plugged in and device powered?\n", interface);
+    exit(-1);
+  }
+
   struct netif *ni;
 
   // Initialize network interface

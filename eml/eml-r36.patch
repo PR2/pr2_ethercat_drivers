@@ -1488,7 +1488,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  		sleep(1);
  		tries++;
  	}
-@@ -88,25 +145,45 @@
+@@ -88,25 +145,38 @@
  		return -1;
  	}
  	
@@ -1509,13 +1509,6 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +            "Interface %s is not UP\n"
 +            " try : ifup %s\n"
 +            ,interface, interface);
-+    return -1;
-+  }
-+  if (!(ifr.ifr_flags & IFF_RUNNING)) {
-+    fprintf(stderr, 
-+            "Interface %s is not RUNNING\n"
-+            " is cable plugged in and device powered?\n"
-+            ,interface);
 +    return -1;
 +  }
 +
@@ -1541,7 +1534,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	}
  
  	addr.sll_family   = AF_PACKET;
-@@ -123,8 +200,41 @@
+@@ -123,8 +193,41 @@
  }
  
  int close_socket(struct netif *ni) {
@@ -1584,7 +1577,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	while(ret < 0 && tries < MAX_TRIES_SOCKET) {
  		ret = close(ni->socket_private);
  		tries++;
-@@ -132,6 +242,13 @@
+@@ -132,6 +235,13 @@
  	}
  	if(ret < 0)
  		perror("Failed to close socket");
@@ -1598,7 +1591,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	return ret;
  }
  
-@@ -142,112 +259,807 @@
+@@ -142,112 +252,807 @@
  	unsigned char  data [MAX_ETH_DATA];
  };
  
