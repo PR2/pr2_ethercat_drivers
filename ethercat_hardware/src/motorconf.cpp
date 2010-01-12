@@ -177,6 +177,11 @@ void init(char *interface)
     {
       fprintf(stderr, "Unable set device %d into OP_STATE", device->sh_->get_ring_position());
     }
+  }
+  
+  BOOST_FOREACH(EthercatDevice *device, devices)
+  {
+    if (!device) continue;
     device->initialize(NULL, true);
   }
 }
