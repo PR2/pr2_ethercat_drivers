@@ -911,6 +911,11 @@ void WG0X::collectDiagnostics(EthercatCom *com)
                                 buf);
     EC_Ethernet_Frame frame(&nprd_telegram);
     if (!com->txandrx_once(&frame)) {
+      // packet didn't come back
+      goto end;
+    }
+    if (nprd_telegram.get_wkc() != 1) {
+      // packet came back, but device didn't not respond
       goto end;
     }
   }
