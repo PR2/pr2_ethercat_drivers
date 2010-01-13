@@ -348,9 +348,9 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Publish accelerometer data as a ROS topic, if firmware is recent enough
     if (fw_major_ >= 1)
     {
-      topic = "/accelerometer/";
+      topic = "accelerometer";
       if (!actuator_.name_.empty())
-        topic += actuator_.name_;
+        topic = topic + "/" + string(actuator_.name_);
       accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
 
       // Register accelerometer with pr2_hardware_interface::HardwareInterface
