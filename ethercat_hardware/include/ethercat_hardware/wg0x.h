@@ -230,6 +230,31 @@ struct WG0XSafetyDisableCounters
   static const unsigned BASE_ADDR = 0x223;
 } __attribute__ ((__packed__));
 
+struct WG0XDiagnosticsInfo
+{
+  uint16_t config_offset_current_A_;
+  uint16_t config_offset_current_B_;
+  uint16_t supply_current_in_;
+  union {
+    uint16_t supply_current_out_;
+    uint16_t voltage_ref_;
+  } __attribute__ ((__packed__));
+  uint16_t offset_current_A_;
+  uint16_t offset_current_B_;
+  uint16_t adc_current_;
+  uint8_t unused1[2];
+  uint8_t lowside_deadtime_;
+  uint8_t highside_deadtime_;
+  uint8_t unused2[14];
+  uint8_t pdo_command_irq_count_;
+  uint8_t mbx_command_irq_count_;
+  uint8_t unused3;
+  WG0XSafetyDisableCounters safety_disable_counters_;
+  uint8_t unused4;
+  uint8_t pdi_timeout_error_count_;
+  uint8_t pdi_checksum_error_count_;
+  static const unsigned BASE_ADDR = 0x200;
+} __attribute__ ((__packed__));
 
 struct WG0XConfigInfo
 {
@@ -396,11 +421,12 @@ struct MbxDiagnostics
 struct WG0XDiagnostics 
 {
   WG0XDiagnostics();
-  void update(const WG0XSafetyDisableStatus &new_status, const WG0XSafetyDisableCounters &new_counters);
+  void update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info);
 
   bool valid_;
   WG0XSafetyDisableStatus safety_disable_status_;
-  WG0XSafetyDisableCounters safety_disable_counters_;  
+
+  WG0XDiagnosticsInfo diagnostics_info_;
   
   uint32_t safety_disable_total_;
   uint32_t undervoltage_total_;
@@ -528,7 +554,7 @@ private:
   // Board configuration parameters
   double backemf_constant_;
   static const int ACTUATOR_INFO_PAGE = 4095;
-
+  
   // Diagnostic message values
   double voltage_error_, max_voltage_error_;
   double filtered_voltage_error_, max_filtered_voltage_error_;

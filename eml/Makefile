@@ -1,18 +1,12 @@
 all: installed
 
 ARCH = $(shell uname -m)
-ifeq ($(ARCH), i686)
-TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-i686.tgz
-TARBALL = build/eml-prebuilt-i686.tgz
-else ifeq ($(ARCH), i386)
-TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-i686.tgz
-TARBALL = build/eml-prebuilt-i686.tgz
-else ifeq ($(ARCH), x86_64)
+ifeq ($(ARCH), x86_64)
 TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-x86_64.tgz
 TARBALL = build/eml-prebuilt-x86_64.tgz
 else
-	@echo "Unsupported architecture $(ARCH)"
-	@exit 2
+TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-i686.tgz
+TARBALL = build/eml-prebuilt-i686.tgz
 endif
 SOURCE_DIR = build/eml
 

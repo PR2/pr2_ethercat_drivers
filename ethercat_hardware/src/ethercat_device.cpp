@@ -94,6 +94,7 @@ void EthercatPortDiagnostics::zeroTotals()
   lostLinkTotal=0;
 }
 
+
 EthercatDeviceDiagnostics::EthercatDeviceDiagnostics() :
   errorCountersMayBeCleared_(false),
   diagnosticsValid_(false),
@@ -171,13 +172,19 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
       goto end;
     }
 
-    if (nprd_telegram.get_wkc() != 1) {
+    devicesRespondingToNodeAddress_ = nprd_telegram.get_wkc();
+    if (devicesRespondingToNodeAddress_ == 0) {
       // Device has not responded to its node address.
       if (aprd_telegram.get_adp() >= EtherCAT_AL::instance()->get_num_slaves()) {
         resetDetected_ = true;
         goto end;
       }
-    } else {
+    } 
+    else if (devicesRespondingToNodeAddress_ > 1) {
+      // Can't determine much if two (or more) devices are responding to same request.
+      goto end;
+    }
+    else {
       resetDetected_ = false;
     }    
   }
@@ -252,6 +259,10 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
   
   if (resetDetected_) {
     d.mergeSummaryf(d.ERROR, "Device reset likely");
+  }
+
+  if (devicesRespondingToNodeAddress_ > 1) {
+    d.mergeSummaryf(d.ERROR, "More than one device (%d) responded to node address", devicesRespondingToNodeAddress_);
   }
 
   if (!diagnosticsValid_) {    

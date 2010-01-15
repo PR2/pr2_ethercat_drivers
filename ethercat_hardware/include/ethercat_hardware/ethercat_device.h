@@ -118,6 +118,7 @@ protected:
 
   bool diagnosticsValid_;
   bool resetDetected_;
+  unsigned devicesRespondingToNodeAddress_;
 };
 
 

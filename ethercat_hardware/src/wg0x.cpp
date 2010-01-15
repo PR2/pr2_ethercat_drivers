@@ -161,7 +161,7 @@ WG0XDiagnostics::WG0XDiagnostics() :
   watchdog_disable_total_(0)
 {
   memset(&safety_disable_status_, 0, sizeof(safety_disable_status_));
-  memset(&safety_disable_counters_, 0, sizeof(safety_disable_counters_));
+  memset(&diagnostics_info_, 0, sizeof(diagnostics_info_));
 }
 
 /*!
@@ -170,18 +170,23 @@ WG0XDiagnostics::WG0XDiagnostics() :
  * \param new_status    newly collected safety disable status 
  * \param new_counters  newly collected safety disable counters
  */
-void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG0XSafetyDisableCounters &new_counters)
+void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info)
 {
+
   safety_disable_total_   += 0xFF & ((uint32_t)(new_status.safety_disable_count_ - safety_disable_status_.safety_disable_count_));
-  undervoltage_total_     += 0xFF & ((uint32_t)(new_counters.undervoltage_count_ - safety_disable_counters_.undervoltage_count_));
-  over_current_total_     += 0xFF & ((uint32_t)(new_counters.over_current_count_ - safety_disable_counters_.over_current_count_));
-  board_over_temp_total_  += 0xFF & ((uint32_t)(new_counters.board_over_temp_count_ - safety_disable_counters_.board_over_temp_count_));
-  bridge_over_temp_total_ += 0xFF & ((uint32_t)(new_counters.bridge_over_temp_count_ - safety_disable_counters_.bridge_over_temp_count_));
-  operate_disable_total_  += 0xFF & ((uint32_t)(new_counters.operate_disable_count_ - safety_disable_counters_.operate_disable_count_));
-  watchdog_disable_total_ += 0xFF & ((uint32_t)(new_counters.watchdog_disable_count_ - safety_disable_counters_.watchdog_disable_count_));
+  {
+    const WG0XSafetyDisableCounters &new_counters(new_diagnostics_info.safety_disable_counters_);
+    const WG0XSafetyDisableCounters &old_counters(diagnostics_info_.safety_disable_counters_);
+    undervoltage_total_     += 0xFF & ((uint32_t)(new_counters.undervoltage_count_ - old_counters.undervoltage_count_));
+    over_current_total_     += 0xFF & ((uint32_t)(new_counters.over_current_count_ - old_counters.over_current_count_));
+    board_over_temp_total_  += 0xFF & ((uint32_t)(new_counters.board_over_temp_count_ - old_counters.board_over_temp_count_));
+    bridge_over_temp_total_ += 0xFF & ((uint32_t)(new_counters.bridge_over_temp_count_ - old_counters.bridge_over_temp_count_));
+    operate_disable_total_  += 0xFF & ((uint32_t)(new_counters.operate_disable_count_ - old_counters.operate_disable_count_));
+    watchdog_disable_total_ += 0xFF & ((uint32_t)(new_counters.watchdog_disable_count_ - old_counters.watchdog_disable_count_));
+  } 
 
   safety_disable_status_   = new_status;
-  safety_disable_counters_ = new_counters;
+  diagnostics_info_        = new_diagnostics_info;
 }
 
 WG0X::WG0X()
@@ -348,9 +353,9 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Publish accelerometer data as a ROS topic, if firmware is recent enough
     if (fw_major_ >= 1)
     {
-      topic = "/accelerometer/";
+      topic = "accelerometer";
       if (!actuator_.name_.empty())
-        topic += actuator_.name_;
+        topic = topic + "/" + string(actuator_.name_);
       accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
 
       // Register accelerometer with pr2_hardware_interface::HardwareInterface
@@ -892,30 +897,55 @@ end:
 void WG0X::collectDiagnostics(EthercatCom *com)
 {
   //Collect safety disable information through mailbox  
-  bool success = true;
+  bool success = false;
 
   // Have parent collect diagnositcs
   EthercatDevice::collectDiagnostics(com);
 
-  WG0XSafetyDisableStatus s;
-  if (readMailbox(com, s.BASE_ADDR, &s, sizeof(s)) != 0) {
-    success = false;
-  }
-    
-  WG0XSafetyDisableCounters c;
-  if (readMailbox(com, c.BASE_ADDR, &c, sizeof(c)) != 0) {
-    success = false;
+  // Send a packet with both a Fixed address read (NPRW) to device to make sure it is present in chain.
+  // This avoids wasting time trying to read mailbox of device that it not present on chain.
+  {
+    EC_Logic *logic = EC_Logic::instance();
+    unsigned char buf[1];
+    EC_UINT address = 0x0000;
+    NPRD_Telegram nprd_telegram(logic->get_idx(),
+                                sh_->get_station_address(),
+                                address,
+                                0 /*working counter*/,
+                                sizeof(buf),
+                                buf);
+    EC_Ethernet_Frame frame(&nprd_telegram);
+    if (!com->txandrx_once(&frame)) {
+      // packet didn't come back
+      goto end;
+    }
+    if (nprd_telegram.get_wkc() != 1) {
+      // packet came back, but device didn't not respond
+      goto end;
+    }
   }
  
+  WG0XSafetyDisableStatus s;
+  if (readMailbox(com, s.BASE_ADDR, &s, sizeof(s)) != 0) {
+    goto end;
+  }
+    
+  WG0XDiagnosticsInfo di;
+  if (readMailbox(com, di.BASE_ADDR, &di, sizeof(di)) != 0) {
+    goto end;
+  }
+  
+  success = true;
+
+ end:
   if (!lockWG0XDiagnostics()) {
     wg0x_collect_diagnostics_.valid_ = false;   // change this even if we did't get the lock
     return;
   }
 
-
   wg0x_collect_diagnostics_.valid_ = success;   
   if (success) {
-    wg0x_collect_diagnostics_.update(s,c);
+    wg0x_collect_diagnostics_.update(s,di);
   }
 
   unlockWG0XDiagnostics();
@@ -1968,6 +1998,20 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   d.addf("Bridge Over Temp Count", "%d", p.bridge_over_temp_total_);
   d.addf("Operate Disable Count", "%d", p.operate_disable_total_);
   d.addf("Watchdog Disable Count", "%d", p.watchdog_disable_total_);
+
+  {
+    static const double WG05_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
+    const WG0XDiagnosticsInfo &di(p.diagnostics_info_);
+    //d.addf("PDO Command IRQ Count", "%d", di.pdo_command_irq_count_);
+    d.addf("MBX Command IRQ Count", "%d", di.mbx_command_irq_count_);
+    d.addf("PDI Timeout Error Count", "%d", di.pdi_timeout_error_count_);
+    d.addf("PDI Checksum Error Count", "%d", di.pdi_checksum_error_count_);
+    d.addf("Supply Current", "%f", di.supply_current_in_ * WG05_SUPPLY_CURRENT_SCALE);
+    d.addf("Configured Offset A", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_A_);
+    d.addf("Configured Offset B", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_B_);
+  }
+
+
 }
 
 void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)

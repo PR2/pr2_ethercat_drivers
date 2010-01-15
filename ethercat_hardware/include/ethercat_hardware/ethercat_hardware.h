@@ -75,12 +75,16 @@ public:
   ~EthercatHardware();
 
   /*!
-   * \brief update send most recent motor commands and retrieve updates. This command must be run at a sufficient rate or else the motors will be disabled.
+   * \brief Send most recent motor commands and retrieve updates. This command must be run at a sufficient rate or else the motors will be disabled.
+   * \param reset A boolean indicating if the motor controller boards should be reset
+   * \param halt A boolean indicating if the motors should be halted
    */
   void update(bool reset, bool halt);
 
   /*!
    * \brief Initialize the EtherCAT Master Library.
+   * \param interface The socket interface that is connected to the EtherCAT devices (e.g., eth0)
+   * \param allow_unprogrammed A boolean indicating if the driver should treat the discovery of unprogrammed boards as a fatal error.  Set to 'true' during board configuration, and set to 'false' otherwise.
    */
   void init(char *interface, bool allow_unprogrammed);
 

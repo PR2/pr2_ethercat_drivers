@@ -4,8 +4,8 @@ Package for creating a hardware interface to the robot using the EtherCAT motor 
 </description>
 <author>Rob Wheeler (email: wheeler@willowgarage.com)</author>
 <license>BSD</license>
-<review status="unreviewed" notes="API review in progress (Rob)"/>
-<url>http://pr.willowgarage.com</url>
+<review status="unreviewed" notes=""/>
+<url>http://ros.org/wiki/ethercat_hardware</url>
 <depend package="pr2_msgs"/>
 <depend package="pr2_hardware_interface"/>
 <depend package="eml"/>
@@ -19,5 +19,4 @@ Package for creating a hardware interface to the robot using the EtherCAT motor 
   <cpp cflags="-I${prefix}/include" lflags="-L${prefix}/lib -lethercat_hardware -Wl,-rpath,${prefix}/lib"/>
   <ethercat_hardware plugin="${prefix}/ethercat_device_plugin.xml" />
 </export>
-<repository>http://pr.willowgarage.com/repos</repository>
 </package>

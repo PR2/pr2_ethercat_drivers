@@ -251,6 +251,7 @@ void Usage(string msg = "")
 {
   fprintf(stderr, "Usage: %s [options]\n", g_options.program_name_);
   fprintf(stderr, " -i, --interface <i>    Use the network interface <i>\n");
+  fprintf(stderr, " -a, --actuators <file> Get the actuator definitions from file (default: actuators.conf)\n");
   fprintf(stderr, " -d, --device <d>       Select the device to program\n");
   fprintf(stderr, " -b, --board <b>        Set the expected board type (wg005, wg006, wg021)\n");
   fprintf(stderr, " -p, --program          Program a motor control board\n");
@@ -348,7 +349,7 @@ int main(int argc, char *argv[])
       {"board", required_argument, 0, 'b'},
       {"motor", required_argument, 0, 'm'},
       {"program", no_argument, 0, 'p'},
-      {"actuators", no_argument, 0, 'a'},
+      {"actuators", required_argument, 0, 'a'},
     };
     int option_index = 0;
     int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:", long_options, &option_index);
