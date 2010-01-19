@@ -1,8 +1,7 @@
 <package>
 <description brief="EtherCAT Master Library">
 
-EtherCAT Master Library
-An Open Source implementation of the EtherCAT protocol
+This is an implementation of the EtherCAT master protocol for the PR2 robot based on the work done at Flanders' Mechatronics Technology Centre.
 
 </description>
 <author>Tom Panis, Klaas Gadeyne, Bob Koninckx</author>
