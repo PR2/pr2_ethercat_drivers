@@ -2128,6 +2128,13 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   EthercatDevice::ethercatDiagnostics(d, numPorts); 
 }
 
+void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  WG0X::diagnostics(d, buffer);
+  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+
+}
+
 void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   WG021Status *status = (WG021Status *)(buffer + command_size_);

@@ -601,6 +601,7 @@ public:
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
+  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   enum
   {
     PRODUCT_CODE = 6805006
