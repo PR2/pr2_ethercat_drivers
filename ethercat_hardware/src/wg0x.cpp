@@ -827,7 +827,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
   }
 
-  if (filtered_current_error_ > 0.5)
+  if (filtered_current_error_ > 1.0)
   {
     //complain and shut down
     rv = false;
@@ -2126,6 +2126,13 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 
   unsigned numPorts = (sh_->get_product_code()==WG06::PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
   EthercatDevice::ethercatDiagnostics(d, numPorts); 
+}
+
+void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  WG0X::diagnostics(d, buffer);
+  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+
 }
 
 void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)

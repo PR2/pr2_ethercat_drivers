@@ -1,17 +1,17 @@
 <package>
 <description brief='Fingertip Pressure'>
 
-fintertip_pressure publishes ROS topics with information related to the PR2 fingertip pressure sensors. This information includes:
+This package provides access to the PR2 fingertip pressure sensors. This information includes:
 <ul>
-  <li>Visualization of the pressure map in <a href="http://ros.org/wiki/rviz">Rviz</a> or in a standalone panel.</li>
-  <li>calibration data on the data such as scaling factors, zero points and reference frames. </li>
+  <li>visualization of the pressure map in <a href="http://ros.org/wiki/rviz">Rviz</a> or in a standalone panel.</li>
+  <li>calibration-related data such as scaling factors, zero points and reference frames. </li>
 </ul>
 
 </description>
-<author>Blaise Gassend (email: blaise@willowgarage.com)</author>
+<author>Blaise Gassend/blaise@willowgarage.com</author>
 <license>BSD</license>
-<review status="unreviewed" notes=""/>
-<url>http://pr.willowgarage.com</url>
+<review status="Doc reviewed" notes=""/>
+<url>http://ros.org/wiki/fingertip_pressure</url>
 <depend package='pr2_msgs'/>
 <depend package='rospy' />
 <depend package='geometry_msgs' />
@@ -21,5 +21,4 @@ fintertip_pressure publishes ROS topics with information related to the PR2 fing
 <export>
   <cpp cflags="-I${prefix}/msg/cpp"/>
 </export>
-<repository>http://pr.willowgarage.com/repos</repository>
 </package>

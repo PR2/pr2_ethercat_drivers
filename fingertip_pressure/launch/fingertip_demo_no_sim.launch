@@ -1,0 +1,9 @@
+<launch>
+  <!--include file="$(find pr2_gazebo)/pr2_empty.launch"/-->
+  
+  <node pkg="fingertip_pressure" name="sensor_info" type="sensor_info.py" respawn="false" output="screen"/>
+  <node pkg="fingertip_pressure" name="rectangle_viz" type="rectangle_viz.py" respawn="false" output="screen"/>
+  <node pkg="fingertip_pressure" name="sphere_viz" type="sphere_viz.py" respawn="false" output="screen"/>
+  <node pkg="fingertip_pressure" name="view_fingertip_pressure" type="view_fingertip_pressure" respawn="false" output="screen"/>
+  <node name="rviz" pkg="rviz" type="rviz" respawn="false" output="screen"/>
+</launch>
