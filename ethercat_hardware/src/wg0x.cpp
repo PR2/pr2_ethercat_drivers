@@ -827,7 +827,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
   }
 
-  if (filtered_current_error_ > 0.5)
+  if (filtered_current_error_ > 1.0)
   {
     //complain and shut down
     rv = false;
