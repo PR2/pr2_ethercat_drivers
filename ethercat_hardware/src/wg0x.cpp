@@ -668,9 +668,9 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
       int32_t acc = status->accel_[count - i - 1];
       int range = (acc >> 30) & 3;
       float d = 1 << (8 - range);
-      accelerometer_.state_.samples_[i].x = 9.81 * ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].y = 9.81 * ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].z = 9.81 * ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].x = ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].y = ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
+      accelerometer_.state_.samples_[i].z = ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
     }
 
     if (accel_publisher_->trylock())
