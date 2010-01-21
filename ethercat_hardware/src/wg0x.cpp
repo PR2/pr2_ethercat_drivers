@@ -616,7 +616,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
   c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
-  c->config2_ = ((cmd.L0_ & 0xf) << 4) | ((cmd.L1_ & 0xf) << 0);
+  c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
   c->general_config_ = cmd.pulse_replicator_ == true;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 
@@ -870,7 +870,7 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.B_ = ((this_status->config0_ >> 0) & 0xf);
   state.I_ = ((this_status->config1_ >> 4) & 0xf);
   state.M_ = ((this_status->config1_ >> 0) & 0xf);
-  state.L0_ = ((this_status->config2_ >> 4) & 0xf);
+  state.L1_ = ((this_status->config2_ >> 4) & 0xf);
   state.L0_ = ((this_status->config2_ >> 0) & 0xf);
   state.pulse_replicator_ = (this_status->general_config_ & 0x1) == 0x1;
 
