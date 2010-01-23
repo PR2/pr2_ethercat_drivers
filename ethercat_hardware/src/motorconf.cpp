@@ -149,7 +149,6 @@ void init(char *interface)
     {
       WG06 *dev = new WG06();
       dev->construct(sh, start_address);
-      dev->use_ros_ = false;
       devices.push_back(dev);
     }
     else if (sh->get_product_code() == WG021::PRODUCT_CODE)
@@ -182,6 +181,7 @@ void init(char *interface)
   BOOST_FOREACH(EthercatDevice *device, devices)
   {
     if (!device) continue;
+    device->use_ros_ = false;
     device->initialize(NULL, true);
   }
 }

@@ -290,6 +290,10 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   }    
 }
 
+EthercatDevice::EthercatDevice() : use_ros_(true)
+{
+  //nothing
+}
 
 EthercatDevice::~EthercatDevice()
 {

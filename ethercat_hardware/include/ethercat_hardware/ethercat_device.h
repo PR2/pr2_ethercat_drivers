@@ -127,6 +127,7 @@ class EthercatDevice
 public:
   virtual void construct(EtherCAT_SlaveHandler *sh, int &start_address);
 
+  EthercatDevice();
   virtual ~EthercatDevice();
 
   virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=0) = 0;
@@ -165,6 +166,8 @@ public:
   inline int readWriteData(EthercatCom *com, EC_UINT address, void *buffer, EC_UINT length, AddrMode addrMode) {
     return readWriteData(com, sh_, address, buffer, length, addrMode);
   }
+
+  bool use_ros_;
 
   EtherCAT_SlaveHandler *sh_;
   unsigned int command_size_;

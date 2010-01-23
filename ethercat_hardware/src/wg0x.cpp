@@ -206,6 +206,7 @@ WG0X::~WG0X()
 {
   delete sh_->get_fmmu_config();
   delete sh_->get_pd_config();
+  delete motor_trace_;
 }
   
 WG06::~WG06()
@@ -325,12 +326,36 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   sh->set_pd_config(pd);
 }
 
+int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
+{
+  int retval = WG0X::initialize(hw, allow_unprogrammed);
+  if (!retval && use_ros_)
+  {
+    if (!WG0X::initializeMotorTrace(hw)) 
+    {
+      ROS_FATAL("Initializing motor trace failed");
+      sleep(1); // wait for ros to flush rosconsole output
+      ROS_BREAK();
+      return -1;
+    }
+  }
+  return retval;
+}
+
 int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   int retval = WG0X::initialize(hw, allow_unprogrammed);
   
   if (!retval && use_ros_)
   {
+    if (!WG0X::initializeMotorTrace(hw)) 
+    {
+      ROS_FATAL("Initializing motor trace failed");
+      sleep(1); // wait for ros to flush rosconsole output
+      ROS_BREAK();
+      return -1;
+    }
+
     // Publish pressure sensor data as a ROS topic
     string topic = "pressure";
     if (!actuator_.name_.empty())
@@ -370,7 +395,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       }
 
     }
-
   }
 
   return retval;
@@ -418,6 +442,55 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
   }
 
   return retval;
+}
+
+/**  \brief Allocates and initialized motor trace for WG0X devices than use it (WG006, WG005)
+ */
+bool WG0X::initializeMotorTrace(pr2_hardware_interface::HardwareInterface *hw)
+{
+  if (!hw) 
+    return true;
+
+  motor_trace_ = new WG0XMotorTrace(1000);
+  if (motor_trace_ == NULL) 
+    return false;
+  
+  WG0XActuatorInfo &ai_(actuator_info_);
+  ethercat_hardware::ActuatorInfo ai;
+  ai.id   = ai_.id_;
+  ai.name = std::string(ai_.name_);
+  ai.robot_name = ai_.robot_name_;
+  ai.motor_make = ai_.motor_make_;
+  ai.motor_model = ai_.motor_model_;
+  ai.max_current = ai_.max_current_;
+  ai.speed_constant = ai_.speed_constant_; 
+  ai.resistance  = ai_.resistance_;
+  ai.motor_torque_constant = ai_.motor_torque_constant_;
+  ai.encoder_reduction = ai_.encoder_reduction_;
+  ai.pulses_per_revolution = ai_.pulses_per_revolution_;
+  
+  ethercat_hardware::BoardInfo bi;
+  bi.description = "WG0X";
+  bi.product_code = sh_->get_product_code();
+  bi.pcb = board_major_;
+  bi.pca = board_minor_;
+  bi.serial = sh_->get_serial();
+  bi.firmware_major = fw_major_;
+  bi.firmware_minor = fw_minor_;
+
+  if (!motor_trace_->initialize(ai,bi))
+    return false;
+  
+  publish_motor_trace_.name_ = string(actuator_info_.name_) + "_publish_motor_trace";
+  publish_motor_trace_.command_.data_ = 0;
+  publish_motor_trace_.state_.data_ = 0;
+  if (!hw->addDigitalOut(&publish_motor_trace_)) {
+    ROS_FATAL("A digital out of the name '%s' already exists", publish_motor_trace_.name_.c_str());
+    ROS_BREAK();
+    return false;
+  }
+
+  return true;
 }
 
 int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
@@ -732,20 +805,55 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   bool rv = true;
-  double expected_voltage;
   int level = 0;
   string reason = "OK";
 
-  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  //Check motor model
+  double expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
+  double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
+  double pwm_ratio = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
+  voltage_estimate_ = supply_voltage * pwm_ratio;
+  voltage_error_ = fabs(expected_voltage - voltage_estimate_);
+  max_voltage_error_ = max(voltage_error_, max_voltage_error_);
+  filtered_voltage_error_ = 0.995 * filtered_voltage_error_ + 0.005 * voltage_error_;
+  max_filtered_voltage_error_ = max(filtered_voltage_error_, max_filtered_voltage_error_);
 
-  if (!(state.is_enabled_)) {
-    goto end;
+
+  //Check current-loop performance
+  double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
+  current_error_ = fabs(state.last_measured_current_ - last_executed_current);
+  max_current_error_ = max(current_error_, max_current_error_);
+  if ((last_executed_current > 0 ?
+         prev_status->programmed_pwm_value_ < 0x2c00 :
+         prev_status->programmed_pwm_value_ > -0x2c00))
+  {
+    filtered_current_error_ = 0.995 * filtered_current_error_ + 0.005 * current_error_;
+    max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
+  }
+
+  // Add sample to motor trace
+  if (motor_trace_ != NULL) {
+    ethercat_hardware::MotorTraceSample s;
+    s.timestamp        = state.timestamp_;
+    s.enabled          = state.is_enabled_;
+    s.supply_voltage   = supply_voltage;
+    s.motor_voltage    = state.motor_voltage_;
+    s.programmed_pwm   = pwm_ratio;
+    s.executed_current = last_executed_current;
+    s.measured_current = state.last_measured_current_;
+    s.velocity         = state.velocity_;
+    s.encoder_position = state.position_;
+    s.encoder_error_count = state.num_encoder_errors_;
+    s.voltage_error    = voltage_error_;
+    s.filtered_voltage_error = filtered_voltage_error_;
+    s.current_error    = current_error_;
+    s.filtered_current_error = filtered_current_error_;
+    motor_trace_->add_sample(s);
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
-  expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
 
   if (this_status->timestamp_ == last_timestamp_ ||
       this_status->timestamp_ == last_last_timestamp_) {
@@ -766,6 +874,10 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
+  if (!(state.is_enabled_)) {
+    goto end;
+  }
+
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
   if (in_lockout_)
   {
@@ -774,13 +886,6 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     level = 2;
     goto end;
   }
-
-  voltage_estimate_ = prev_status->supply_voltage_ * config_info_.nominal_voltage_scale_ * double(prev_status->programmed_pwm_value_) / 0x4000;
-
-  voltage_error_ = fabs(expected_voltage - voltage_estimate_);
-  max_voltage_error_ = max(voltage_error_, max_voltage_error_);
-  filtered_voltage_error_ = 0.995 * filtered_voltage_error_ + 0.005 * voltage_error_;
-  max_filtered_voltage_error_ = max(filtered_voltage_error_, max_filtered_voltage_error_);
 
   // Check back-EMF consistency
   if(filtered_voltage_error_ > 10)
@@ -812,21 +917,6 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
-  //Check current-loop performance
-  double last_executed_current;
-  last_executed_current =  prev_status->programmed_current_ * config_info_.nominal_current_scale_;
-  current_error_ = fabs(state.last_measured_current_ - last_executed_current);
-
-  max_current_error_ = max(current_error_, max_current_error_);
-
-  if ((last_executed_current > 0 ?
-         prev_status->programmed_pwm_value_ < 0x2c00 :
-         prev_status->programmed_pwm_value_ > -0x2c00))
-  {
-    filtered_current_error_ = 0.995 * filtered_current_error_ + 0.005 * current_error_;
-    max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
-  }
-
   if (filtered_current_error_ > 1.0)
   {
     //complain and shut down
@@ -843,7 +933,16 @@ end:
     level_ = level;
     reason_ = reason;
   }
-  actuator_.state_.halted_ = !rv;
+  bool halt = !rv;
+  if (motor_trace_!=NULL) {
+    if ((!actuator_.state_.halted_ && halt) || (publish_motor_trace_.command_.data_)) 
+    {
+      ROS_ERROR("Publishing motor trace");
+      publish_motor_trace_.command_.data_ = 0;
+      motor_trace_->publish();
+    }
+  }
+  actuator_.state_.halted_ = halt;
   return rv;
 }
 
