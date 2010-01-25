@@ -424,6 +424,7 @@ struct WG0XDiagnostics
   WG0XDiagnostics();
   void update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info);
 
+  bool first_;
   bool valid_;
   WG0XSafetyDisableStatus safety_disable_status_;
 

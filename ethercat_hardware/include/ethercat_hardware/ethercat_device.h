@@ -116,9 +116,10 @@ protected:
   et1x00_error_counters errorCountersPrev_;
   bool errorCountersMayBeCleared_;
 
+  bool diagnosticsFirst_;
   bool diagnosticsValid_;
   bool resetDetected_;
-  unsigned devicesRespondingToNodeAddress_;
+  int devicesRespondingToNodeAddress_;
 };
 
 

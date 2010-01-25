@@ -97,8 +97,10 @@ void EthercatPortDiagnostics::zeroTotals()
 
 EthercatDeviceDiagnostics::EthercatDeviceDiagnostics() :
   errorCountersMayBeCleared_(false),
+  diagnosticsFirst_(true),
   diagnosticsValid_(false),
-  resetDetected_(false)
+  resetDetected_(false),
+  devicesRespondingToNodeAddress_(-1)
 {
   zeroTotals();
   errorCountersPrev_.zero();
@@ -132,6 +134,7 @@ void EthercatDeviceDiagnostics::accumulate(const et1x00_error_counters &n, const
 void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler *sh)
 {
   diagnosticsValid_ = false;
+  diagnosticsFirst_ = false;
 
   // Check if device has been reset/power cycled using its node address
   // Node address initialize to 0 after device reset.
@@ -265,7 +268,11 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     d.mergeSummaryf(d.ERROR, "More than one device (%d) responded to node address", devicesRespondingToNodeAddress_);
   }
 
-  if (!diagnosticsValid_) {    
+  if (diagnosticsFirst_)
+  {
+    d.mergeSummaryf(d.WARN, "Have not yet collected diagnostics");
+  }
+  else if (!diagnosticsValid_) {    
     d.mergeSummaryf(d.WARN, "Could not collect diagnostics");
   }
 }

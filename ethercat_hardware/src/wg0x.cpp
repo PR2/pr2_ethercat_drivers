@@ -151,6 +151,7 @@ MbxDiagnostics::MbxDiagnostics() :
 }
 
 WG0XDiagnostics::WG0XDiagnostics() :
+  first_(true),
   valid_(false),
   safety_disable_total_(0),
   undervoltage_total_(0),
@@ -172,7 +173,7 @@ WG0XDiagnostics::WG0XDiagnostics() :
  */
 void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info)
 {
-
+  first_ = false;
   safety_disable_total_   += 0xFF & ((uint32_t)(new_status.safety_disable_count_ - safety_disable_status_.safety_disable_count_));
   {
     const WG0XSafetyDisableCounters &new_counters(new_diagnostics_info.safety_disable_counters_);
@@ -1038,7 +1039,8 @@ void WG0X::collectDiagnostics(EthercatCom *com)
 
  end:
   if (!lockWG0XDiagnostics()) {
-    wg0x_collect_diagnostics_.valid_ = false;   // change this even if we did't get the lock
+    wg0x_collect_diagnostics_.valid_ = false;   // change these values even if we did't get the lock
+    wg0x_collect_diagnostics_.first_ = false;   
     return;
   }
 
@@ -2080,8 +2082,12 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     wg0x_publish_diagnostics_ = wg0x_collect_diagnostics_;
     unlockWG0XDiagnostics(); 
   }
-
-  if (!wg0x_publish_diagnostics_.valid_) 
+  
+  if (wg0x_publish_diagnostics_.first_)
+  {
+    d.mergeSummaryf(d.WARN, "Have not yet collected WG0X diagnostics");
+  }
+  else if (!wg0x_publish_diagnostics_.valid_) 
   {
     d.mergeSummaryf(d.WARN, "Could not collect WG0X diagnostics");
   }
