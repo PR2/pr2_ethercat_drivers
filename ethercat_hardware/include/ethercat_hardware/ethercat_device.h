@@ -71,14 +71,22 @@ struct et1x00_error_counters
   void zero();
 } __attribute__((__packed__));
 
+struct et1x00_dl_status
+{
+  uint16_t status;
+  bool hasLink(unsigned port);
+  bool isClosed(unsigned port);
+  bool hasCommunication(unsigned port);
+  static const EC_UINT BASE_ADDR=0x110;
+} __attribute__((__packed__));
 
 struct EthercatPortDiagnostics
 {
   EthercatPortDiagnostics();
   void zeroTotals();
-  bool physicalLink;
-  bool loop;
-  bool communication;
+  bool hasLink;
+  bool isClosed;
+  bool hasCommunication;
   uint64_t rxErrorTotal;
   uint64_t invalidFrameTotal; 
   uint64_t forwardedRxErrorTotal;
@@ -132,8 +140,13 @@ public:
   virtual ~EthercatDevice();
 
   virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=0) = 0;
-
+  
+  /* 
+   * \param reset  when asserted this will clear diagnostic error conditions device safety disable
+   * \param halt   while asserted will disable actuator, usually by disabling H-bridge
+   */ 
   virtual void packCommand(unsigned char *buffer, bool halt, bool reset) {}
+
   virtual bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
 
   virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);

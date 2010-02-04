@@ -36,7 +36,7 @@
 #define WG0X_H
 
 #include <ethercat_hardware/ethercat_device.h>
-#include <ethercat_hardware/wg0x_motor_trace.h>
+#include <ethercat_hardware/motor_model.h>
 
 #include <realtime_tools/realtime_publisher.h>
 #include <pr2_msgs/PressureState.h>
@@ -487,6 +487,7 @@ protected:
   int level_;
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
+  bool resetting_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
@@ -500,7 +501,13 @@ protected:
   void publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
 
-  bool initializeMotorTrace(pr2_hardware_interface::HardwareInterface *hw);
+  bool initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw, 
+                            const string &device_description,
+                            double max_pwm_ratio, 
+                            double board_resistance,
+                            bool poor_measured_motor_voltage);
+
+  static const int PWM_MAX = 0x4000;
   
 private:
   // Each WG0X device can only support one mailbox operation at a time
@@ -556,21 +563,16 @@ private:
   };
 
   // Board configuration parameters
-  double backemf_constant_;
+
   static const int ACTUATOR_INFO_PAGE = 4095;
 
-  static const int PWM_MAX = 0x4000;
 
-  // Not all devices will need these (WG021) 
-  WG0XMotorTrace *motor_trace_; 
-  pr2_hardware_interface::DigitalOut publish_motor_trace_;  
+  // Not all devices will need this (WG021) 
+  MotorModel *motor_model_; 
+  ethercat_hardware::MotorTraceSample motor_trace_sample_;
+  pr2_hardware_interface::DigitalOut publish_motor_trace_; 
 
   // Diagnostic message values
-  double voltage_error_, max_voltage_error_;
-  double filtered_voltage_error_, max_filtered_voltage_error_;
-  double current_error_, max_current_error_;
-  double filtered_current_error_, max_filtered_current_error_;
-  double voltage_estimate_;
   uint32_t last_timestamp_;
   uint32_t last_last_timestamp_;
   int drops_;
@@ -588,7 +590,8 @@ private:
 class WG05 : public WG0X
 {
 public:
-  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
   {
     PRODUCT_CODE = 6805005

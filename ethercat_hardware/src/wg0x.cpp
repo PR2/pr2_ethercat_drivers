@@ -71,7 +71,7 @@ static unsigned int rotateRight8(unsigned in)
 
 static unsigned computeChecksum(void const *data, unsigned length)
 {
-  unsigned char *d = (unsigned char *)data;
+  const unsigned char *d = (const unsigned char *)data;
   unsigned int checksum = 0x42;
   for (unsigned int i = 0; i < length; ++i)
   {
@@ -191,6 +191,7 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
 }
 
 WG0X::WG0X()
+  
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -207,7 +208,7 @@ WG0X::~WG0X()
 {
   delete sh_->get_fmmu_config();
   delete sh_->get_pd_config();
-  delete motor_trace_;
+  delete motor_model_;
 }
   
 WG06::~WG06()
@@ -223,11 +224,6 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   reason_ = "OK";
   level_ = 0;
 
-  voltage_error_ = max_voltage_error_ = 0;
-  filtered_voltage_error_ = max_filtered_voltage_error_ = 0;
-  current_error_ = max_current_error_ = 0;
-  filtered_current_error_ = max_filtered_current_error_ = 0;
-  voltage_estimate_ = 0;
   last_timestamp_ = 0;
   last_last_timestamp_ = 0;
   drops_ = 0;
@@ -236,6 +232,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   max_board_temperature_ = 0;
   max_bridge_temperature_ = 0;
   in_lockout_ = false;
+  resetting_ = false;
 
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
   fw_minor_ = sh->get_revision() & 0xff;
@@ -332,7 +329,11 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   int retval = WG0X::initialize(hw, allow_unprogrammed);
   if (!retval && use_ros_)
   {
-    if (!WG0X::initializeMotorTrace(hw)) 
+    // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
+    bool poor_measured_motor_voltage = (board_major_ <= 2);
+    double max_pwm_ratio = double(0x3C00) / double(PWM_MAX);
+    double board_resistance = 0.8;
+    if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
     {
       ROS_FATAL("Initializing motor trace failed");
       sleep(1); // wait for ros to flush rosconsole output
@@ -349,7 +350,10 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   
   if (!retval && use_ros_)
   {
-    if (!WG0X::initializeMotorTrace(hw)) 
+    bool poor_measured_motor_voltage = false;
+    double max_pwm_ratio = double(0x2700) / double(PWM_MAX);
+    double board_resitance = 0.0;
+    if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resitance, poor_measured_motor_voltage)) 
     {
       ROS_FATAL("Initializing motor trace failed");
       sleep(1); // wait for ros to flush rosconsole output
@@ -447,13 +451,17 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
 
 /**  \brief Allocates and initialized motor trace for WG0X devices than use it (WG006, WG005)
  */
-bool WG0X::initializeMotorTrace(pr2_hardware_interface::HardwareInterface *hw)
+bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw, 
+                                const string &device_description,
+                                double max_pwm_ratio, 
+                                double board_resistance,
+                                bool   poor_measured_motor_voltage)
 {
   if (!hw) 
     return true;
 
-  motor_trace_ = new WG0XMotorTrace(1000);
-  if (motor_trace_ == NULL) 
+  motor_model_ = new MotorModel(1000);
+  if (motor_model_ == NULL) 
     return false;
   
   WG0XActuatorInfo &ai_(actuator_info_);
@@ -465,23 +473,28 @@ bool WG0X::initializeMotorTrace(pr2_hardware_interface::HardwareInterface *hw)
   ai.motor_model = ai_.motor_model_;
   ai.max_current = ai_.max_current_;
   ai.speed_constant = ai_.speed_constant_; 
-  ai.resistance  = ai_.resistance_;
+  ai.motor_resistance  = ai_.resistance_;
   ai.motor_torque_constant = ai_.motor_torque_constant_;
   ai.encoder_reduction = ai_.encoder_reduction_;
   ai.pulses_per_revolution = ai_.pulses_per_revolution_;
   
+  unsigned product_code = sh_->get_product_code();
   ethercat_hardware::BoardInfo bi;
-  bi.description = "WG0X";
-  bi.product_code = sh_->get_product_code();
+  bi.description = device_description; 
+  bi.product_code = product_code;
   bi.pcb = board_major_;
   bi.pca = board_minor_;
   bi.serial = sh_->get_serial();
   bi.firmware_major = fw_major_;
   bi.firmware_minor = fw_minor_;
+  bi.board_resistance = board_resistance;
+  bi.max_pwm_ratio    = max_pwm_ratio;
+  bi.poor_measured_motor_voltage = poor_measured_motor_voltage;
 
-  if (!motor_trace_->initialize(ai,bi))
+  if (!motor_model_->initialize(ai,bi))
     return false;
   
+  // Create digital out that can be used to force trigger of motor trace
   publish_motor_trace_.name_ = string(actuator_info_.name_) + "_publish_motor_trace";
   publish_motor_trace_.command_.data_ = 0;
   publish_motor_trace_.state_.data_ = 0;
@@ -556,7 +569,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     }
 
     actuator_.name_ = actuator_info_.name_;
-    backemf_constant_ = 1.0 / (actuator_info_.speed_constant_ * 2 * M_PI * 1.0/60);
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
 
     bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
@@ -613,18 +625,19 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   pr2_hardware_interface::ActuatorCommand &cmd = actuator_.command_;
-
-  // Override enable if motors are halted
-  bool tmp = cmd.enable_;
-  if (halt) {
-    cmd.enable_ = reset;
+  
+  if (halt) 
+  {
     cmd.effort_ = 0;
   }
 
-  if (reset) {
+  if (reset) 
+  {
     level_ = 0;
     reason_ = "OK";
+    if (motor_model_) motor_model_->reset();
   }
+  resetting_ = reset;
 
   // Compute the current
   double current = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
@@ -638,12 +651,10 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   WG0XCommand *c = (WG0XCommand *)buffer;
   memset(c, 0, command_size_);
   c->programmed_current_ = int(current / config_info_.nominal_current_scale_);
-  c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
+  c->mode_ = (cmd.enable_ && !halt) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
+  c->mode_ |= (reset ? MODE_SAFETY_RESET : 0);
   c->digital_out_ = digital_out_.command_.data_;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-
-  // Restore enable
-  cmd.enable_ = tmp;
 }
 
 void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
@@ -666,17 +677,12 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   pr2_hardware_interface::ProjectorCommand &cmd = projector_.command_;
 
-  // Override enable if motors are halted
-  bool tmp = cmd.enable_;
-  if (halt) {
-    cmd.enable_ = reset;
-    cmd.current_ = 0;
-  }
-  
+  // Override enable if motors are halted  
   if (reset) {
     level_ = 0;
     reason_ = "OK";
   }
+  resetting_ = reset;
 
   // Truncate the current to limit
   projector_.state_.last_commanded_current_ = cmd.current_;
@@ -687,22 +693,40 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   memset(c, 0, command_size_);
   c->digital_out_ = digital_out_.command_.data_;
   c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
-  c->mode_ = cmd.enable_ ? (MODE_ENABLE | MODE_CURRENT | MODE_SAFETY_RESET) : MODE_OFF;
+  c->mode_ = (cmd.enable_ && !halt) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
+  c->mode_ |= reset ? MODE_SAFETY_RESET : 0;
   c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
   c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
   c->general_config_ = cmd.pulse_replicator_ == true;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-
-  // Restore enable
-  cmd.enable_ = tmp;
 }
 
 bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
-  int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
+  bool rv = true;
+  int level = 0;
+  string reason = "OK";
 
+  int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
   WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
+
+  unsigned char* this_status = this_buffer + command_size_;
+  if (computeChecksum(this_status, status_bytes) != 0)
+  {
+    rv = false;
+    reason = "Checksum error on status data";
+    level = 2;
+    goto end;
+  }
+
+  if (computeChecksum(p, sizeof(*p)) != 0)
+  {
+    rv = false;
+    reason = "Checksum error on pressure data";
+    level = 2;
+    goto end;
+  }
 
   for (int i = 0; i < 22; ++i ) {
     pressure_sensors_[0].state_.data_[i] =
@@ -762,7 +786,18 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     }
   }
 
-  return WG0X::unpackState(this_buffer, prev_buffer);
+  if (!WG0X::unpackState(this_buffer, prev_buffer))
+  {
+    rv = false;
+  }
+
+ end:
+  if (level > level_)
+  {
+    level_ = level;
+    reason_ = reason;
+  }
+  return rv;
 }
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -787,7 +822,7 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.calibration_falling_edge_valid_ = this_status->calibration_reading_ &  LIMIT_ON_TO_OFF;
   state.last_calibration_rising_edge_ = double(this_status->last_calibration_rising_edge_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
   state.last_calibration_falling_edge_ = double(this_status->last_calibration_falling_edge_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
-  state.is_enabled_ = this_status->mode_ != MODE_OFF;
+  state.is_enabled_ = bool(this_status->mode_ & MODE_ENABLE);
 
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
@@ -802,6 +837,35 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   return verifyState(this_status, prev_status);
 }
 
+bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
+{
+  bool rv = true;
+  int level = 0;
+  string reason = "OK";
+
+  unsigned char* this_status = this_buffer + command_size_;
+  if (computeChecksum(this_status, status_size_) != 0)
+  {
+    rv = false;
+    reason = "Checksum error on status data";
+    level = 2;
+    goto end;
+  }
+
+  if (!WG0X::unpackState(this_buffer, prev_buffer))
+  {
+    rv = false;
+  }
+
+ end:
+  if (level > level_)
+  {
+    level_ = level;
+    reason_ = reason;
+  }
+  return rv;
+}
+
 bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
@@ -809,52 +873,27 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   int level = 0;
   string reason = "OK";
 
-  //Check motor model
-  double expected_voltage = state.last_measured_current_ * actuator_info_.resistance_ + state.velocity_ * actuator_info_.encoder_reduction_ * backemf_constant_;
-  double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
-  double pwm_ratio = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
-  voltage_estimate_ = supply_voltage * pwm_ratio;
-  voltage_error_ = fabs(expected_voltage - voltage_estimate_);
-  max_voltage_error_ = max(voltage_error_, max_voltage_error_);
-  filtered_voltage_error_ = 0.995 * filtered_voltage_error_ + 0.005 * voltage_error_;
-  max_filtered_voltage_error_ = max(filtered_voltage_error_, max_filtered_voltage_error_);
-
-
-  //Check current-loop performance
-  double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
-  current_error_ = fabs(state.last_measured_current_ - last_executed_current);
-  max_current_error_ = max(current_error_, max_current_error_);
-  if ((last_executed_current > 0 ?
-         prev_status->programmed_pwm_value_ < 0x2c00 :
-         prev_status->programmed_pwm_value_ > -0x2c00))
-  {
-    filtered_current_error_ = 0.995 * filtered_current_error_ + 0.005 * current_error_;
-    max_filtered_current_error_ = max(filtered_current_error_, max_filtered_current_error_);
-  }
-
-  // Add sample to motor trace
-  if (motor_trace_ != NULL) {
-    ethercat_hardware::MotorTraceSample s;
+  if (motor_model_ != NULL) {
+    // Collect data for motor model
+    ethercat_hardware::MotorTraceSample &s(motor_trace_sample_);
+    double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
+    double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
+    double pwm_ratio = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
     s.timestamp        = state.timestamp_;
     s.enabled          = state.is_enabled_;
     s.supply_voltage   = supply_voltage;
-    s.motor_voltage    = state.motor_voltage_;
+    s.measured_motor_voltage = state.motor_voltage_;
     s.programmed_pwm   = pwm_ratio;
     s.executed_current = last_executed_current;
     s.measured_current = state.last_measured_current_;
     s.velocity         = state.velocity_;
     s.encoder_position = state.position_;
     s.encoder_error_count = state.num_encoder_errors_;
-    s.voltage_error    = voltage_error_;
-    s.filtered_voltage_error = filtered_voltage_error_;
-    s.current_error    = current_error_;
-    s.filtered_current_error = filtered_current_error_;
-    motor_trace_->add_sample(s);
+    motor_model_->sample(s);
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
-
 
   if (this_status->timestamp_ == last_timestamp_ ||
       this_status->timestamp_ == last_last_timestamp_) {
@@ -875,12 +914,8 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
-  if (!(state.is_enabled_)) {
-    goto end;
-  }
-
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
-  if (in_lockout_)
+  if (in_lockout_ && !resetting_)
   {
     rv = false;
     reason = "Safety Lockout";
@@ -888,41 +923,13 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
-  // Check back-EMF consistency
-  if(filtered_voltage_error_ > 10)
-  {
-    reason = "Problem with the MCB, motor, encoder, or actuator model.";
-    //Something is wrong with the encoder, the motor, or the motor board
-
-    //Disable motors
-    rv = false;
-    level = 2;
-
-    const double epsilon = 0.001;
-    //Try to diagnose further
-    //motor_velocity == 0 -> encoder failure likely
-    if (fabs(state.velocity_) < epsilon)
-    {
-      reason += " Velocity near zero - check for encoder error.";
-    }
-    //measured_current_ ~= 0 -> motor open-circuit likely
-    else if (fabs(state.last_measured_current_) < epsilon)
-    {
-      reason += " Current near zero - check for unconnected motor leads.";
-    }
-    //motor_voltage_ ~= 0 -> motor short-circuit likely
-    else if (fabs(voltage_estimate_) < epsilon)
-    {
-      reason += " Voltage near zero - check for short circuit.";
-    }
+  if (!(state.is_enabled_)) {
     goto end;
   }
 
-  if (filtered_current_error_ > 1.0)
+  if (motor_model_ && !motor_model_->verify(reason))
   {
-    //complain and shut down
     rv = false;
-    reason = "Current loop error too large (MCB failing to hit desired current)";
     level = 2;
     goto end;
   }
@@ -935,12 +942,12 @@ end:
     reason_ = reason;
   }
   bool halt = !rv;
-  if (motor_trace_!=NULL) {
-    if ((!actuator_.state_.halted_ && halt) || (publish_motor_trace_.command_.data_)) 
+  if (motor_model_) {
+    bool halting = halt && !actuator_.state_.halted_;
+    if ( halting || publish_motor_trace_.command_.data_)
     {
-      ROS_ERROR("Publishing motor trace");
+      motor_model_->publishTrace(halting ? reason : "Publishing manually triggered"); 
       publish_motor_trace_.command_.data_ = 0;
-      motor_trace_->publish();
     }
   }
   actuator_.state_.halted_ = halt;
@@ -950,11 +957,21 @@ end:
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
-  pr2_hardware_interface::ProjectorState &state = projector_.state_;
+  int level = 0;
+  string reason = "OK";
 
+  pr2_hardware_interface::ProjectorState &state = projector_.state_;
   WG021Status *this_status, *prev_status;
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
+  
+  if (computeChecksum(this_status, status_size_) != 0)
+  {
+    rv = false;
+    reason = "Checksum error on status data";
+    level = 2;
+    goto end;
+  }
 
   digital_out_.state_.data_ = this_status->digital_out_;
 
@@ -981,15 +998,20 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
   in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
-  if (in_lockout_)
+  if (in_lockout_ && !resetting_)
   {
-    reason_ = "Safety Lockout";
-    level_ = 2;
+    reason = "Safety Lockout";
+    level = 2;
     rv = false;
     goto end;
   }
 
 end:
+  if (level > level_)
+  {
+    level_ = level;
+    reason_ = reason;
+  }
   return rv;
 }
 
@@ -1316,7 +1338,7 @@ bool WG0X::clearReadMailbox(EthercatCom *com)
             MBX_STATUS_PHY_ADDR+MBX_STATUS_SIZE-1,
             logic->get_wkc(),
             sizeof(unused),
-            unused);
+             unused);
   read_start.attach(&read_end);
   EC_Ethernet_Frame frame(&read_start);
 
@@ -1568,7 +1590,13 @@ bool WG0X::writeMailboxInternal(EthercatCom *com, void const *data, unsigned len
       return false;
     }
 
-    if (write_start.get_wkc() != 1)
+    if (write_start.get_wkc() > 1) 
+    {
+      fprintf(stderr, "%s : " ERROR_HDR
+              " multiple (%d) devices responded to mailbox write\n", __func__, write_start.get_wkc());
+      return false;
+    }
+    else if (write_start.get_wkc() != 1)
     {
       // Write to cmd mbx was refused 
       if (sends<=1) {
@@ -2155,12 +2183,12 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Resistance", "%f", actuator_info_.resistance_);
   d.addf("Motor Torque Constant", "%f", actuator_info_.motor_torque_constant_);
   d.addf("Pulses Per Revolution", "%d", actuator_info_.pulses_per_revolution_);
-  d.addf("Encoder Reduction", "%f\n", actuator_info_.encoder_reduction_);
+  d.addf("Encoder Reduction", "%f", actuator_info_.encoder_reduction_);
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
 
-  d.addf("Watchdog Limit", "%dms\n", config_info_.watchdog_limit_);
+  d.addf("Watchdog Limit", "%dms", config_info_.watchdog_limit_);
 
   string mode, prefix;
   if (status->mode_) {
@@ -2213,17 +2241,12 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Current Loop Kp", "%d", config_info_.current_loop_kp_);
   d.addf("Current Loop Ki", "%d", config_info_.current_loop_ki_);
 
-  d.addf("Motor voltage estimate", "%f", voltage_estimate_);
-  d.addf("Packet count", "%d", status->packet_count_);
+  if (motor_model_) 
+  {
+    motor_model_->diagnostics(d);
+  }
 
-  d.addf("Voltage Error", "%f", voltage_error_);
-  d.addf("Max Voltage Error", "%f", max_voltage_error_);
-  d.addf("Filtered Voltage Error", "%f", filtered_voltage_error_);
-  d.addf("Max Filtered Voltage Error", "%f", max_filtered_voltage_error_);
-  d.addf("Current Error", "%f", current_error_);
-  d.addf("Max Current Error", "%f", max_current_error_);
-  d.addf("Filtered Current Error", "%f", filtered_current_error_);
-  d.addf("Max Filtered Current Error", "%f", max_filtered_current_error_);
+  d.addf("Packet count", "%d", status->packet_count_);
 
   d.addf("Drops", "%d", drops_);
   d.addf("Consecutive Drops", "%d", consecutive_drops_);

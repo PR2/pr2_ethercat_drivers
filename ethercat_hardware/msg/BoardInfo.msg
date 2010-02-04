@@ -5,3 +5,6 @@ uint32 pca
 uint32 serial
 uint32 firmware_major
 uint32 firmware_minor
+float64 board_resistance
+float64 max_pwm_ratio
+bool poor_measured_motor_voltage

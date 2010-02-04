@@ -126,7 +126,8 @@ private:
 
   realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
   realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
-  struct {
+  struct EthercatHardwareDiagnostics {
+    EthercatHardwareDiagnostics() : acc_() { }
     accumulator_set<double, stats<tag::max, tag::mean> > acc_;
     double max_roundtrip_;
     int txandrx_errors_;
