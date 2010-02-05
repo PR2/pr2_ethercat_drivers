@@ -11,7 +11,7 @@ MotorModel::MotorModel(unsigned trace_size) :
   abs_motor_voltage_error_(0.02),
   measured_voltage_error_(0.2),
   abs_measured_voltage_error_(0.02),
-  current_error_(0.5),
+  current_error_(0.2),
   abs_current_error_(0.02),
   abs_velocity_(0.02),
   abs_measured_current_(0.02),
@@ -20,6 +20,7 @@ MotorModel::MotorModel(unsigned trace_size) :
 {
   assert(trace_size_ > 0);
   trace_buffer_.reserve(trace_size_);
+  reset();
 }
 
 void MotorModel::reset()
@@ -38,6 +39,7 @@ void MotorModel::reset()
     abs_position_delta_.reset();
   }
   filter_mutex_.unlock();
+  previous_pwm_saturated_ = false;
 }
 
 /**  \brief Initializes motor trace publisher
@@ -158,7 +160,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
 
   // Compute limits for motor voltage error.
   const double resistance_error = 0.15;    // assume motor resistance can be off by 15%
-  const double backemf_constant_error = 0.10; // assume backemf const can be off by 10%
+  const double backemf_constant_error = 0.15; // assume backemf const can be off by 15%
   double motor_voltage_error_limit = 2.0 + fabs(resistance_voltage*resistance_error) + fabs(backemf_voltage * backemf_constant_error);
   // Put max limit on back emf voltage
   motor_voltage_error_limit = min(motor_voltage_error_limit, 10.0);
@@ -188,12 +190,16 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     motor_voltage_error_.sample((motor_voltage - board_voltage) / motor_voltage_error_limit);
     abs_motor_voltage_error_.sample( fabs(motor_voltage_error_.filter()) );
     
-    // Compare measured/programmed only when board output voltage is not maxed out.   
-    if ((s.programmed_pwm < bi.max_pwm_ratio*0.99) && (s.programmed_pwm > -bi.max_pwm_ratio*0.99))
+    // Compare measured/programmed only when board output voltage is not (or was recently) maxed out.
+    bool pwm_saturated = ((s.programmed_pwm > bi.max_pwm_ratio*0.95) || (s.programmed_pwm < -bi.max_pwm_ratio*0.95));
+    double current_error = s.measured_current-s.executed_current;
+    if ((!pwm_saturated && !previous_pwm_saturated_) || 
+	(fabs(current_error + current_error_.filter()) < current_error_.filter()) )
     {
-      current_error_.sample(s.measured_current-s.executed_current);
+      current_error_.sample(current_error);
       abs_current_error_.sample( fabs(current_error_.filter()) );
     }
+    previous_pwm_saturated_ = pwm_saturated;
     
     abs_velocity_.sample(fabs(s.velocity));
     abs_board_voltage_.sample(fabs(board_voltage));
@@ -243,7 +249,7 @@ bool MotorModel::verify(std::string &reason) const
   
   // Error limits should realy be parameters, not hardcoded.
   double measured_voltage_error_limit = board_info_.poor_measured_motor_voltage ? 10.0 : 4.0;
-  double current_error_limit          = board_info_.hw_max_current * 0.3;
+  double current_error_limit          = board_info_.hw_max_current * 0.30;
 
   bool is_measured_voltage_error = abs_measured_voltage_error_.filter() > measured_voltage_error_limit;
   bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit

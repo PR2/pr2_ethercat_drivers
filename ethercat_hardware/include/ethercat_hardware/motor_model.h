@@ -32,6 +32,7 @@ protected:
   ethercat_hardware::ActuatorInfo actuator_info_;
   ethercat_hardware::BoardInfo board_info_;
   double backemf_constant_;
+  bool previous_pwm_saturated_;
   std::vector<ethercat_hardware::MotorTraceSample> trace_buffer_;
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTrace> *publisher_;
 
