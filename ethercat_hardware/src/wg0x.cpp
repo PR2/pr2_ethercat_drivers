@@ -352,8 +352,8 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     bool poor_measured_motor_voltage = false;
     double max_pwm_ratio = double(0x2700) / double(PWM_MAX);
-    double board_resitance = 0.0;
-    if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resitance, poor_measured_motor_voltage)) 
+    double board_resistance = 5.0;
+    if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
     {
       ROS_FATAL("Initializing motor trace failed");
       sleep(1); // wait for ros to flush rosconsole output
@@ -489,6 +489,7 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   bi.firmware_minor = fw_minor_;
   bi.board_resistance = board_resistance;
   bi.max_pwm_ratio    = max_pwm_ratio;
+  bi.hw_max_current   = config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_;
   bi.poor_measured_motor_voltage = poor_measured_motor_voltage;
 
   if (!motor_model_->initialize(ai,bi))
@@ -2139,7 +2140,10 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     d.addf("MBX Command IRQ Count", "%d", di.mbx_command_irq_count_);
     d.addf("PDI Timeout Error Count", "%d", di.pdi_timeout_error_count_);
     d.addf("PDI Checksum Error Count", "%d", di.pdi_checksum_error_count_);
-    d.addf("Supply Current", "%f", di.supply_current_in_ * WG05_SUPPLY_CURRENT_SCALE);
+    unsigned product = sh_->get_product_code();
+    if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) {
+      d.addf("Supply Current", "%f", di.supply_current_in_ * WG05_SUPPLY_CURRENT_SCALE);
+    }
     d.addf("Configured Offset A", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_A_);
     d.addf("Configured Offset B", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_B_);
   }

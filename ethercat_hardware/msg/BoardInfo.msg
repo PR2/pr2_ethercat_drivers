@@ -7,4 +7,5 @@ uint32 firmware_major
 uint32 firmware_minor
 float64 board_resistance
 float64 max_pwm_ratio
+float64 hw_max_current
 bool poor_measured_motor_voltage

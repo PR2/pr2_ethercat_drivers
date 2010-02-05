@@ -157,7 +157,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
   double motor_voltage =  resistance_voltage + backemf_voltage;
 
   // Compute limits for motor voltage error.
-  const double resistance_error = 0.10;       // assume motor resistance can be off by 10%
+  const double resistance_error = 0.15;    // assume motor resistance can be off by 15%
   const double backemf_constant_error = 0.10; // assume backemf const can be off by 10%
   double motor_voltage_error_limit = 2.0 + fabs(resistance_voltage*resistance_error) + fabs(backemf_voltage * backemf_constant_error);
   // Put max limit on back emf voltage
@@ -166,7 +166,8 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
   // Estimate resitance
   double est_motor_resistance = 0.0;
   double est_motor_resistance_accuracy = 0.0;
-  if (fabs(s.measured_current) > 0.020) // Don't even try calculation if the is not enough motor current
+  // Don't even try calculation if the is not enough motor current
+  if (fabs(s.measured_current) > (0.02 * bi.hw_max_current + 0.005)) 
   {
     est_motor_resistance = (board_voltage - backemf_voltage) / s.measured_current;
     // not all resistance samples are created equal.  
@@ -242,7 +243,7 @@ bool MotorModel::verify(std::string &reason) const
   
   // Error limits should realy be parameters, not hardcoded.
   double measured_voltage_error_limit = board_info_.poor_measured_motor_voltage ? 10.0 : 4.0;
-  const double current_error_limit          = 1.0;
+  double current_error_limit          = board_info_.hw_max_current * 0.3;
 
   bool is_measured_voltage_error = abs_measured_voltage_error_.filter() > measured_voltage_error_limit;
   bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit
