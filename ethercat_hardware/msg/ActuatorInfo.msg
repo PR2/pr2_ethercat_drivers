@@ -1,0 +1,11 @@
+uint32 id
+string name
+string robot_name
+string motor_make
+string motor_model
+float64 max_current
+float64 speed_constant
+float64 motor_resistance
+float64 motor_torque_constant
+float64 encoder_reduction
+float64 pulses_per_revolution

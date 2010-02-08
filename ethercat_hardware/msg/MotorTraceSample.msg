@@ -1,0 +1,17 @@
+float64 timestamp
+bool    enabled
+float64 supply_voltage
+float64 measured_motor_voltage
+float64 programmed_pwm
+float64 executed_current
+float64 measured_current
+float64 velocity
+float64 encoder_position
+uint32  encoder_error_count
+float64 motor_voltage_error_limit
+float64 filtered_motor_voltage_error
+float64 filtered_abs_motor_voltage_error
+float64 filtered_measured_voltage_error
+float64 filtered_abs_measured_voltage_error
+float64 filtered_current_error
+float64 filtered_abs_current_error

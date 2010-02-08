@@ -340,9 +340,16 @@ void EthercatHardware::update(bool reset, bool halt)
   if (halt)
     halt_motors_ = true;
 
+  // Resetting devices should clear device errors and release devices from halt.
+  // To reduce load on power system, release devices from halt, one at a time 
+  const unsigned CYCLES_PER_HALT_RELEASE = 2; // Wait two cycles between releasing each device
   if (reset)
   {
-    reset_state_ = 2 * num_slaves_;
+    reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
+  }
+  bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
+  if (reset_devices)
+  {
     halt_motors_ = false;
     diagnostics_.max_roundtrip_ = 0;
   }
@@ -351,9 +358,8 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     // Pack the command structures into the EtherCAT buffer
     // Disable the motor if they are halted or coming out of reset
-    slaves_[s]->packCommand(this_buffer,
-        halt_motors_ || (reset_state_ && (s < reset_state_)),
-        !halt_motors_ && (s == (reset_state_ / 2)));
+    bool halt_device = halt_motors_ || ((s*CYCLES_PER_HALT_RELEASE+1) < reset_state_);
+    slaves_[s]->packCommand(this_buffer, halt_device, reset_devices);
     this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
@@ -372,9 +378,10 @@ void EthercatHardware::update(bool reset, bool halt)
   prev_buffer = prev_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    // Don't halt motors during a reset
-    if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_state_)
+    if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
+    {
       halt_motors_ = true;
+    }
     this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
     prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
