@@ -61,6 +61,7 @@ bool MotorModel::initialize(const ethercat_hardware::ActuatorInfo &actuator_info
     backemf_constant_ = 1.0 / (actuator_info_.speed_constant * 2.0 * M_PI * 1.0/60.0);
   } else {
     ROS_ERROR("Invalid speed constant of %f for %s", actuator_info_.speed_constant, actuator_info_.name.c_str());
+    return false;
   }
 
   {
@@ -128,13 +129,14 @@ void MotorModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
 
   d.addf("Motor Voltage Error %", "%f",        100.0 * motor_voltage_error);
   d.addf("Max Motor Voltage Error %", "%f",    100.0 * motor_voltage_error_max);
-  d.addf("Filtered Voltage Error %", "%f",     100.0 * abs_motor_voltage_error);
-  d.addf("Max Filtered Voltage Error %", "%f", 100.0 * abs_motor_voltage_error_max);
+  d.addf("Abs Filtered Voltage Error %", "%f",     100.0 * abs_motor_voltage_error);
+  d.addf("Max Abs Filtered Voltage Error %", "%f", 100.0 * abs_motor_voltage_error_max);
 
+  // TODO change names
   d.addf("Current Error", "%f",              current_error);
   d.addf("Max Current Error", "%f",          current_error_max);
-  d.addf("Filtered Current Error", "%f",     abs_current_error);
-  d.addf("Max Filtered Current Error", "%f", abs_current_error_max);
+  d.addf("Abs Filtered Current Error", "%f",     abs_current_error);
+  d.addf("Max Abs Filtered Current Error", "%f", abs_current_error_max);
 
   d.addf("Motor Resistance Estimate", "%f", est_motor_resistance);
 }
@@ -295,7 +297,7 @@ bool MotorModel::verify(std::string &reason) const
       }
     }
   }
-  else if (current_error_.filter() > current_error_limit)
+  else if (abs_current_error_.filter() > current_error_limit)
   {
     //complain and shut down
     rv = false;
