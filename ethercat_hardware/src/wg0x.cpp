@@ -668,6 +668,10 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
       accelerometer_.command_.range_ < 0)
     accelerometer_.command_.range_ = 0;
 
+  if (accelerometer_.command_.bandwidth_ > 6 || 
+      accelerometer_.command_.bandwidth_ < 0)
+    accelerometer_.command_.bandwidth_ = 0;
+  
   c->digital_out_ = (digital_out_.command_.data_ != 0) |
     ((accelerometer_.command_.bandwidth_ & 0x7) << 1) | 
     ((accelerometer_.command_.range_ & 0x3) << 4); 
