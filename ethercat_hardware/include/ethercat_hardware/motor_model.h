@@ -24,17 +24,23 @@ public:
   void publishTrace(const std::string &reason);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void sample(const ethercat_hardware::MotorTraceSample &s);
-  bool verify(std::string &reason) const;
+  bool verify(std::string &reason, int &level) const;
   void reset();
 protected:
   unsigned trace_size_;
   unsigned trace_index_; /* index of most recent element in trace vector */
+  unsigned published_traces_;
   ethercat_hardware::ActuatorInfo actuator_info_;
   ethercat_hardware::BoardInfo board_info_;
   double backemf_constant_;
   bool previous_pwm_saturated_;
   std::vector<ethercat_hardware::MotorTraceSample> trace_buffer_;
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTrace> *publisher_;
+  double current_error_limit_;
+  int publish_delay_;
+  const char* publish_delay_reason_;
+  bool new_max_current_error_;
+  bool new_max_voltage_error_;
 
   class SimpleFilter
   {
@@ -52,7 +58,7 @@ protected:
   {
   public:
     Filter(double filter_coefficient);
-    void sample(double value);
+    bool sample(double value);
     void reset();
     double filter_max() const { return max_filtered_value_; }
   protected:
