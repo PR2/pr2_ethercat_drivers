@@ -287,6 +287,7 @@ bool MotorModel::verify(std::string &reason, int &level) const
 {
   const int ERROR = 2;
   const int WARN = 1;
+  const int GOOD = 0;
 
   bool rv=true;
 
@@ -296,17 +297,20 @@ bool MotorModel::verify(std::string &reason, int &level) const
   bool is_measured_voltage_error = abs_measured_voltage_error_.filter() > measured_voltage_error_limit;
   bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit  
 
+  int new_level = GOOD;
+  std::string new_reason;
+
   // Check back-EMF consistency
   if (is_motor_voltage_error || is_measured_voltage_error) 
   {
     rv = false;
-    level = ERROR;
-    reason = "Problem with the MCB, motor, encoder, or actuator model.";  
+    new_level = ERROR;
+    new_reason = "Problem with the MCB, motor, encoder, or actuator model.";  
 
     if( is_measured_voltage_error ) 
     {
       // Problem with board
-      reason += " Board may be damaged.";
+      new_reason += " Board may be damaged.";
     }
     else if (is_motor_voltage_error) 
     {
@@ -319,22 +323,22 @@ bool MotorModel::verify(std::string &reason, int &level) const
       if ((abs_measured_current_.filter() < current_epsilon) && (abs_current_error_.filter() > current_epsilon))
       {
         //measured_current_ ~= 0 -> motor open-circuit likely
-        reason += " Current near zero - check for unconnected motor leads.";
+        new_reason += " Current near zero - check for unconnected motor leads.";
       }
       else if (abs_board_voltage_.filter() < epsilon)
       {
         //motor_voltage_ ~= 0 -> motor short-circuit likely
-        reason += " Voltage near zero - check for short circuit.";
+        new_reason += " Voltage near zero - check for short circuit.";
       }
       else if (abs_velocity_.filter() < epsilon)
       {
         // motor_velocity == 0 -> encoder failure likely
-        reason += " Velocity near zero - check for encoder error.";
+        new_reason += " Velocity near zero - check for encoder error.";
       }
       else if (abs_position_delta_.filter() < encoder_tick_delta)
       {
         // encoder changing by only 0 or 1 ticks --> check for disconnected wire.
-        reason += " Encoder delta below 1 - check encoder wiring.";
+        new_reason += " Encoder delta below 1 - check encoder wiring.";
       }
     }
   }
@@ -342,20 +346,25 @@ bool MotorModel::verify(std::string &reason, int &level) const
   {
     //complain and shut down
     rv = false;
-    level = ERROR;
-    reason = "Current loop error too large (MCB failing to hit desired current)";
+    new_level = ERROR;
+    new_reason = "Current loop error too large (MCB failing to hit desired current)";
   }
   else if (abs_motor_voltage_error_.filter() > 0.7)
   {
-    level = WARN;
-    reason = "Potential problem with the MCB, motor, encoder, or actuator model.";  
+    new_level = WARN;
+    new_reason = "Potential problem with the MCB, motor, encoder, or actuator model.";  
   }
   else if (abs_current_error_.filter() > (current_error_limit_ * 0.7))
   {
-    level = WARN;
-    reason = "Potential current loop error (MCB failing to hit desired current)";  
+    new_level = WARN;
+    new_reason = "Potential current loop error (MCB failing to hit desired current)";  
   }
 
+  if (new_level > level) 
+  {
+    level = new_level;
+    reason = new_reason;
+  }    
 
   return rv;
 }

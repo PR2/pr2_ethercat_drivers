@@ -365,33 +365,48 @@ void EthercatHardware::update(bool reset, bool halt)
 
   // Transmit process data
   ros::Time start = ros::Time::now();
-  if (!em_->txandrx_PD(buffer_size_, this_buffer_)) {
-    ++diagnostics_.txandrx_errors_;
+
+  // Try multiple times to get proccess data to device
+  bool success = false;
+  for (unsigned i=0; i<5 && !success; ++i) {
+    // Try transmitting process data
+    success = em_->txandrx_PD(buffer_size_, this_buffer_);
+    if (!success) {
+      ++diagnostics_.txandrx_errors_;
+    } 
+    // Transmit new OOB data
+    oob_com_->tx();
   }
+
   diagnostics_.acc_((ros::Time::now() - start).toSec());
 
-  // Transmit new OOB data
-  oob_com_->tx();
-
-  // Convert status back to HW Interface
-  this_buffer = this_buffer_;
-  prev_buffer = prev_buffer_;
-  for (unsigned int s = 0; s < num_slaves_; ++s)
+  if (!success)
   {
-    if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
-    {
-      halt_motors_ = true;
-    }
-    this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
-    prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+    // If process data didn't get sent after multiple retries, stop motors
+    halt_motors_ = true;
   }
-
-  if (reset_state_)
-    --reset_state_;
-
-  unsigned char *tmp = this_buffer_;
-  this_buffer_ = prev_buffer_;
-  prev_buffer_ = tmp;
+  else
+  {
+    // Convert status back to HW Interface
+    this_buffer = this_buffer_;
+    prev_buffer = prev_buffer_;
+    for (unsigned int s = 0; s < num_slaves_; ++s)
+    {
+      if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
+      {
+        halt_motors_ = true;
+      }
+      this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+      prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+    }
+    
+    if (reset_state_)
+      --reset_state_;
+    
+    unsigned char *tmp = this_buffer_;
+    this_buffer_ = prev_buffer_;
+    prev_buffer_ = tmp;
+  }
 
   if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {
