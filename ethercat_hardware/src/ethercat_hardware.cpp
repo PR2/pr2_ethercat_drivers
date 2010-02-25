@@ -47,6 +47,7 @@ EthercatHardware::EthercatHardware(const std::string& name) :
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
   diagnostics_.device_count_ = 0;
+  diagnostics_.pd_error_ = false;
   diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardware::diagnosticsThreadFunc, this));
 }
 
@@ -257,6 +258,11 @@ void EthercatHardware::publishDiagnostics()
     status.summary(status.OK, "OK");
   }
 
+  if (diagnostics_.pd_error_)
+  {
+    status.mergeSummary(status.ERROR, "Error sending proccess data");
+  }
+
   status.add("Motors halted", halt_motors_ ? "true" : "false");
   status.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
@@ -352,6 +358,7 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     halt_motors_ = false;
     diagnostics_.max_roundtrip_ = 0;
+    diagnostics_.pd_error_ = false;
   }
 
   for (unsigned int s = 0; s < num_slaves_; ++s)
@@ -384,6 +391,7 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     // If process data didn't get sent after multiple retries, stop motors
     halt_motors_ = true;
+    diagnostics_.pd_error_ = true;
   }
   else
   {

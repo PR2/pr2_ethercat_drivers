@@ -132,6 +132,7 @@ private:
     double max_roundtrip_;
     int txandrx_errors_;
     unsigned device_count_;
+    bool pd_error_;
   } diagnostics_;
   boost::condition_variable diagnostics_cond_;
   boost::mutex diagnostics_mutex_;
