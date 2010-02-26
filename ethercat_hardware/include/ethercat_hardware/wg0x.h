@@ -36,6 +36,7 @@
 #define WG0X_H
 
 #include <ethercat_hardware/ethercat_device.h>
+#include <ethercat_hardware/motor_model.h>
 
 #include <realtime_tools/realtime_publisher.h>
 #include <pr2_msgs/PressureState.h>
@@ -232,16 +233,16 @@ struct WG0XSafetyDisableCounters
 
 struct WG0XDiagnosticsInfo
 {
-  uint16_t config_offset_current_A_;
-  uint16_t config_offset_current_B_;
+  int16_t config_offset_current_A_;
+  int16_t config_offset_current_B_;
   uint16_t supply_current_in_;
   union {
     uint16_t supply_current_out_;
     uint16_t voltage_ref_;
   } __attribute__ ((__packed__));
-  uint16_t offset_current_A_;
-  uint16_t offset_current_B_;
-  uint16_t adc_current_;
+  int16_t offset_current_A_;
+  int16_t offset_current_B_;
+  int16_t adc_current_;
   uint8_t unused1[2];
   uint8_t lowside_deadtime_;
   uint8_t highside_deadtime_;
@@ -423,6 +424,7 @@ struct WG0XDiagnostics
   WG0XDiagnostics();
   void update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info);
 
+  bool first_;
   bool valid_;
   WG0XSafetyDisableStatus safety_disable_status_;
 
@@ -485,6 +487,7 @@ protected:
   int level_;
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
+  bool resetting_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
@@ -498,6 +501,14 @@ protected:
   void publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
 
+  bool initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw, 
+                            const string &device_description,
+                            double max_pwm_ratio, 
+                            double board_resistance,
+                            bool poor_measured_motor_voltage);
+
+  static const int PWM_MAX = 0x4000;
+  
 private:
   // Each WG0X device can only support one mailbox operation at a time
   bool lockMailbox();
@@ -552,15 +563,16 @@ private:
   };
 
   // Board configuration parameters
-  double backemf_constant_;
+
   static const int ACTUATOR_INFO_PAGE = 4095;
-  
+
+
+  // Not all devices will need this (WG021) 
+  MotorModel *motor_model_; 
+  ethercat_hardware::MotorTraceSample motor_trace_sample_;
+  pr2_hardware_interface::DigitalOut publish_motor_trace_; 
+
   // Diagnostic message values
-  double voltage_error_, max_voltage_error_;
-  double filtered_voltage_error_, max_filtered_voltage_error_;
-  double current_error_, max_current_error_;
-  double filtered_current_error_, max_filtered_current_error_;
-  double voltage_estimate_;
   uint32_t last_timestamp_;
   uint32_t last_last_timestamp_;
   int drops_;
@@ -578,6 +590,8 @@ private:
 class WG05 : public WG0X
 {
 public:
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
   {
     PRODUCT_CODE = 6805005
@@ -596,7 +610,7 @@ struct WG06Pressure
 class WG06 : public WG0X
 {
 public:
-  WG06() : use_ros_(true), last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
+  WG06() : last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
   ~WG06();
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
@@ -606,7 +620,6 @@ public:
   {
     PRODUCT_CODE = 6805006
   };
-  bool use_ros_;
 private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;

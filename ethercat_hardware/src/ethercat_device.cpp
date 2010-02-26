@@ -74,6 +74,23 @@ bool et1x00_error_counters::isGreaterThan(const et1x00_error_counters &v) const
   return false;
 }
 
+bool et1x00_dl_status::hasLink(unsigned port)
+{
+  assert(port<4);
+  return status & (1<<(4+port));
+}
+
+bool et1x00_dl_status::hasCommunication(unsigned port)
+{
+  assert(port<4);
+  return status & (1<<(9+port*2));
+}
+
+bool et1x00_dl_status::isClosed(unsigned port)
+{
+  assert(port<4);
+  return status & (1<<(8+port*2));
+}
 
 void et1x00_error_counters::zero()
 {
@@ -97,8 +114,10 @@ void EthercatPortDiagnostics::zeroTotals()
 
 EthercatDeviceDiagnostics::EthercatDeviceDiagnostics() :
   errorCountersMayBeCleared_(false),
+  diagnosticsFirst_(true),
   diagnosticsValid_(false),
-  resetDetected_(false)
+  resetDetected_(false),
+  devicesRespondingToNodeAddress_(-1)
 {
   zeroTotals();
   errorCountersPrev_.zero();
@@ -132,6 +151,7 @@ void EthercatDeviceDiagnostics::accumulate(const et1x00_error_counters &n, const
 void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler *sh)
 {
   diagnosticsValid_ = false;
+  diagnosticsFirst_ = false;
 
   // Check if device has been reset/power cycled using its node address
   // Node address initialize to 0 after device reset.
@@ -142,24 +162,27 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
   { 
     // Send a packet with both a Fixed address read (NPRW) and a positional read (APRD)
     // If the NPRD has a working counter == 0, but the APRD sees the correct number of devices,
-    // then the node has likely been reset.      
+    // then the node has likely been reset.
+    // Also, get DL status regiseter with nprd telegram
     EC_Logic *logic = EC_Logic::instance();
-    unsigned char buf[1];
-    EC_UINT address = 0x0000;
+    et1x00_dl_status dl_status;
     NPRD_Telegram nprd_telegram(logic->get_idx(),
                                 sh->get_station_address(),
-                                address,
+                                dl_status.BASE_ADDR,
                                 logic->get_wkc(),
-                                sizeof(buf),
-                                buf);
-    
+                                sizeof(dl_status),
+                                (unsigned char*) &dl_status);
     // Use positional read to re-count number of devices on chain
+    unsigned char buf[1];    
+    EC_UINT address = 0x0000;
     APRD_Telegram aprd_telegram(logic->get_idx(),  // Index
                                 0,                 // Slave position on ethercat chain (auto increment address) (
                                 address,           // ESC physical memory address (start address) 
                                 logic->get_wkc(),  // Working counter
                                 sizeof(buf),       // Data Length,
                                 buf);              // Buffer to put read result into
+    
+
 
     // Chain both telegrams together
     nprd_telegram.attach(&aprd_telegram);
@@ -186,7 +209,15 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
     }
     else {
       resetDetected_ = false;
-    }    
+    }
+    
+    // fill in port status information
+    for (unsigned i=0;i<4;++i) {
+      EthercatPortDiagnostics &pt(portDiagnostics_[i]);
+      pt.hasLink  = dl_status.hasLink(i);
+      pt.isClosed = dl_status.isClosed(i);
+      pt.hasCommunication = dl_status.hasCommunication(i);
+    }
   }
 
   { // read and accumulate communication error counters
@@ -236,6 +267,7 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     assert(numPorts<4);
     numPorts=4;
   }
+  assert(numPorts > 0);
   
   d.addf("Reset detected", "%s", (resetDetected_ ? "Yes" : "No"));
   d.addf("Valid", "%s", (diagnosticsValid_ ? "Yes" : "No"));
@@ -244,9 +276,13 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
   d.addf("PDI Errors", "%lld", pdiErrorTotal_);
   ostringstream os, port;
   for (unsigned i=0; i<numPorts; ++i) {
-    const EthercatPortDiagnostics &pt(portDiagnostics_[i]);    
+    const EthercatPortDiagnostics &pt(portDiagnostics_[i]);
     port.str(""); port << " Port " << i;
-
+    os.str(""); os << "Status" << port.str();
+    d.addf(os.str(), "%s Link, %s, %s Comm", 
+           pt.hasLink ? "Has":"No",
+           pt.isClosed ? "Closed":"Open",
+           pt.hasCommunication ? "Has":"No"); 
     os.str(""); os << "RX Error" << port.str();
     d.addf(os.str(), "%lld", pt.rxErrorTotal); 
     os.str(""); os << "Forwarded RX Error" << port.str();
@@ -257,16 +293,29 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     d.addf(os.str(), "%lld", pt.lostLinkTotal);
   }
   
-  if (resetDetected_) {
+  if (resetDetected_) 
+  {
     d.mergeSummaryf(d.ERROR, "Device reset likely");
   }
-
-  if (devicesRespondingToNodeAddress_ > 1) {
+  else if (devicesRespondingToNodeAddress_ > 1) 
+  {
     d.mergeSummaryf(d.ERROR, "More than one device (%d) responded to node address", devicesRespondingToNodeAddress_);
   }
-
-  if (!diagnosticsValid_) {    
-    d.mergeSummaryf(d.WARN, "Could not collect diagnostics");
+  else {
+    if (diagnosticsFirst_)
+    {
+      d.mergeSummaryf(d.WARN, "Have not yet collected diagnostics");
+    }
+    else if (!diagnosticsValid_) 
+    {
+      d.mergeSummaryf(d.WARN, "Could not collect diagnostics");
+    }
+    else 
+    {
+      if (!portDiagnostics_[0].hasLink) {
+        d.mergeSummaryf(d.WARN, "No link on port 0");
+      }
+    }
   }
 }
 
@@ -290,6 +339,10 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   }    
 }
 
+EthercatDevice::EthercatDevice() : use_ros_(true)
+{
+  //nothing
+}
 
 EthercatDevice::~EthercatDevice()
 {
