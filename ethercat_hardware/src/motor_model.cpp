@@ -1,12 +1,15 @@
 #include <ethercat_hardware/motor_model.h>
 
-static double max(double a, double b) {return (a>b)?a:b;}
+//static double max(double a, double b) {return (a>b)?a:b;}
 static double min(double a, double b) {return (a<b)?a:b;}
 
 MotorModel::MotorModel(unsigned trace_size) : 
   trace_size_(trace_size), 
   trace_index_(0),
+  published_traces_(0),
   backemf_constant_(0.0),
+  publish_delay_(-1),
+  publish_delay_reason_(""),
   motor_voltage_error_(0.2),
   abs_motor_voltage_error_(0.02),
   measured_voltage_error_(0.2),
@@ -40,6 +43,7 @@ void MotorModel::reset()
   }
   filter_mutex_.unlock();
   previous_pwm_saturated_ = false;
+  publish_delay_ = -1;
 }
 
 /**  \brief Initializes motor trace publisher
@@ -61,7 +65,10 @@ bool MotorModel::initialize(const ethercat_hardware::ActuatorInfo &actuator_info
     backemf_constant_ = 1.0 / (actuator_info_.speed_constant * 2.0 * M_PI * 1.0/60.0);
   } else {
     ROS_ERROR("Invalid speed constant of %f for %s", actuator_info_.speed_constant, actuator_info_.name.c_str());
+    return false;
   }
+
+  current_error_limit_ = board_info_.hw_max_current * 0.30;
 
   {
     ethercat_hardware::MotorTrace &msg(publisher_->msg_);
@@ -77,6 +84,8 @@ bool MotorModel::initialize(const ethercat_hardware::ActuatorInfo &actuator_info
  */
 void MotorModel::publishTrace(const std::string &reason)
 {
+  ++published_traces_;
+
   assert(publisher_ != NULL);
   if ((publisher_==NULL) || (!publisher_->trylock())) 
     return;
@@ -93,6 +102,9 @@ void MotorModel::publishTrace(const std::string &reason)
   for (unsigned i=0; i<size; ++i) {
     msg.samples.push_back(trace_buffer_.at((trace_index_+1+i)%size));
   }
+
+  // Cancel any delayed publishing from occuring
+  publish_delay_ = -1;
 
   publisher_->unlockAndPublish();
 }
@@ -128,15 +140,18 @@ void MotorModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
 
   d.addf("Motor Voltage Error %", "%f",        100.0 * motor_voltage_error);
   d.addf("Max Motor Voltage Error %", "%f",    100.0 * motor_voltage_error_max);
-  d.addf("Filtered Voltage Error %", "%f",     100.0 * abs_motor_voltage_error);
-  d.addf("Max Filtered Voltage Error %", "%f", 100.0 * abs_motor_voltage_error_max);
+  d.addf("Abs Filtered Voltage Error %", "%f",     100.0 * abs_motor_voltage_error);
+  d.addf("Max Abs Filtered Voltage Error %", "%f", 100.0 * abs_motor_voltage_error_max);
 
+  // TODO change names
   d.addf("Current Error", "%f",              current_error);
   d.addf("Max Current Error", "%f",          current_error_max);
-  d.addf("Filtered Current Error", "%f",     abs_current_error);
-  d.addf("Max Filtered Current Error", "%f", abs_current_error_max);
+  d.addf("Abs Filtered Current Error", "%f",     abs_current_error);
+  d.addf("Max Abs Filtered Current Error", "%f", abs_current_error_max);
 
   d.addf("Motor Resistance Estimate", "%f", est_motor_resistance);
+
+  d.addf("# Published traces", "%d", published_traces_);
 }
 
 
@@ -161,11 +176,11 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
   // Compute limits for motor voltage error.
   const double resistance_error = 0.15;    // assume motor resistance can be off by 15%
   const double backemf_constant_error = 0.15; // assume backemf const can be off by 15%
-  double motor_voltage_error_limit = 2.0 + fabs(resistance_voltage*resistance_error) + fabs(backemf_voltage * backemf_constant_error);
+  double motor_voltage_error_limit = 4.0 + fabs(resistance_voltage*resistance_error) + fabs(backemf_voltage * backemf_constant_error);
   // Put max limit on back emf voltage
   motor_voltage_error_limit = min(motor_voltage_error_limit, 10.0);
 
-  // Estimate resitance
+  // Estimate resistance
   double est_motor_resistance = 0.0;
   double est_motor_resistance_accuracy = 0.0;
   // Don't even try calculation if the is not enough motor current
@@ -188,19 +203,34 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     
     // Compare motor and board voltage. Identify errors with motor or encoder
     motor_voltage_error_.sample((motor_voltage - board_voltage) / motor_voltage_error_limit);
-    abs_motor_voltage_error_.sample( fabs(motor_voltage_error_.filter()) );
+    bool new_max_voltage_error = abs_motor_voltage_error_.sample( fabs(motor_voltage_error_.filter()));
     
     // Compare measured/programmed only when board output voltage is not (or was recently) maxed out.
     bool pwm_saturated = ((s.programmed_pwm > bi.max_pwm_ratio*0.95) || (s.programmed_pwm < -bi.max_pwm_ratio*0.95));
     double current_error = s.measured_current-s.executed_current;
+    bool new_max_current_error = false;
     if ((!pwm_saturated && !previous_pwm_saturated_) || 
 	(fabs(current_error + current_error_.filter()) < current_error_.filter()) )
     {
       current_error_.sample(current_error);
-      abs_current_error_.sample( fabs(current_error_.filter()) );
+      new_max_current_error = abs_current_error_.sample(fabs(current_error_.filter()));
     }
     previous_pwm_saturated_ = pwm_saturated;
     
+    // Publish trace if voltage or current error hits a new max above 40% of limit
+    // However, delay publishing in case error grows even larger in next few cycles
+    if (new_max_voltage_error && (abs_motor_voltage_error_.filter_max() > 0.5))
+    {
+      publish_delay_ = 500;
+      publish_delay_reason_ = "New max voltage error";
+    }
+    else if( new_max_current_error && (abs_current_error_.filter_max() > (current_error_limit_ * 0.5)))
+    {
+      publish_delay_ = 500;
+      publish_delay_reason_ = "New max current error";
+    }
+
+    // Keep track of some values, so that the cause of motor voltage error can be determined laterx
     abs_velocity_.sample(fabs(s.velocity));
     abs_board_voltage_.sample(fabs(board_voltage));
     abs_measured_current_.sample(fabs(s.measured_current));
@@ -209,6 +239,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
       abs_position_delta_.sample(fabs(position_delta));
     }
 
+    // Update filtered resistance estimate with resistance calculated this cycle
     motor_resistance_.sample(est_motor_resistance, 0.005 * est_motor_resistance_accuracy);
 
     filter_mutex_.unlock();
@@ -237,33 +268,49 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     s2.filtered_abs_current_error          = abs_current_error_.filter();
   }
 
+  // Publish motor trace when delay hits 0.
+  if ((publish_delay_ >= 0) && (--publish_delay_ == 0))
+  {
+    publishTrace(publish_delay_reason_);
+  }
+
 }
 
 
 /** \brief Check for errors between sample data and motor model
  * 
+ *  \param reason string is filled in when error or warning occurs
+ *  \param level  filled in with 2 (ERROR) or 1 (WARN).
+ *  \return returns false if motor should halt
  */
-bool MotorModel::verify(std::string &reason) const
+bool MotorModel::verify(std::string &reason, int &level) const
 {
+  const int ERROR = 2;
+  const int WARN = 1;
+  const int GOOD = 0;
+
   bool rv=true;
-  
+
   // Error limits should realy be parameters, not hardcoded.
   double measured_voltage_error_limit = board_info_.poor_measured_motor_voltage ? 10.0 : 4.0;
-  double current_error_limit          = board_info_.hw_max_current * 0.30;
 
   bool is_measured_voltage_error = abs_measured_voltage_error_.filter() > measured_voltage_error_limit;
-  bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit
+  bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit  
+
+  int new_level = GOOD;
+  std::string new_reason;
 
   // Check back-EMF consistency
   if (is_motor_voltage_error || is_measured_voltage_error) 
   {
-    reason = "Problem with the MCB, motor, encoder, or actuator model.";  
     rv = false;
+    new_level = ERROR;
+    new_reason = "Problem with the MCB, motor, encoder, or actuator model.";  
 
     if( is_measured_voltage_error ) 
     {
       // Problem with board
-      reason += " Board may be damaged.";
+      new_reason += " Board may be damaged.";
     }
     else if (is_motor_voltage_error) 
     {
@@ -276,35 +323,55 @@ bool MotorModel::verify(std::string &reason) const
       if ((abs_measured_current_.filter() < current_epsilon) && (abs_current_error_.filter() > current_epsilon))
       {
         //measured_current_ ~= 0 -> motor open-circuit likely
-        reason += " Current near zero - check for unconnected motor leads.";
+        new_reason += " Current near zero - check for unconnected motor leads.";
       }
       else if (abs_board_voltage_.filter() < epsilon)
       {
         //motor_voltage_ ~= 0 -> motor short-circuit likely
-        reason += " Voltage near zero - check for short circuit.";
+        new_reason += " Voltage near zero - check for short circuit.";
       }
       else if (abs_velocity_.filter() < epsilon)
       {
         // motor_velocity == 0 -> encoder failure likely
-        reason += " Velocity near zero - check for encoder error.";
+        new_reason += " Velocity near zero - check for encoder error.";
       }
       else if (abs_position_delta_.filter() < encoder_tick_delta)
       {
         // encoder changing by only 0 or 1 ticks --> check for disconnected wire.
-        reason += " Encoder delta below 1 - check encoder wiring.";
+        new_reason += " Encoder delta below 1 - check encoder wiring.";
       }
     }
   }
-  else if (current_error_.filter() > current_error_limit)
+  else if (abs_current_error_.filter() > current_error_limit_)
   {
     //complain and shut down
     rv = false;
-    reason = "Current loop error too large (MCB failing to hit desired current)";
+    new_level = ERROR;
+    new_reason = "Current loop error too large (MCB failing to hit desired current)";
   }
+  else if (abs_motor_voltage_error_.filter() > 0.7)
+  {
+    new_level = WARN;
+    new_reason = "Potential problem with the MCB, motor, encoder, or actuator model.";  
+  }
+  else if (abs_current_error_.filter() > (current_error_limit_ * 0.7))
+  {
+    new_level = WARN;
+    new_reason = "Potential current loop error (MCB failing to hit desired current)";  
+  }
+
+  if (new_level > level) 
+  {
+    level = new_level;
+    reason = new_reason;
+  }    
 
   return rv;
 }
 
+/** \brief Updates filter with newly sampled value
+ *
+ */
 void MotorModel::SimpleFilter::sample(double value, double filter_coefficient)
 {
   // F = A*V + (1-A)*F 
@@ -313,10 +380,19 @@ void MotorModel::SimpleFilter::sample(double value, double filter_coefficient)
   filtered_value_ += filter_coefficient * (value-filtered_value_);  
 }
 
-void MotorModel::Filter::sample(double value)
-{
+/** \brief Updates filter with newly sampled value, also tracks max value
+ *
+ *  \return true if new filtered value is large than previous maximum value
+ */
+bool MotorModel::Filter::sample(double value)
+{    
+  bool new_max = false;
   SimpleFilter::sample(value, filter_coefficient_);
-  max_filtered_value_ = max(fabs(filtered_value_), max_filtered_value_);
+  if (fabs(filtered_value_) > max_filtered_value_) {
+    new_max = true;
+    max_filtered_value_ = fabs(filtered_value_);
+  }
+  return new_max;
 }
 
 MotorModel::SimpleFilter::SimpleFilter()
