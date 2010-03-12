@@ -2300,6 +2300,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
   d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
   d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
+  d.addf("SW Max Current", "%f", actuator_info_.max_current_);
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
