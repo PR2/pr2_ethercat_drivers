@@ -159,7 +159,9 @@ WG0XDiagnostics::WG0XDiagnostics() :
   board_over_temp_total_(0),
   bridge_over_temp_total_(0),
   operate_disable_total_(0),
-  watchdog_disable_total_(0)
+  watchdog_disable_total_(0),
+  zero_offset_(0),
+  cached_zero_offset_(0)
 {
   memset(&safety_disable_status_, 0, sizeof(safety_disable_status_));
   memset(&diagnostics_info_, 0, sizeof(diagnostics_info_));
@@ -190,16 +192,16 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
-WG0X::WG0X() : motor_model_(NULL)
+WG0X::WG0X() : cached_zero_offset_(0), has_app_ram_(false), motor_model_(NULL)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
   {
-    fprintf(stderr, ERROR_HDR " : WG0X : init diagnostics mutex :%s\n", strerror(error));
+    ROS_ERROR("WG0X : init diagnostics mutex :%s\n", strerror(error));
   }
   if ((error = pthread_mutex_init(&mailbox_lock_, NULL)) != 0)
   {
-    fprintf(stderr, ERROR_HDR " : WG0X : init mailbox mutex :%s\n", strerror(error));
+    ROS_ERROR("WG0X : init mailbox mutex :%s\n", strerror(error));
   }
 }
 
@@ -330,20 +332,40 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   int retval = WG0X::initialize(hw, allow_unprogrammed);
-  if (!retval && use_ros_)
+
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+
+  // Determine if device supports application RAM
+  if (!retval)
   {
-    // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
-    bool poor_measured_motor_voltage = (board_major_ <= 2);
-    double max_pwm_ratio = double(0x3C00) / double(PWM_MAX);
-    double board_resistance = 0.8;
-    if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
+    if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
     {
-      ROS_FATAL("Initializing motor trace failed");
-      sleep(1); // wait for ros to flush rosconsole output
-      ROS_BREAK();
-      return -1;
+      has_app_ram_ = true;
+      double zero_offset;
+
+      if (readAppRam(&com, zero_offset))
+      {
+        actuator_.state_.zero_offset_ = zero_offset;
+        cached_zero_offset_ = zero_offset;
+      }
+    }    
+
+    if (use_ros_)
+    {
+      // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
+      bool poor_measured_motor_voltage = (board_major_ <= 2);
+      double max_pwm_ratio = double(0x3C00) / double(PWM_MAX);
+      double board_resistance = 0.8;
+      if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
+      {
+        ROS_FATAL("Initializing motor trace failed");
+        sleep(1); // wait for ros to flush rosconsole output
+        ROS_BREAK();
+        return -1;
+      }
     }
-  }
+
+  }// end if !retval
   return retval;
 }
 
@@ -642,6 +664,21 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
     if (motor_model_) motor_model_->reset();
   }
   resetting_ = reset;
+
+  // If zero_offset was changed, give it to non-realtime thread
+  double zero_offset = actuator_.state_.zero_offset_;
+  if (zero_offset != cached_zero_offset_) 
+  {
+    if (tryLockWG0XDiagnostics())
+    {
+      cached_zero_offset_ = zero_offset;
+      wg0x_collect_diagnostics_.zero_offset_ = zero_offset;
+    }
+    else 
+    {
+      // It is OK if trylock failed, this will still try again next cycle.
+    }
+  }
 
   // Compute the current
   double current = (cmd.effort_ / actuator_info_.encoder_reduction_) / actuator_info_.motor_torque_constant_ ;
@@ -1064,6 +1101,21 @@ void WG0X::collectDiagnostics(EthercatCom *com)
     goto end;
   }
   
+  { // Try writing zero offset to to WG0X devices that have application ram
+    WG0XDiagnostics &dg(wg0x_collect_diagnostics_);
+    if (has_app_ram_ && (dg.zero_offset_ != dg.cached_zero_offset_) )
+    {
+      if (writeAppRam(com, dg.zero_offset_))
+      {
+        dg.cached_zero_offset_ = dg.zero_offset_;
+      }
+      else 
+      {
+        // Diagnostics thread will try again next update cycle
+      }
+    }
+  }
+
   success = true;
 
  end:
@@ -1081,6 +1133,37 @@ void WG0X::collectDiagnostics(EthercatCom *com)
   unlockWG0XDiagnostics();
 }
 
+
+bool WG0X::writeAppRam(EthercatCom *com, double zero_offset) 
+{
+  WG0XUserConfigRam cfg;
+  cfg.version_ = 1;
+  cfg.zero_offset_ = zero_offset;
+  boost::crc_32_type crc32;
+  crc32.process_bytes(&cfg, sizeof(cfg)-sizeof(cfg.crc32_));
+  cfg.crc32_ = crc32.checksum();
+  return (writeMailbox(com, WG0XUserConfigRam::BASE_ADDR, &cfg, sizeof(cfg)) == 0);
+}
+
+bool WG0X::readAppRam(EthercatCom *com, double &zero_offset) 
+{
+  WG0XUserConfigRam cfg;
+  if (!readMailbox(com, WG0XUserConfigRam::BASE_ADDR, &cfg, sizeof(cfg)) == 0)
+  {
+    return false;
+  }
+  if (cfg.version_ != 1) 
+  {
+    return false;
+  }
+  boost::crc_32_type crc32;
+  crc32.process_bytes(&cfg, sizeof(cfg)-sizeof(cfg.crc32_));
+  if (cfg.crc32_ != crc32.checksum()) {
+    return false;
+  }
+  zero_offset = cfg.zero_offset_;
+  return true;
+}
 
 int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
 {
