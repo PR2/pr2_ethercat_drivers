@@ -345,11 +345,18 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
       if (readAppRam(&com, zero_offset))
       {
+	ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
         actuator_.state_.zero_offset_ = zero_offset;
         cached_zero_offset_ = zero_offset;
       }
+      else 
+      {
+	ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
+      }
     }    
-
+    else{
+      ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
+    }
     if (use_ros_)
     {
       // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
@@ -671,8 +678,10 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   {
     if (tryLockWG0XDiagnostics())
     {
+      ROS_INFO("Calibration change of %s, new %f, old %f\n", actuator_info_.name_, zero_offset, cached_zero_offset_);
       cached_zero_offset_ = zero_offset;
       wg0x_collect_diagnostics_.zero_offset_ = zero_offset;
+      unlockWG0XDiagnostics();
     }
     else 
     {
@@ -1103,15 +1112,15 @@ void WG0X::collectDiagnostics(EthercatCom *com)
   
   { // Try writing zero offset to to WG0X devices that have application ram
     WG0XDiagnostics &dg(wg0x_collect_diagnostics_);
-    if (has_app_ram_ && (dg.zero_offset_ != dg.cached_zero_offset_) )
-    {
-      if (writeAppRam(com, dg.zero_offset_))
-      {
-        dg.cached_zero_offset_ = dg.zero_offset_;
+
+    if (has_app_ram_ && dg.zero_offset_ != dg.cached_zero_offset_){
+      if (writeAppRam(com, dg.zero_offset_)){
+	ROS_INFO("Writing new calibration to device %s, new %f, old %f\n", actuator_info_.name_, dg.zero_offset_, dg.cached_zero_offset_);
+	dg.cached_zero_offset_ = dg.zero_offset_;
       }
-      else 
-      {
-        // Diagnostics thread will try again next update cycle
+      else{
+	ROS_ERROR("Failed to write new calibration to device %s, new %f, old %f\n", actuator_info_.name_, dg.zero_offset_, dg.cached_zero_offset_);
+	// Diagnostics thread will try again next update cycle
       }
     }
   }
