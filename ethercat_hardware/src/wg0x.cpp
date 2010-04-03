@@ -944,6 +944,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     s.encoder_position = state.position_;
     s.encoder_error_count = state.num_encoder_errors_;
     motor_model_->sample(s);
+    motor_model_->checkPublish();
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
@@ -999,7 +1000,7 @@ end:
     bool halting = halt && !actuator_.state_.halted_;
     if ( halting || publish_motor_trace_.command_.data_)
     {
-      motor_model_->publishTrace(halting ? reason : "Publishing manually triggered"); 
+      motor_model_->flagPublish(halting ? reason : "Publishing manually triggered", level, 100); 
       publish_motor_trace_.command_.data_ = 0;
     }
   }
