@@ -287,6 +287,16 @@ struct WG0XConfigInfo
   static const unsigned CONFIG_INFO_BASE_ADDR = 0x0080;
 }__attribute__ ((__packed__));
 
+struct WG0XUserConfigRam
+{
+  uint8_t version_;
+  uint8_t unused_[3];
+  double zero_offset_;
+  uint32_t crc32_;
+
+  static const unsigned BASE_ADDR = 0x00C0;
+}__attribute__ ((__packed__));
+
 struct WG0XActuatorInfo
 {
   uint16_t major_;              // Major revision
@@ -439,6 +449,10 @@ struct WG0XDiagnostics
   uint32_t watchdog_disable_total_;
 
   uint32_t lock_errors_;
+
+  // Hack, use diagnostic thread to push new offset values to device
+  double zero_offset_;
+  double cached_zero_offset_;
 };
 
 class WG0X : public EthercatDevice
@@ -489,6 +503,11 @@ protected:
   bool in_lockout_;
   bool resetting_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
+  double cached_zero_offset_;  
+
+  bool has_app_ram_; // True if device support application ram
+  bool readAppRam(EthercatCom *com, double &zero_offset);
+  bool writeAppRam(EthercatCom *com, double zero_offset);
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   int readEeprom(EthercatCom *com);
