@@ -40,9 +40,9 @@ roslib.load_manifest('fingertip_pressure')
 import sys
 import rospy
 
-import wx
 import fingertip_pressure
 from fingertip_pressure.fingertip_panel import FingertipPressurePanel, GripperPressurePanel
+import wx # Must be imported after the fingertip_panel for wxversion.
 
 NAME = 'view_fingertip_pressure'
 
