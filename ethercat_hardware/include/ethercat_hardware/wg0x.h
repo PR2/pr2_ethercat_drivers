@@ -449,6 +449,7 @@ struct WG0XDiagnostics
   uint32_t watchdog_disable_total_;
 
   uint32_t lock_errors_;
+  uint32_t checksum_errors_;
 
   // Hack, use diagnostic thread to push new offset values to device
   double zero_offset_;
@@ -526,6 +527,8 @@ protected:
                             double board_resistance,
                             bool poor_measured_motor_voltage);
 
+  bool verifyChecksum(const void* buffer, unsigned size);
+  
   static const int PWM_MAX = 0x4000;
   
 private:
