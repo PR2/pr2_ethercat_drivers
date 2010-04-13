@@ -235,7 +235,9 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
       }
       errorCountersMayBeCleared_ = false;
     }
-    assert(!errorCountersPrev_.isGreaterThan(e));
+    if (errorCountersPrev_.isGreaterThan(e)) {
+      ROS_ERROR("Device %d : previous port error counters less current values", sh->get_ring_position());
+    }
 
     // Accumulate
     this->accumulate(e, errorCountersPrev_);
