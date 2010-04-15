@@ -46,6 +46,9 @@ from fingertip_pressure.colormap import color255
 from fingertip_pressure.msg import PressureInfo
 from geometry_msgs.msg import Vector3
 
+import wxversion
+wxversion.ensureMinimal("2.8")
+
 import wx
 import threading
 from wx import xrc

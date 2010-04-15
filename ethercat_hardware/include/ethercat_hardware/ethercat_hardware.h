@@ -100,6 +100,11 @@ public:
 
   void printCounters(std::ostream &os=std::cout); 
 
+  /*!
+   * \brief Send process data
+   */
+  bool txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries);
+
   pr2_hardware_interface::HardwareInterface *hw_;
 
 private:
