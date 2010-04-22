@@ -47,6 +47,7 @@ EthercatHardware::EthercatHardware(const std::string& name) :
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
   diagnostics_.device_count_ = 0;
+  diagnostics_.pd_error_ = false;
   diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardware::diagnosticsThreadFunc, this));
 }
 
@@ -196,9 +197,16 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   prev_buffer_ = buffers_ + buffer_size_;
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
-  // Make sure motors are disabled
+  // Make sure motors are disabled, also collect status data
   memset(this_buffer_, 0, 2 * buffer_size_);
-  em_->txandrx_PD(buffer_size_, this_buffer_);
+  if (!txandrx_PD(buffer_size_, this_buffer_, 20))
+  {
+    ROS_FATAL("No communication with devices");
+    ROS_BREAK();
+  }
+  
+  // prev_buffer should contain valid status data when update function is first used
+  memcpy(prev_buffer_, this_buffer_, buffer_size_);
 
   // Create pr2_hardware_interface::HardwareInterface
   hw_ = new pr2_hardware_interface::HardwareInterface();
@@ -255,6 +263,11 @@ void EthercatHardware::publishDiagnostics()
     status.summary(status.ERROR, "Motors halted");
   } else {
     status.summary(status.OK, "OK");
+  }
+
+  if (diagnostics_.pd_error_)
+  {
+    status.mergeSummary(status.ERROR, "Error sending proccess data");
   }
 
   status.add("Motors halted", halt_motors_ ? "true" : "false");
@@ -340,51 +353,66 @@ void EthercatHardware::update(bool reset, bool halt)
   if (halt)
     halt_motors_ = true;
 
+  // Resetting devices should clear device errors and release devices from halt.
+  // To reduce load on power system, release devices from halt, one at a time 
+  const unsigned CYCLES_PER_HALT_RELEASE = 2; // Wait two cycles between releasing each device
   if (reset)
   {
-    reset_state_ = 2 * num_slaves_;
+    reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
+  }
+  bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
+  if (reset_devices)
+  {
     halt_motors_ = false;
     diagnostics_.max_roundtrip_ = 0;
+    diagnostics_.pd_error_ = false;
   }
 
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
     // Pack the command structures into the EtherCAT buffer
     // Disable the motor if they are halted or coming out of reset
-    slaves_[s]->packCommand(this_buffer,
-        halt_motors_ || (reset_state_ && (s < reset_state_)),
-        !halt_motors_ && (s == (reset_state_ / 2)));
+    bool halt_device = halt_motors_ || ((s*CYCLES_PER_HALT_RELEASE+1) < reset_state_);
+    slaves_[s]->packCommand(this_buffer, halt_device, reset_devices);
     this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   // Transmit process data
   ros::Time start = ros::Time::now();
-  if (!em_->txandrx_PD(buffer_size_, this_buffer_)) {
-    ++diagnostics_.txandrx_errors_;
-  }
+
+  // Send/receive device proccess data
+  bool success = txandrx_PD(buffer_size_, this_buffer_, 5);
+
   diagnostics_.acc_((ros::Time::now() - start).toSec());
 
-  // Transmit new OOB data
-  oob_com_->tx();
-
-  // Convert status back to HW Interface
-  this_buffer = this_buffer_;
-  prev_buffer = prev_buffer_;
-  for (unsigned int s = 0; s < num_slaves_; ++s)
+  if (!success)
   {
-    // Don't halt motors during a reset
-    if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_state_)
-      halt_motors_ = true;
-    this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
-    prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+    // If process data didn't get sent after multiple retries, stop motors
+    halt_motors_ = true;
+    diagnostics_.pd_error_ = true;
   }
-
-  if (reset_state_)
-    --reset_state_;
-
-  unsigned char *tmp = this_buffer_;
-  this_buffer_ = prev_buffer_;
-  prev_buffer_ = tmp;
+  else
+  {
+    // Convert status back to HW Interface
+    this_buffer = this_buffer_;
+    prev_buffer = prev_buffer_;
+    for (unsigned int s = 0; s < num_slaves_; ++s)
+    {
+      if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
+      {
+        halt_motors_ = true;
+      }
+      this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+      prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
+    }
+    
+    if (reset_state_)
+      --reset_state_;
+    
+    unsigned char *tmp = this_buffer_;
+    this_buffer_ = prev_buffer_;
+    prev_buffer_ = tmp;
+  }
 
   if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {
@@ -484,3 +512,18 @@ void EthercatHardware::printCounters(std::ostream &os)
 }
 
 
+bool EthercatHardware::txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries)
+{
+  // Try multiple times to get proccess data to device
+  bool success = false;
+  for (unsigned i=0; i<tries && !success; ++i) {
+    // Try transmitting process data
+    success = em_->txandrx_PD(buffer_size_, this_buffer_);
+    if (!success) {
+      ++diagnostics_.txandrx_errors_;
+    } 
+    // Transmit new OOB data
+    oob_com_->tx();
+  }
+  return success;
+}

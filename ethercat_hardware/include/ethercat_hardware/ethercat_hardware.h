@@ -100,6 +100,11 @@ public:
 
   void printCounters(std::ostream &os=std::cout); 
 
+  /*!
+   * \brief Send process data
+   */
+  bool txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries);
+
   pr2_hardware_interface::HardwareInterface *hw_;
 
 private:
@@ -126,11 +131,13 @@ private:
 
   realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
   realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
-  struct {
+  struct EthercatHardwareDiagnostics {
+    EthercatHardwareDiagnostics() : acc_() { }
     accumulator_set<double, stats<tag::max, tag::mean> > acc_;
     double max_roundtrip_;
     int txandrx_errors_;
     unsigned device_count_;
+    bool pd_error_;
   } diagnostics_;
   boost::condition_variable diagnostics_cond_;
   boost::mutex diagnostics_mutex_;
