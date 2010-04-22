@@ -258,7 +258,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
 
   EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
-  ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
                        command_size_,// Logical length
                        0x00, // Logical StartBit
@@ -271,7 +271,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   start_address += command_size_;
 
-  ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
                        base_status, // Logical length
                        0x00, // Logical StartBit
@@ -286,7 +286,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   if (isWG06)
   {
-    ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+    //ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
     (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
                          sizeof(WG06Pressure), // Logical length
                          0x00, // Logical StartBit
@@ -2300,6 +2300,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
   d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
   d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
+  d.addf("SW Max Current", "%f", actuator_info_.max_current_);
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
