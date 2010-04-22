@@ -21,7 +21,8 @@ public:
   MotorModel(unsigned trace_size);
   bool initialize(const ethercat_hardware::ActuatorInfo &actuator_info, 
                   const ethercat_hardware::BoardInfo &board_info);
-  void publishTrace(const std::string &reason);
+  void flagPublish(const std::string &reason, int level, int delay);
+  void checkPublish();
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void sample(const ethercat_hardware::MotorTraceSample &s);
   bool verify(std::string &reason, int &level) const;
@@ -38,9 +39,10 @@ protected:
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTrace> *publisher_;
   double current_error_limit_;
   int publish_delay_;
-  const char* publish_delay_reason_;
-  bool new_max_current_error_;
-  bool new_max_voltage_error_;
+  int publish_level_;
+  std::string publish_reason_;
+  //bool new_max_current_error_;
+  //bool new_max_voltage_error_;
 
   class SimpleFilter
   {

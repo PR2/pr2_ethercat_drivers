@@ -8,8 +8,6 @@ MotorModel::MotorModel(unsigned trace_size) :
   trace_index_(0),
   published_traces_(0),
   backemf_constant_(0.0),
-  publish_delay_(-1),
-  publish_delay_reason_(""),
   motor_voltage_error_(0.2),
   abs_motor_voltage_error_(0.02),
   measured_voltage_error_(0.2),
@@ -44,6 +42,8 @@ void MotorModel::reset()
   filter_mutex_.unlock();
   previous_pwm_saturated_ = false;
   publish_delay_ = -1;
+  publish_level_ = 0;
+  publish_reason_ = "OK";
 }
 
 /**  \brief Initializes motor trace publisher
@@ -80,10 +80,16 @@ bool MotorModel::initialize(const ethercat_hardware::ActuatorInfo &actuator_info
   return true;
 }
 
-/**  \brief Publishes motor trace
+/**  \brief Publishes motor trace if delay time is up
  */
-void MotorModel::publishTrace(const std::string &reason)
+void MotorModel::checkPublish()
 {
+  if (publish_delay_ < 0)
+    return;
+  --publish_delay_;
+  if (publish_delay_ >= 0)
+    return;
+
   ++published_traces_;
 
   assert(publisher_ != NULL);
@@ -93,7 +99,7 @@ void MotorModel::publishTrace(const std::string &reason)
   ethercat_hardware::MotorTrace &msg(publisher_->msg_);
   
   msg.header.stamp = ros::Time::now();  
-  msg.reason = reason;
+  msg.reason = publish_reason_;
   unsigned size=trace_buffer_.size();
   msg.samples.clear();
   msg.samples.reserve(size);
@@ -105,9 +111,30 @@ void MotorModel::publishTrace(const std::string &reason)
 
   // Cancel any delayed publishing from occuring
   publish_delay_ = -1;
+  publish_level_ = 0;
 
   publisher_->unlockAndPublish();
 }
+
+/** \flags delayed publish of motor trace. 
+ *
+ * New publish will only take precedence of previous publish iff level is higher than previous level
+ */
+void MotorModel::flagPublish(const std::string &reason, int level, int delay)
+{
+  if (delay < 0) 
+    delay = 0;
+  else if (delay > 900) {
+    delay = 900;
+  }
+  if (level > publish_level_)
+  {
+    publish_reason_ = reason;
+    publish_delay_ = delay;
+    publish_level_ = level;
+  }
+}
+
 
 /**  \brief Collects and publishes device diagnostics
  */
@@ -221,13 +248,11 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     // However, delay publishing in case error grows even larger in next few cycles
     if (new_max_voltage_error && (abs_motor_voltage_error_.filter_max() > 0.5))
     {
-      publish_delay_ = 500;
-      publish_delay_reason_ = "New max voltage error";
+      flagPublish("New max voltage error", 1, 500);
     }
     else if( new_max_current_error && (abs_current_error_.filter_max() > (current_error_limit_ * 0.5)))
     {
-      publish_delay_ = 500;
-      publish_delay_reason_ = "New max current error";
+      flagPublish("New max current error", 1, 500);
     }
 
     // Keep track of some values, so that the cause of motor voltage error can be determined laterx
@@ -267,13 +292,6 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     s2.filtered_current_error              = current_error_.filter();
     s2.filtered_abs_current_error          = abs_current_error_.filter();
   }
-
-  // Publish motor trace when delay hits 0.
-  if ((publish_delay_ >= 0) && (--publish_delay_ == 0))
-  {
-    publishTrace(publish_delay_reason_);
-  }
-
 }
 
 
