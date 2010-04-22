@@ -40,9 +40,17 @@ roslib.load_manifest('fingertip_pressure')
 import sys
 import rospy
 
-import wx
+WXVER = '2.8'
+import wxversion
+if wxversion.checkInstalled(WXVER):
+  wxversion.select(WXVER)
+else:
+  print >> sys.stderr, "This application requires wxPython version %s"%(WXVER)
+  sys.exit(1)
+
 import fingertip_pressure
 from fingertip_pressure.fingertip_panel import FingertipPressurePanel, GripperPressurePanel
+import wx # Must be imported after the fingertip_panel for wxversion.
 
 NAME = 'view_fingertip_pressure'
 
@@ -58,7 +66,12 @@ class MainWindow(wx.Frame):
         
         sizer = wx.BoxSizer()
         self.SetSizer(sizer)
-        sizer.Add(GripperPressurePanel(self, 'pressure/r_gripper_motor'), 1, wx.EXPAND)
+        default_name = 'pressure/r_gripper_motor'
+        remap_name = 'board'
+        remapped_name = rospy.remap_name(remap_name)
+        if remapped_name == remap_name:
+          remapped_name = default_name
+        sizer.Add(GripperPressurePanel(self, remapped_name), 1, wx.EXPAND)
         
         #self.SetMaxSize(wx.Size(1500,1500))
 

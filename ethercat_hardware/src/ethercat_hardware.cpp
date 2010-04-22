@@ -197,9 +197,16 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   prev_buffer_ = buffers_ + buffer_size_;
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
-  // Make sure motors are disabled
+  // Make sure motors are disabled, also collect status data
   memset(this_buffer_, 0, 2 * buffer_size_);
-  em_->txandrx_PD(buffer_size_, this_buffer_);
+  if (!txandrx_PD(buffer_size_, this_buffer_, 20))
+  {
+    ROS_FATAL("No communication with devices");
+    ROS_BREAK();
+  }
+  
+  // prev_buffer should contain valid status data when update function is first used
+  memcpy(prev_buffer_, this_buffer_, buffer_size_);
 
   // Create pr2_hardware_interface::HardwareInterface
   hw_ = new pr2_hardware_interface::HardwareInterface();
@@ -373,17 +380,8 @@ void EthercatHardware::update(bool reset, bool halt)
   // Transmit process data
   ros::Time start = ros::Time::now();
 
-  // Try multiple times to get proccess data to device
-  bool success = false;
-  for (unsigned i=0; i<5 && !success; ++i) {
-    // Try transmitting process data
-    success = em_->txandrx_PD(buffer_size_, this_buffer_);
-    if (!success) {
-      ++diagnostics_.txandrx_errors_;
-    } 
-    // Transmit new OOB data
-    oob_com_->tx();
-  }
+  // Send/receive device proccess data
+  bool success = txandrx_PD(buffer_size_, this_buffer_, 5);
 
   diagnostics_.acc_((ros::Time::now() - start).toSec());
 
@@ -514,3 +512,18 @@ void EthercatHardware::printCounters(std::ostream &os)
 }
 
 
+bool EthercatHardware::txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries)
+{
+  // Try multiple times to get proccess data to device
+  bool success = false;
+  for (unsigned i=0; i<tries && !success; ++i) {
+    // Try transmitting process data
+    success = em_->txandrx_PD(buffer_size_, this_buffer_);
+    if (!success) {
+      ++diagnostics_.txandrx_errors_;
+    } 
+    // Transmit new OOB data
+    oob_com_->tx();
+  }
+  return success;
+}

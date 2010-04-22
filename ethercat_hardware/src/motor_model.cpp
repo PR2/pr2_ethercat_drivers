@@ -116,7 +116,7 @@ void MotorModel::checkPublish()
   publisher_->unlockAndPublish();
 }
 
-/** \flags delayed publish of motor trace. 
+/** \brief flags delayed publish of motor trace. 
  *
  * New publish will only take precedence of previous publish iff level is higher than previous level
  */
@@ -201,7 +201,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
   double motor_voltage =  resistance_voltage + backemf_voltage;
 
   // Compute limits for motor voltage error.
-  const double resistance_error = 0.15;    // assume motor resistance can be off by 15%
+  const double resistance_error = 2.00;    // assume motor resistance can be off by 200%
   const double backemf_constant_error = 0.15; // assume backemf const can be off by 15%
   double motor_voltage_error_limit = 4.0 + fabs(resistance_voltage*resistance_error) + fabs(backemf_voltage * backemf_constant_error);
   // Put max limit on back emf voltage
