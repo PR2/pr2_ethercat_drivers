@@ -439,6 +439,7 @@ struct WG0XDiagnostics
   uint32_t watchdog_disable_total_;
 
   uint32_t lock_errors_;
+  uint32_t checksum_errors_;
 };
 
 class WG0X : public EthercatDevice
@@ -507,6 +508,8 @@ protected:
                             double board_resistance,
                             bool poor_measured_motor_voltage);
 
+  bool verifyChecksum(const void* buffer, unsigned size);
+  
   static const int PWM_MAX = 0x4000;
   
 private:

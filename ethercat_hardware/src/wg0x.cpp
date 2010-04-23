@@ -195,11 +195,11 @@ WG0X::WG0X() : motor_model_(NULL)
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
   {
-    fprintf(stderr, ERROR_HDR " : WG0X : init diagnostics mutex :%s\n", strerror(error));
+    ROS_ERROR("WG0X : init diagnostics mutex :%s", strerror(error));
   }
   if ((error = pthread_mutex_init(&mailbox_lock_, NULL)) != 0)
   {
-    fprintf(stderr, ERROR_HDR " : WG0X : init mailbox mutex :%s\n", strerror(error));
+    ROS_ERROR("WG0X : init mailbox mutex :%s", strerror(error));
   }
 }
 
@@ -258,7 +258,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
 
   EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
-  ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
                        command_size_,// Logical length
                        0x00, // Logical StartBit
@@ -271,7 +271,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   start_address += command_size_;
 
-  ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
                        base_status, // Logical length
                        0x00, // Logical StartBit
@@ -286,7 +286,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   if (isWG06)
   {
-    ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+    //ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
     (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
                          sizeof(WG06Pressure), // Logical length
                          0x00, // Logical StartBit
@@ -526,7 +526,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     if (fw_major_ != 1 || fw_minor_ < 7)
     {
-      ROS_FATAL("Unsupported firmware revision %d.%02d\n", fw_major_, fw_minor_);
+      ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
       ROS_BREAK();
       return -1;
     }
@@ -535,7 +535,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     if ((fw_major_ == 0 && fw_minor_ < 4) /*|| (fw_major_ == 1 && fw_minor_ < 0)*/)
     {
-      ROS_FATAL("Unsupported firmware revision %d.%02d\n", fw_major_, fw_minor_);
+      ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
       ROS_BREAK();
       return -1;
     }
@@ -551,7 +551,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
   if (readEeprom(&com) < 0)
   {
-    ROS_FATAL("Unable to read actuator info from EEPROM\n");
+    ROS_FATAL("Unable to read actuator info from EEPROM");
     ROS_BREAK();
     return -1;
   }
@@ -720,7 +720,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
 
   unsigned char* this_status = this_buffer + command_size_;
-  if (computeChecksum(this_status, status_bytes) != 0)
+  if (!verifyChecksum(this_status, status_bytes))
   {
     rv = false;
     reason = "Checksum error on status data";
@@ -728,7 +728,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     goto end;
   }
 
-  if (computeChecksum(p, sizeof(*p)) != 0)
+  if (!verifyChecksum(p, sizeof(*p)))
   {
     rv = false;
     reason = "Checksum error on pressure data";
@@ -845,6 +845,20 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   return verifyState(this_status, prev_status);
 }
 
+
+bool WG0X::verifyChecksum(const void* buffer, unsigned size)
+{
+  bool success = computeChecksum(buffer, size) == 0;
+  if (!success) {
+    if (tryLockWG0XDiagnostics()) {
+      ++wg0x_collect_diagnostics_.checksum_errors_;
+      unlockWG0XDiagnostics();
+    }
+  }
+  return success;
+}
+
+
 bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
@@ -852,7 +866,7 @@ bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   string reason = "OK";
 
   unsigned char* this_status = this_buffer + command_size_;
-  if (computeChecksum(this_status, status_size_) != 0)
+  if (!verifyChecksum(this_status, status_size_))
   {
     rv = false;
     reason = "Checksum error on status data";
@@ -898,6 +912,7 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     s.encoder_position = state.position_;
     s.encoder_error_count = state.num_encoder_errors_;
     motor_model_->sample(s);
+    motor_model_->checkPublish();
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
@@ -953,7 +968,7 @@ end:
     bool halting = halt && !actuator_.state_.halted_;
     if ( halting || publish_motor_trace_.command_.data_)
     {
-      motor_model_->publishTrace(halting ? reason : "Publishing manually triggered"); 
+      motor_model_->flagPublish(halting ? reason : "Publishing manually triggered", level, 100); 
       publish_motor_trace_.command_.data_ = 0;
     }
   }
@@ -972,7 +987,7 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   this_status = (WG021Status *)(this_buffer + command_size_);
   prev_status = (WG021Status *)(prev_buffer + command_size_);
   
-  if (computeChecksum(this_status, status_size_) != 0)
+  if (!verifyChecksum(this_status, status_size_))
   {
     rv = false;
     reason = "Checksum error on status data";
@@ -1064,6 +1079,7 @@ void WG0X::collectDiagnostics(EthercatCom *com)
     goto end;
   }
   
+
   success = true;
 
  end:
@@ -2129,6 +2145,7 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
 
   WG0XDiagnostics const &p(wg0x_publish_diagnostics_);
   WG0XSafetyDisableStatus const &s(p.safety_disable_status_);
+  d.addf("Status Checksum Error Count", "%d", p.checksum_errors_);
   d.addf("Safety Disable Status", "%s (%02x)", safetyDisableString(s.safety_disable_status_).c_str(), s.safety_disable_status_);
   d.addf("Safety Disable Status Hold", "%s (%02x)", safetyDisableString(s.safety_disable_status_hold_).c_str(), s.safety_disable_status_hold_);
   d.addf("Safety Disable Count", "%d", p.safety_disable_total_);
@@ -2300,6 +2317,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
   d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
   d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
+  d.addf("SW Max Current", "%f", actuator_info_.max_current_);
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
