@@ -192,7 +192,11 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
-WG0X::WG0X() : cached_zero_offset_(0), has_app_ram_(false), motor_model_(NULL)
+WG0X::WG0X() : 
+  cached_zero_offset_(0), 
+  calibration_status_(NO_CALIBRATION),
+  has_app_ram_(false),
+  motor_model_(NULL)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -625,6 +629,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
         actuator_.state_.zero_offset_ = zero_offset;
         cached_zero_offset_ = zero_offset;
+        calibration_status_ = SAVED_CALIBRATION;
       }
       else
       {
@@ -692,6 +697,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
       ROS_INFO("Calibration change of %s, new %f, old %f", actuator_info_.name_, zero_offset, cached_zero_offset_);
       cached_zero_offset_ = zero_offset;
       wg0x_collect_diagnostics_.zero_offset_ = zero_offset;
+      calibration_status_ = CONTROLLER_CALIBRATION;
       unlockWG0XDiagnostics();
     }
     else 
@@ -2316,6 +2322,12 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
+
+  d.addf("Calibration Offset", "%f", cached_zero_offset_);
+  d.addf("Calibration Status", "%s", 
+         (calibration_status_ == NO_CALIBRATION) ? "No calibration" :
+         (calibration_status_ == CONTROLLER_CALIBRATION) ? "Calibrated by controller" :
+         (calibration_status_ == SAVED_CALIBRATION) ? "Using saved calibration" : "UNKNOWN");
 
   d.addf("Watchdog Limit", "%dms", config_info_.watchdog_limit_);
 
