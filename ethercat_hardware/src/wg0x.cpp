@@ -331,6 +331,11 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
 int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
+  if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
+  {
+    has_app_ram_ = true;
+  }
+
   int retval = WG0X::initialize(hw, allow_unprogrammed);
 
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
@@ -338,25 +343,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   // Determine if device supports application RAM
   if (!retval)
   {
-    if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
-    {
-      has_app_ram_ = true;
-      double zero_offset;
-
-      if (readAppRam(&com, zero_offset))
-      {
-	ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
-        actuator_.state_.zero_offset_ = zero_offset;
-        cached_zero_offset_ = zero_offset;
-      }
-      else 
-      {
-	ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
-      }
-    }    
-    else{
-      ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
-    }
     if (use_ros_)
     {
       // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
@@ -378,6 +364,11 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
 int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
+  if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
+  {
+    has_app_ram_ = true;
+  }
+
   int retval = WG0X::initialize(hw, allow_unprogrammed);
   
   if (!retval && use_ros_)
@@ -624,6 +615,26 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         ROS_BREAK();
         return -1;
     }
+
+    // If it is supported, read application ram data.
+    if (has_app_ram_)
+    {
+      double zero_offset;
+      if (readAppRam(&com, zero_offset))
+      {
+        ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
+        actuator_.state_.zero_offset_ = zero_offset;
+        cached_zero_offset_ = zero_offset;
+      }
+      else
+      {
+        ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
+      }
+    }
+    else{
+      ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
+    }
+
   }
   else if (allow_unprogrammed)
   {
