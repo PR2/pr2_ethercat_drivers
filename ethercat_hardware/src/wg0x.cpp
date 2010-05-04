@@ -192,7 +192,11 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
-WG0X::WG0X() : cached_zero_offset_(0), has_app_ram_(false), motor_model_(NULL)
+WG0X::WG0X() : 
+  cached_zero_offset_(0), 
+  calibration_status_(NO_CALIBRATION),
+  has_app_ram_(false),
+  motor_model_(NULL)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -331,6 +335,11 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
 int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
+  if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
+  {
+    has_app_ram_ = true;
+  }
+
   int retval = WG0X::initialize(hw, allow_unprogrammed);
 
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
@@ -338,25 +347,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   // Determine if device supports application RAM
   if (!retval)
   {
-    if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
-    {
-      has_app_ram_ = true;
-      double zero_offset;
-
-      if (readAppRam(&com, zero_offset))
-      {
-	ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
-        actuator_.state_.zero_offset_ = zero_offset;
-        cached_zero_offset_ = zero_offset;
-      }
-      else 
-      {
-	ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
-      }
-    }    
-    else{
-      ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
-    }
     if (use_ros_)
     {
       // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
@@ -378,6 +368,11 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
 int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
+  if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
+  {
+    has_app_ram_ = true;
+  }
+
   int retval = WG0X::initialize(hw, allow_unprogrammed);
   
   if (!retval && use_ros_)
@@ -624,6 +619,27 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         ROS_BREAK();
         return -1;
     }
+
+    // If it is supported, read application ram data.
+    if (has_app_ram_)
+    {
+      double zero_offset;
+      if (readAppRam(&com, zero_offset))
+      {
+        ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
+        actuator_.state_.zero_offset_ = zero_offset;
+        cached_zero_offset_ = zero_offset;
+        calibration_status_ = SAVED_CALIBRATION;
+      }
+      else
+      {
+        ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
+      }
+    }
+    else{
+      ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
+    }
+
   }
   else if (allow_unprogrammed)
   {
@@ -681,6 +697,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
       ROS_INFO("Calibration change of %s, new %f, old %f", actuator_info_.name_, zero_offset, cached_zero_offset_);
       cached_zero_offset_ = zero_offset;
       wg0x_collect_diagnostics_.zero_offset_ = zero_offset;
+      calibration_status_ = CONTROLLER_CALIBRATION;
       unlockWG0XDiagnostics();
     }
     else 
@@ -2305,6 +2322,12 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
+
+  d.addf("Calibration Offset", "%f", cached_zero_offset_);
+  d.addf("Calibration Status", "%s", 
+         (calibration_status_ == NO_CALIBRATION) ? "No calibration" :
+         (calibration_status_ == CONTROLLER_CALIBRATION) ? "Calibrated by controller" :
+         (calibration_status_ == SAVED_CALIBRATION) ? "Using saved calibration" : "UNKNOWN");
 
   d.addf("Watchdog Limit", "%dms", config_info_.watchdog_limit_);
 

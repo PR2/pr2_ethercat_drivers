@@ -504,7 +504,9 @@ protected:
   bool in_lockout_;
   bool resetting_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
-  double cached_zero_offset_;  
+  double cached_zero_offset_;
+  enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
+  int calibration_status_;
 
   bool has_app_ram_; // True if device support application ram
   bool readAppRam(EthercatCom *com, double &zero_offset);
