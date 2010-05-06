@@ -192,7 +192,9 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
-WG0X::WG0X() : 
+WG0X::WG0X() :
+  timestamp_jump_detected_(false),
+  fpga_internal_reset_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
   has_app_ram_(false),
@@ -685,6 +687,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
     level_ = 0;
     reason_ = "OK";
     if (motor_model_) motor_model_->reset();
+    timestamp_jump_detected_ = false;
   }
   resetting_ = reset;
 
@@ -752,6 +755,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   if (reset) {
     level_ = 0;
     reason_ = "OK";
+    timestamp_jump_detected_ = false;
   }
   resetting_ = reset;
 
@@ -951,6 +955,13 @@ bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   return rv;
 }
 
+// Returns true if timestamp changed by more than (amount) or time goes in reverse.
+bool WG0X::timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount)
+{
+  uint32_t timestamp_diff = (timestamp - last_timestamp);
+  return (timestamp_diff > amount);
+}
+
 bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
@@ -989,6 +1000,11 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   } else {
     consecutive_drops_ = 0;
   }
+  // Detect timestamps going in reverse or changing by more than 1000 seconds = 1,000,000 msec
+  if ( timestamp_jump(this_status->timestamp_,last_timestamp_,1000000) )
+  {
+    timestamp_jump_detected_ = true;
+  }
   last_last_timestamp_ = last_timestamp_;
   last_timestamp_ = this_status->timestamp_;
 
@@ -1006,6 +1022,13 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     rv = false;
     reason = "Safety Lockout";
     level = 2;
+    goto end;
+  }
+
+  if (fpga_internal_reset_detected_)
+  {
+    // Error message is generated in diagnostic function
+    rv = false;
     goto end;
   }
 
@@ -1082,13 +1105,9 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
-  in_lockout_ = bool(this_status->mode_ & MODE_SAFETY_LOCKOUT);
-  if (in_lockout_ && !resetting_)
+  if (!verifyState((WG0XStatus *)(this_buffer + command_size_), (WG0XStatus *)(prev_buffer + command_size_)))
   {
-    reason = "Safety Lockout";
-    level = 2;
     rv = false;
-    goto end;
   }
 
 end:
@@ -2263,6 +2282,22 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   d.addf("Bridge Over Temp Count", "%d", p.bridge_over_temp_total_);
   d.addf("Operate Disable Count", "%d", p.operate_disable_total_);
   d.addf("Watchdog Disable Count", "%d", p.watchdog_disable_total_);
+
+  if (timestamp_jump_detected_ && (s.safety_disable_status_hold_ & SAFETY_OPERATIONAL))
+  {
+    fpga_internal_reset_detected_ = true;
+  }
+
+  if (fpga_internal_reset_detected_) 
+  {
+    d.mergeSummaryf(d.ERROR, "FPGA internal reset detected");
+  }
+  
+  if (timestamp_jump_detected_)
+  {
+    d.mergeSummaryf(d.WARN, "Timestamp jumped");
+  }
+
 
   {
     static const double WG05_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;

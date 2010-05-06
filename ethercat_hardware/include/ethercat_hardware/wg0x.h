@@ -504,6 +504,8 @@ protected:
   bool in_lockout_;
   bool resetting_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
+  bool timestamp_jump_detected_;
+  bool fpga_internal_reset_detected_;
   double cached_zero_offset_;
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
@@ -530,6 +532,7 @@ protected:
                             bool poor_measured_motor_voltage);
 
   bool verifyChecksum(const void* buffer, unsigned size);
+  static bool timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount);
   
   static const int PWM_MAX = 0x4000;
   
