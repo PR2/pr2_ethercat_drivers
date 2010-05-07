@@ -1054,7 +1054,7 @@ end:
     bool halting = halt && !actuator_.state_.halted_;
     if ( halting || publish_motor_trace_.command_.data_)
     {
-      motor_model_->flagPublish(halting ? reason : "Publishing manually triggered", level, 100); 
+      motor_model_->flagPublish(halting ? reason : "Publishing manually triggered", halting ? level : 0, 100); 
       publish_motor_trace_.command_.data_ = 0;
     }
   }
