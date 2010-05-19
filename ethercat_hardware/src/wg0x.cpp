@@ -1049,7 +1049,7 @@ end:
     level_ = level;
     reason_ = reason;
   }
-  bool halt = !rv;
+  bool halt = !rv || this_status->mode_ == MODE_OFF;
   if (motor_model_) {
     bool halting = halt && !actuator_.state_.halted_;
     if ( halting || publish_motor_trace_.command_.data_)
