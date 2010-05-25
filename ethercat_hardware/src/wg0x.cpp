@@ -235,6 +235,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   max_bridge_temperature_ = 0;
   in_lockout_ = false;
   resetting_ = false;
+  has_error_ = false;
 
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
   fw_minor_ = sh->get_revision() & 0xff;
@@ -642,6 +643,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   {
     level_ = 0;
     reason_ = "OK";
+    has_error_ = false;
     if (motor_model_) motor_model_->reset();
     timestamp_jump_detected_ = false;
   }
@@ -659,7 +661,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   WG0XCommand *c = (WG0XCommand *)buffer;
   memset(c, 0, command_size_);
   c->programmed_current_ = int(current / config_info_.nominal_current_scale_);
-  c->mode_ = (cmd.enable_ && !halt) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
+  c->mode_ = (cmd.enable_ && !halt && !has_error_) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
   c->mode_ |= (reset ? MODE_SAFETY_RESET : 0);
   c->digital_out_ = digital_out_.command_.data_;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
@@ -706,7 +708,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   memset(c, 0, command_size_);
   c->digital_out_ = digital_out_.command_.data_;
   c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
-  c->mode_ = (cmd.enable_ && !halt) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
+  c->mode_ = (cmd.enable_ && !halt && !has_error_) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
   c->mode_ |= reset ? MODE_SAFETY_RESET : 0;
   c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
@@ -987,16 +989,17 @@ end:
     level_ = level;
     reason_ = reason;
   }
-  bool halt = !rv || this_status->mode_ == MODE_OFF;
+  bool is_error = !rv;
+  bool new_error = is_error && !has_error_;
+  has_error_ = is_error || has_error_;
   if (motor_model_) {
-    bool halting = halt && !actuator_.state_.halted_;
-    if ( halting || publish_motor_trace_.command_.data_)
+    if ( new_error || publish_motor_trace_.command_.data_)
     {
-      motor_model_->flagPublish(halting ? reason : "Publishing manually triggered", level, 100); 
+      motor_model_->flagPublish(new_error ? reason : "Publishing manually triggered", new_error ? level : 0, 100); 
       publish_motor_trace_.command_.data_ = 0;
     }
   }
-  actuator_.state_.halted_ = halt;
+  actuator_.state_.halted_ = has_error_ || this_status->mode_ == MODE_OFF;
   return rv;
 }
 

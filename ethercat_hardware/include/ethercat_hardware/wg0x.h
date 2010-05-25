@@ -489,6 +489,7 @@ protected:
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
   bool resetting_;
+  bool has_error_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
   bool timestamp_jump_detected_;
   bool fpga_internal_reset_detected_;

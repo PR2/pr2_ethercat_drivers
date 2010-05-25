@@ -42,7 +42,7 @@ void MotorModel::reset()
   filter_mutex_.unlock();
   previous_pwm_saturated_ = false;
   publish_delay_ = -1;
-  publish_level_ = 0;
+  publish_level_ = -1;
   publish_reason_ = "OK";
 }
 
@@ -111,7 +111,7 @@ void MotorModel::checkPublish()
 
   // Cancel any delayed publishing from occuring
   publish_delay_ = -1;
-  publish_level_ = 0;
+  publish_level_ = -1;
 
   publisher_->unlockAndPublish();
 }
