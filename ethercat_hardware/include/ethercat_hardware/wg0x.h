@@ -489,7 +489,10 @@ protected:
   string safetyDisableString(uint8_t status);
   bool in_lockout_;
   bool resetting_;
+  bool has_error_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
+  bool timestamp_jump_detected_;
+  bool fpga_internal_reset_detected_;
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
   int readEeprom(EthercatCom *com);
@@ -509,6 +512,7 @@ protected:
                             bool poor_measured_motor_voltage);
 
   bool verifyChecksum(const void* buffer, unsigned size);
+  static bool timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount);
   
   static const int PWM_MAX = 0x4000;
   
