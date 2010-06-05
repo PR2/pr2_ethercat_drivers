@@ -695,6 +695,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   if (reset) {
     level_ = 0;
     reason_ = "OK";
+    has_error_ = false;
     timestamp_jump_detected_ = false;
   }
   resetting_ = reset;
