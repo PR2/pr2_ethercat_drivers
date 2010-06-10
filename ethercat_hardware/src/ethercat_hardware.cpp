@@ -48,6 +48,7 @@ EthercatHardware::EthercatHardware(const std::string& name) :
   diagnostics_.txandrx_errors_ = 0;
   diagnostics_.device_count_ = 0;
   diagnostics_.pd_error_ = false;
+  diagnostics_ready_ = false;
   diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardware::diagnosticsThreadFunc, this));
 }
 
