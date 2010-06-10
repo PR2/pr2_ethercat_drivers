@@ -2,10 +2,10 @@ all: installed
 
 ARCH = $(shell uname -m)
 ifeq ($(ARCH), x86_64)
-TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-x86_64.tgz
+TARBALL_URL = http://pr.willowgarage.com/downloads/eml-v2-prebuilt-x86_64.tgz
 TARBALL = build/eml-prebuilt-x86_64.tgz
 else
-TARBALL_URL = http://pr.willowgarage.com/downloads/eml-prebuilt-i686.tgz
+TARBALL_URL = http://pr.willowgarage.com/downloads/eml-v2-prebuilt-i686.tgz
 TARBALL = build/eml-prebuilt-i686.tgz
 endif
 SOURCE_DIR = build/eml

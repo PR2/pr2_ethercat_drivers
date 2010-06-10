@@ -413,7 +413,7 @@ Index: include/al/ethercat_slave_conf.h
 ===================================================================
 --- include/al/ethercat_slave_conf.h	(revision 36)
 +++ include/al/ethercat_slave_conf.h	(working copy)
-@@ -160,8 +160,10 @@
+@@ -160,13 +160,16 @@
    EC_FixedStationAddress get_station_address() const {return m_station_address; };
    /// Get FMMU config to be written when going to preop
    const EtherCAT_FMMU_Config * get_fmmu_config() const {return m_fmmu_config; };
@@ -424,6 +424,12 @@ Index: include/al/ethercat_slave_conf.h
    /// Get configuration of Sync Man channel 0 and 1 for MBX
    /** @return pointer to config in case of complex slave, or NULL for
        a simple slave
+   */
+   const EtherCAT_MbxConfig * get_mbx_config() const { return m_mbx_config; };
++  void set_mbx_config(EtherCAT_MbxConfig *new_config);
+   /// Check if the SlaveConfig is already used
+   bool is_used() { return used; };
+   /// The SlaveConfig is now used
 Index: include/al/ethercat_FSM.h
 ===================================================================
 --- include/al/ethercat_FSM.h	(revision 36)
@@ -784,7 +790,23 @@ Index: src/al/ethercat_slave_conf.cxx
 ===================================================================
 --- src/al/ethercat_slave_conf.cxx	(revision 36)
 +++ src/al/ethercat_slave_conf.cxx	(working copy)
-@@ -169,7 +169,7 @@
+@@ -109,6 +109,15 @@
+     m_complex = true;
+ }
+ 
++void EtherCAT_SlaveConfig::set_mbx_config(EtherCAT_MbxConfig *new_config)
++{ 
++  m_mbx_config = new_config;
++  if (m_mbx_config == NULL) 
++    m_complex = false;
++  else
++    m_complex = true; 
++}
++
+ EtherCAT_SlaveConfig::~EtherCAT_SlaveConfig(){}
+ 
+ // ==================================================
+@@ -169,7 +178,7 @@
  	  }
      else i++;
    }
