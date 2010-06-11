@@ -109,6 +109,7 @@ public:
 
 private:
   void diagnosticsThreadFunc();
+  static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
   struct netif *ni_;
   string interface_;

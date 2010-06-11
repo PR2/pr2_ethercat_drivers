@@ -40,6 +40,7 @@
 
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include <boost/foreach.hpp>
 
 EthercatHardware::EthercatHardware(const std::string& name) :
   hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), publisher_(ros::NodeHandle(name), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
@@ -76,6 +77,24 @@ EthercatHardware::~EthercatHardware()
   delete hw_;
   motor_publisher_.stop();
   publisher_.stop();
+}
+
+
+void EthercatHardware::changeState(EtherCAT_SlaveHandler *sh, EC_State new_state)
+{
+  unsigned product_code = sh->get_product_code();
+  unsigned serial = sh->get_serial();
+  uint32_t revision = sh->get_revision();
+  unsigned slave = sh->get_station_address()-1;
+
+  if (!sh->to_state(new_state))
+  {
+    ROS_FATAL("Cannot goto state %d for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+              new_state, slave, product_code, product_code, serial, serial, revision, revision);
+    if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
+      ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
+    ROS_BREAK();
+  }
 }
 
 void EthercatHardware::init(char *interface, bool allow_unprogrammed)
@@ -151,7 +170,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   slaves_ = new EthercatDevice*[num_slaves_];
 
-  // Configure slaves
+  // Make temporary list of slave handles
+  std::vector<EtherCAT_SlaveHandler*> slave_handles;
   for (unsigned int slave = 0; slave < num_slaves_; ++slave)
   {
     EC_FixedStationAddress fsa(slave + 1);
@@ -162,26 +182,19 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       sleep(1);
       ROS_BREAK();
     }
+    slave_handles.push_back(sh);
+  }
 
+  // Configure slaves
+  BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
+  {
     unsigned product_code = sh->get_product_code();
     unsigned serial = sh->get_serial();
     uint32_t revision = sh->get_revision();
-
-    if ((slaves_[slave] = configSlave(sh)) != NULL)
+    unsigned slave = sh->get_station_address()-1;
+    
+    if ((slaves_[slave] = configSlave(sh)) == NULL)
     {
-      if (!sh->to_state(EC_OP_STATE))
-      {
-        ROS_FATAL("Cannot goto OP state for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
-                  slave, product_code, product_code, serial, serial, revision, revision);
-        if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
-          ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
-        ROS_BREAK();
-      }
-      buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
-    }
-    else
-    {
-      uint32_t product_code = sh->get_product_code();
       ROS_FATAL("Unable to configure slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
                 slave, product_code, product_code, serial, serial, revision, revision);
       if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
@@ -190,6 +203,26 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       sleep(1);
       ROS_BREAK();
     }
+    buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
+  }
+
+  // Move slave from INIT to PREOP
+  BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
+  {
+    changeState(sh,EC_PREOP_STATE);
+  }
+
+  // Move slave from PREOP to SAFEOP
+  BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
+  {
+    changeState(sh,EC_SAFEOP_STATE);
+  }
+
+  // Move slave from SAFEOP to OP
+  // TODO : move to OP after initializing slave process data
+  BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
+  {
+    changeState(sh,EC_OP_STATE);
   }
 
   // Allocate buffers to send and receive commands
