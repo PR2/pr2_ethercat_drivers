@@ -541,7 +541,7 @@ void EthercatDevice::ethercatDiagnostics(diagnostic_updater::DiagnosticStatusWra
 }
 
 
-void EthercatDevice::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *)
+void EthercatDevice::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   stringstream str;
   str << "EtherCAT Device (" << std::setw(2) << std::setfill('0') << sh_->get_ring_position() << ")";
@@ -560,4 +560,15 @@ void EthercatDevice::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d,
   d.addf("Revision", "%08x", sh_->get_revision());
 
   this->ethercatDiagnostics(d, 4); //assume unknown device has 4 ports
+}
+
+void EthercatDevice::multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer)
+{
+  // Clean up recycled status object before reusing it.
+  diagnostic_status_.clearSummary();
+  diagnostic_status_.clear();
+
+  // If child-class does not implement multiDiagnostics(), fall back to using slave's diagnostic() function
+  diagnostics(diagnostic_status_, buffer);
+  vec.push_back(diagnostic_status_);
 }

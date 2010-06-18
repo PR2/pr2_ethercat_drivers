@@ -141,7 +141,7 @@ public:
 
   virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=0) = 0;
   
-  /* 
+  /**
    * \param reset  when asserted this will clear diagnostic error conditions device safety disable
    * \param halt   while asserted will disable actuator, usually by disabling H-bridge
    */ 
@@ -149,8 +149,27 @@ public:
 
   virtual bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
 
-  virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
+  /**
+   * \brief For EtherCAT devices that publish more than one EtherCAT Status message.
+   * If sub-class implements multiDiagnostics() then diagnostics() is not used.
+   * \param vec     Vector of diagnostics status messages. Slave appends one or more new diagnostic status'.
+   * \param buffer  Pointer to slave process data.\ 
+   */  
+  virtual void multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer);
 
+  /**
+   * \brief For EtherCAT device that only publish one EtherCAT Status message.
+   * If sub-class implements multiDiagnostics() then diagnostics() is not used.
+   * \param d       Diagnostics status wrapper.
+   * \param buffer  Pointer to slave process data.
+   */
+  virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer);
+
+  /** 
+   * \brief Adds diagnostic information for EtherCAT ports.
+   * \param d       EtherCAT port diagnostics information will be appended.
+   * \param buffer  Number of communication ports slave has.
+   */
   void ethercatDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned numPorts);
 
   virtual void collectDiagnostics(EthercatCom *com);
@@ -196,7 +215,10 @@ public:
   unsigned newDiagnosticsIndex_;
   pthread_mutex_t newDiagnosticsIndexLock_;  
   EthercatDeviceDiagnostics deviceDiagnostics[2];
-  pthread_mutex_t diagnosticsLock_;  
+  pthread_mutex_t diagnosticsLock_;
+
+  // Keep diagnostics status as cache.  Avoids a lot of construction/destruction of status object.
+  diagnostic_updater::DiagnosticStatusWrapper diagnostic_status_;
 };
 
 #endif /* ETHERCAT_DEVICE_H */

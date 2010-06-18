@@ -285,82 +285,82 @@ void EthercatHardware::diagnosticsThreadFunc()
 }
 
 void EthercatHardware::publishDiagnostics()
-{
+{  
   // Publish status of EtherCAT master
-  diagnostic_updater::DiagnosticStatusWrapper status;
-  
-  statuses_.clear();
+  status_.clearSummary();
+  status_.clear();    
 
-  status.name = "EtherCAT Master";
+  status_.name = "EtherCAT Master";
   if (halt_motors_)
   {
-    status.summary(status.ERROR, "Motors halted");
+    status_.summary(status_.ERROR, "Motors halted");
   } else {
-    status.summary(status.OK, "OK");
+    status_.summary(status_.OK, "OK");
   }
 
   if (diagnostics_.pd_error_)
   {
-    status.mergeSummary(status.ERROR, "Error sending proccess data");
+    status_.mergeSummary(status_.ERROR, "Error sending proccess data");
   }
 
-  status.add("Motors halted", halt_motors_ ? "true" : "false");
-  status.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
-  status.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
-  status.add("Interface", interface_);
-  status.addf("Reset state", "%d", reset_state_);
+  status_.add("Motors halted", halt_motors_ ? "true" : "false");
+  status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
+  status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
+  status_.add("Interface", interface_);
+  status_.addf("Reset state", "%d", reset_state_);
 
   // Produce warning if number of devices changed after device initalization
   if (num_slaves_ != diagnostics_.device_count_) {
-    status.mergeSummary(status.WARN, "Number of EtherCAT devices changed");
+    status_.mergeSummary(status_.WARN, "Number of EtherCAT devices changed");
   }
 
   // Roundtrip
   diagnostics_.max_roundtrip_ = std::max(diagnostics_.max_roundtrip_, 
        extract_result<tag::max>(diagnostics_.acc_));
-  status.addf("Average roundtrip time (us)", "%.4f", extract_result<tag::mean>(diagnostics_.acc_) * 1e6);
+  status_.addf("Average roundtrip time (us)", "%.4f", extract_result<tag::mean>(diagnostics_.acc_) * 1e6);
 
   accumulator_set<double, stats<tag::max, tag::mean> > blank;
   diagnostics_.acc_ = blank;
 
-  status.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
-  status.addf("EtherCAT Process Data txandrx errors", "%d", diagnostics_.txandrx_errors_);
+  status_.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
+  status_.addf("EtherCAT Process Data txandrx errors", "%d", diagnostics_.txandrx_errors_);
 
   { // Publish ethercat network interface counters 
     const struct netif_counters *c = &ni_->counters;
-    status.add("Input Thread",       ((ni_->is_stopped!=0) ? "Stopped" : "Running"));
-    status.addf("Sent Packets",        "%lld", c->sent);
-    status.addf("Received Packets",    "%lld", c->received);
-    status.addf("Collected Packets",   "%lld", c->collected);
-    status.addf("Dropped Packets",     "%lld", c->dropped);
-    status.addf("TX Errors",           "%lld", c->tx_error);
-    status.addf("TX Network Down",     "%lld", c->tx_net_down);
-    status.addf("TX Queue Full",       "%lld", c->tx_full);
-    status.addf("RX Runt Packet",      "%lld", c->rx_runt_pkt);
-    status.addf("RX Not EtherCAT",     "%lld", c->rx_not_ecat);
-    status.addf("RX Other EML",        "%lld", c->rx_other_eml);
-    status.addf("RX Bad Index",        "%lld", c->rx_bad_index);
-    status.addf("RX Bad Sequence",     "%lld", c->rx_bad_seqnum);
-    status.addf("RX Duplicate Sequence", "%lld", c->rx_dup_seqnum);    
-    status.addf("RX Duplicate Packet", "%lld", c->rx_dup_pkt);    
-    status.addf("RX Bad Order",        "%lld", c->rx_bad_order);    
-    status.addf("RX Late Packet",      "%lld", c->rx_late_pkt);
-    status.addf("RX Late Packet RTT",  "%lld", c->rx_late_pkt_rtt_us);
+    status_.add("Input Thread",       ((ni_->is_stopped!=0) ? "Stopped" : "Running"));
+    status_.addf("Sent Packets",        "%lld", c->sent);
+    status_.addf("Received Packets",    "%lld", c->received);
+    status_.addf("Collected Packets",   "%lld", c->collected);
+    status_.addf("Dropped Packets",     "%lld", c->dropped);
+    status_.addf("TX Errors",           "%lld", c->tx_error);
+    status_.addf("TX Network Down",     "%lld", c->tx_net_down);
+    status_.addf("TX Queue Full",       "%lld", c->tx_full);
+    status_.addf("RX Runt Packet",      "%lld", c->rx_runt_pkt);
+    status_.addf("RX Not EtherCAT",     "%lld", c->rx_not_ecat);
+    status_.addf("RX Other EML",        "%lld", c->rx_other_eml);
+    status_.addf("RX Bad Index",        "%lld", c->rx_bad_index);
+    status_.addf("RX Bad Sequence",     "%lld", c->rx_bad_seqnum);
+    status_.addf("RX Duplicate Sequence", "%lld", c->rx_dup_seqnum);    
+    status_.addf("RX Duplicate Packet", "%lld", c->rx_dup_pkt);    
+    status_.addf("RX Bad Order",        "%lld", c->rx_bad_order);    
+    status_.addf("RX Late Packet",      "%lld", c->rx_late_pkt);
+    status_.addf("RX Late Packet RTT",  "%lld", c->rx_late_pkt_rtt_us);
     
     double rx_late_pkt_rtt_us_avg = 0.0;
     if (c->rx_late_pkt > 0) {
       rx_late_pkt_rtt_us_avg = ((double)c->rx_late_pkt_rtt_us_sum)/((double)c->rx_late_pkt);
     }
-    status.addf("RX Late Packet Avg RTT", "%f", rx_late_pkt_rtt_us_avg);
+    status_.addf("RX Late Packet Avg RTT", "%f", rx_late_pkt_rtt_us_avg);
   }
 
-  statuses_.push_back(status);
+  statuses_.clear();
+  statuses_.push_back(status_);
 
+  // Also, collect diagnostic statuses of all EtherCAT device
   unsigned char *current = diagnostics_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    slaves_[s]->diagnostics(status, current);
-    statuses_.push_back(status);
+    slaves_[s]->multiDiagnostics(statuses_, current);
     current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 

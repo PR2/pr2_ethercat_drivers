@@ -150,6 +150,8 @@ private:
   
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
+  diagnostic_updater::DiagnosticStatusWrapper status_;
+
 
   EthercatOobCom *oob_com_;  
 
