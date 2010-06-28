@@ -42,21 +42,28 @@
 #include <sys/ioctl.h>
 #include <boost/foreach.hpp>
 
-EthercatHardware::EthercatHardware(const std::string& name) :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), publisher_(ros::NodeHandle(name), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
+  acc_(),
+  max_roundtrip_(0),
+  txandrx_errors_(0),
+  device_count_(0),
+  pd_error_(false)
 {
-  diagnostics_.max_roundtrip_ = 0;
-  diagnostics_.txandrx_errors_ = 0;
-  diagnostics_.device_count_ = 0;
-  diagnostics_.pd_error_ = false;
-  diagnostics_ready_ = false;
-  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardware::diagnosticsThreadFunc, this));
+
+}
+
+EthercatHardware::EthercatHardware(const std::string& name) :
+  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
+  diagnostics_publisher_(name), 
+  motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), 
+  device_loader_("ethercat_hardware", "EthercatDevice")
+{
+
 }
 
 EthercatHardware::~EthercatHardware()
 {
-  diagnostics_thread_.interrupt();
-  diagnostics_thread_.join();
+  diagnostics_publisher_.stop();
   if (slaves_)
   {
     for (uint32_t i = 0; i < num_slaves_; ++i)
@@ -73,10 +80,8 @@ EthercatHardware::~EthercatHardware()
     close_socket(ni_);
   }
   delete[] buffers_;
-  delete[] diagnostics_buffer_;
   delete hw_;
   motor_publisher_.stop();
-  publisher_.stop();
 }
 
 
@@ -229,7 +234,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   buffers_ = new unsigned char[2 * buffer_size_];
   this_buffer_ = buffers_;
   prev_buffer_ = buffers_ + buffer_size_;
-  diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Make sure motors are disabled, also collect status data
   memset(this_buffer_, 0, 2 * buffer_size_);
@@ -262,13 +266,71 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     }
   }
 
+  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
+}
+
+
+EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(const std::string &name) :
+  diagnostics_ready_(false),
+  publisher_(ros::NodeHandle(name), "/diagnostics", 1),
+  diagnostics_buffer_(NULL),
+  slaves_(NULL),
+  num_slaves_(0)
+{
+  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
+}
+
+EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
+{
+  delete[] diagnostics_buffer_;
+}
+
+void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves)
+{
+  interface_ = interface;
+  buffer_size_ = buffer_size;
+  slaves_ = slaves;
+  num_slaves_ = num_slaves;
+
+  diagnostics_buffer_ = new unsigned char[buffer_size_];
+
   // Initialize diagnostic data structures
   publisher_.msg_.status.reserve(num_slaves_ + 1);
   statuses_.reserve(num_slaves_ + 1);
   values_.reserve(10);
 }
 
-void EthercatHardware::diagnosticsThreadFunc()
+void EthercatHardwareDiagnosticsPublisher::publish(
+         const unsigned char *buffer, 
+         const struct netif_counters &counters,
+         const EthercatHardwareDiagnostics &diagnostics,
+         bool halt_motors, 
+         bool input_thread_is_stopped)
+{
+  boost::try_to_lock_t try_lock;
+  boost::unique_lock<boost::mutex> lock(diagnostics_mutex_, try_lock);
+  if (lock.owns_lock())
+  {
+    // Make copies of diagnostic data for dianostic thread
+    memcpy(diagnostics_buffer_, buffer, buffer_size_);
+    counters_ = counters;
+    diagnostics_ = diagnostics;
+    halt_motors_ = halt_motors;
+    input_thread_is_stopped_ = input_thread_is_stopped;
+    // Trigger diagnostics publish thread
+    diagnostics_ready_ = true;
+    diagnostics_cond_.notify_one();
+  }
+}
+
+void EthercatHardwareDiagnosticsPublisher::stop()
+{
+  diagnostics_thread_.interrupt();
+  diagnostics_thread_.join();
+  publisher_.stop();
+}
+
+void EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc()
 {
   try {
     while (1) {
@@ -284,7 +346,7 @@ void EthercatHardware::diagnosticsThreadFunc()
   }
 }
 
-void EthercatHardware::publishDiagnostics()
+void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 {  
   // Publish status of EtherCAT master
   status_.clearSummary();
@@ -307,7 +369,7 @@ void EthercatHardware::publishDiagnostics()
   status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
   status_.add("Interface", interface_);
-  status_.addf("Reset state", "%d", reset_state_);
+  //status_.addf("Reset state", "%d", reset_state_);
 
   // Produce warning if number of devices changed after device initalization
   if (num_slaves_ != diagnostics_.device_count_) {
@@ -325,9 +387,13 @@ void EthercatHardware::publishDiagnostics()
   status_.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
   status_.addf("EtherCAT Process Data txandrx errors", "%d", diagnostics_.txandrx_errors_);
 
+  status_.addf("Reset motors service count", "%d", diagnostics_.reset_motors_service_count_);
+  status_.addf("Halt motors service count", "%d", diagnostics_.halt_motors_service_count_);
+  status_.addf("Halt motors error count", "%d", diagnostics_.halt_motors_error_count_);
+
   { // Publish ethercat network interface counters 
-    const struct netif_counters *c = &ni_->counters;
-    status_.add("Input Thread",       ((ni_->is_stopped!=0) ? "Stopped" : "Running"));
+    const struct netif_counters *c = &counters_;
+    status_.add("Input Thread",       (input_thread_is_stopped_ ? "Stopped" : "Running"));
     status_.addf("Sent Packets",        "%lld", c->sent);
     status_.addf("Received Packets",    "%lld", c->received);
     status_.addf("Collected Packets",   "%lld", c->collected);
@@ -385,13 +451,17 @@ void EthercatHardware::update(bool reset, bool halt)
   this_buffer = this_buffer_;
 
   if (halt)
+  {
+    ++diagnostics_.halt_motors_service_count_;
     halt_motors_ = true;
+  }
 
   // Resetting devices should clear device errors and release devices from halt.
   // To reduce load on power system, release devices from halt, one at a time 
   const unsigned CYCLES_PER_HALT_RELEASE = 2; // Wait two cycles between releasing each device
   if (reset)
   {
+    ++diagnostics_.reset_motors_service_count_;
     reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
   }
   bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
@@ -422,7 +492,11 @@ void EthercatHardware::update(bool reset, bool halt)
   if (!success)
   {
     // If process data didn't get sent after multiple retries, stop motors
-    halt_motors_ = true;
+    if (!halt_motors_)
+    {
+      ++diagnostics_.halt_motors_error_count_;
+    }
+    halt_motors_ = true;    
     diagnostics_.pd_error_ = true;
   }
   else
@@ -434,6 +508,10 @@ void EthercatHardware::update(bool reset, bool halt)
     {
       if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
       {
+        if (!halt_motors_)
+        {
+          ++diagnostics_.halt_motors_error_count_;
+        }
         halt_motors_ = true;
       }
       this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
@@ -451,9 +529,7 @@ void EthercatHardware::update(bool reset, bool halt)
   if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
   {
     last_published_ = hw_->current_time_;
-    memcpy(diagnostics_buffer_, this_buffer_, buffer_size_);
-    diagnostics_ready_ = true;
-    diagnostics_cond_.notify_one();
+    diagnostics_publisher_.publish(this_buffer_, ni_->counters, diagnostics_, halt_motors_, ni_->is_stopped);
   }
 
   if (halt_motors_ != old_halt_motors ||
