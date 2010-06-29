@@ -51,6 +51,7 @@
 
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include <netinet/in.h>
 
 vector<EthercatDevice *> devices;
 
@@ -409,15 +410,20 @@ int main(int argc, char *argv[])
   if (!g_options.interface_)
     Usage("You must specify a network interface");
 
-  // Must run as root
-  if (geteuid() != 0)
+  // Try to get a raw socket.
+  int test_sock = socket(PF_PACKET, SOCK_RAW, htons(0x88A4));
+  if ((test_sock < 0) && (errno == EPERM))
   {
-    fprintf(stderr, "You must run as root!\n");
+    ROS_FATAL("Insufficient priviledges to obtain raw socket.  Try running as root.");
     exit(-1);
   }
+  close(test_sock);
 
   // Keep the kernel from swapping us out
-  mlockall(MCL_CURRENT | MCL_FUTURE);
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
+  {
+    ROS_WARN("mlockall failed : %s", strerror(errno));
+  }
 
   init(g_options.interface_);
 
