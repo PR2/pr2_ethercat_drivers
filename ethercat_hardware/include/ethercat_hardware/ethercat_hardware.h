@@ -69,6 +69,7 @@ struct EthercatHardwareDiagnostics
   int txandrx_errors_;
   unsigned device_count_;
   bool pd_error_;
+  bool halt_after_reset_; //!< True if motor halt soon after motor reset 
   unsigned reset_motors_service_count_; //!< Number of times reset_motor service has been used
   unsigned halt_motors_service_count_;  //!< Number of time halt_motor service call is used
   unsigned halt_motors_error_count_;    //!< Number of transitions into halt state due to device error
@@ -228,6 +229,7 @@ private:
   EthercatHardwareDiagnostics diagnostics_;
   EthercatHardwareDiagnosticsPublisher diagnostics_publisher_;
   ros::Time last_published_;
+  ros::Time last_reset_;
 
   realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
   ros::Time motor_last_published_;
