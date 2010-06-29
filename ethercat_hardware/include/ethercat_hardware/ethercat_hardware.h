@@ -203,6 +203,17 @@ public:
    */
   bool txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries);
 
+  /*!
+   * \brief Ask one or all EtherCAT devices to publish (motor) traces
+   * \param position device ring position to publish trace for.  Use -1 to trigger all devices.
+   * \param reason Message to put in trace as reason. 
+   * \param level Level to put in trace (aka ERROR=2, WARN=1, OK=0)
+   * \param delay Publish trace after delay cyles.  For 1kHz realtime loop 1cycle = 1ms.
+   * \return Return true if device supports publishing trace.  False, if not.   
+   *         If all devices are triggered, returns true if any device publishes trace.
+   */
+  bool publishTrace(int position, const string &reason, unsigned level, unsigned delay);
+
   pr2_hardware_interface::HardwareInterface *hw_;
 
 private:

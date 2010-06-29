@@ -174,6 +174,15 @@ public:
 
   virtual void collectDiagnostics(EthercatCom *com);
 
+  /** 
+   * \brief Asks device to publish (motor) trace. Only works for devices that support it. 
+   * \param reason Message to put in trace as reason. 
+   * \param level Level to put in trace (aka ERROR=2, WARN=1, OK=0)
+   * \param delay Publish trace after delay cyles.  For 1kHz realtime loop 1cycle = 1ms.
+   * \return Return true if device support publishing trace.  False, if not.
+   */  
+  virtual bool publishTrace(const string &reason, unsigned level, unsigned delay) {return false;}
+
   enum AddrMode {FIXED_ADDR=0, POSITIONAL_ADDR=1};
 
   /*!

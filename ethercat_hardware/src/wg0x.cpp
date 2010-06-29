@@ -1066,6 +1066,16 @@ end:
   return rv;
 }
 
+bool WG0X::publishTrace(const string &reason, unsigned level, unsigned delay)
+{
+  if (motor_model_) 
+  {
+    motor_model_->flagPublish(reason, level, delay);
+    return true;
+  }
+  return false;
+}
+
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;

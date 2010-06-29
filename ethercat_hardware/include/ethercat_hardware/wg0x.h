@@ -475,6 +475,8 @@ public:
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   virtual void collectDiagnostics(EthercatCom *com);
 
+  bool publishTrace(const string &reason, unsigned level, unsigned delay);
+
 protected:
   uint8_t fw_major_;
   uint8_t fw_minor_;

@@ -654,3 +654,42 @@ bool EthercatHardware::txandrx_PD(unsigned buffer_size, unsigned char* buffer, u
   }
   return success;
 }
+
+
+bool EthercatHardware::publishTrace(int position, const string &reason, unsigned level, unsigned delay)
+{
+  if (position >= (int)num_slaves_)
+  {
+    ROS_WARN("Invalid device position %d.  Use 0-%d, or -1.", position, num_slaves_-1);    
+    return false;
+  }
+
+  if (level > 2) 
+  {
+    ROS_WARN("Invalid level : %d.  Using level=2 (ERROR).", level);
+    level = 2;
+  }
+
+  string new_reason("Manually triggered : " + reason);
+  
+  bool retval = false;
+  if (position < 0) 
+  {
+    for (unsigned i=0; i<num_slaves_; ++i)
+    {
+      if (slaves_[i]->publishTrace(new_reason,level,delay))
+      {
+        retval = true;
+      }
+    }
+  }
+  else 
+  {
+    retval = slaves_[position]->publishTrace(new_reason,level,delay);
+    if (!retval) 
+    {
+      ROS_WARN("Device %d does not support publishing trace", position);
+    }
+  }
+  return retval;
+}
