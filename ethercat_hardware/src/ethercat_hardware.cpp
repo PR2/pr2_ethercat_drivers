@@ -52,7 +52,7 @@ EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
   halt_motors_service_count_(0),
   halt_motors_error_count_(0)
 {
-
+  resetMaxTiming();
 }
 
 void EthercatHardwareDiagnostics::resetMaxTiming()
@@ -92,6 +92,7 @@ EthercatHardware::~EthercatHardware()
   }
   delete[] buffers_;
   delete hw_;
+  delete oob_com_;
   motor_publisher_.stop();
 }
 

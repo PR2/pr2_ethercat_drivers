@@ -160,6 +160,8 @@ WG0XDiagnostics::WG0XDiagnostics() :
   bridge_over_temp_total_(0),
   operate_disable_total_(0),
   watchdog_disable_total_(0),
+  lock_errors_(0),
+  checksum_errors_(0),
   zero_offset_(0),
   cached_zero_offset_(0)
 {
@@ -1281,6 +1283,7 @@ int WG0X::readEeprom(EthercatCom *com)
 {
   assert(sizeof(actuator_info_) == 264);
   WG0XSpiEepromCmd cmd;
+  memset(&cmd,0,sizeof(cmd));
   cmd.build_read(ACTUATOR_INFO_PAGE);
   if (sendSpiCommand(com, &cmd)) {
     fprintf(stderr, "ERROR SENDING SPI EEPROM READ COMMAND\n");
@@ -1488,7 +1491,7 @@ bool WG0X::clearReadMailbox(EthercatCom *com)
   // Create Ethernet packet with two EtherCAT telegrams inside of it : 
   //  - One telegram to read first byte of mailbox
   //  - One telegram to read last byte of mailbox
-  unsigned char unused[1];
+  unsigned char unused[1] = {0};
   NPRD_Telegram read_start(
             logic->get_idx(),
             station_addr,
@@ -1573,7 +1576,7 @@ bool WG0X::waitForReadMailboxReady(EthercatCom *com)
   
   do {      
     // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus;
+    uint8_t SyncManStatus=0;
     const unsigned SyncManAddr = 0x805+(MBX_STATUS_SYNCMAN_NUM*8);
     if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
       ++good_results;
@@ -1625,7 +1628,7 @@ bool WG0X::waitForWriteMailboxReady(EthercatCom *com)
   
   do {      
     // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus;
+    uint8_t SyncManStatus=0;
     const unsigned SyncManAddr = 0x805+(MBX_COMMAND_SYNCMAN_NUM*8);
     if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
       ++good_results;
@@ -1697,7 +1700,7 @@ bool WG0X::writeMailboxInternal(EthercatCom *com, void const *data, unsigned len
   //  2. Write data into write mailbox
   {
     // Build frame with 2-NPRD + 2 NPWR
-    unsigned char unused[1];
+    unsigned char unused[1] = {0};
     NPWR_Telegram write_start(
                               logic->get_idx(),
                               station_addr,
@@ -1910,7 +1913,7 @@ bool WG0X::readMailboxInternal(EthercatCom *com, void *data, unsigned length)
     read_length = length;
  }
 
-  unsigned char unused[1];
+  unsigned char unused[1] = {0};
   NPRD_Telegram read_start(
                            logic->get_idx(),
                            station_addr,
@@ -2082,6 +2085,7 @@ int WG0X::readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned 
   //   is the right data, or just junk left over from last time.
   { 
     WG0XMbxCmd stat;
+    memset(&stat,0,sizeof(stat));
     // Read data + 1byte checksum from mailbox
     if (!readMailboxInternal(com, &stat, length+1)) 
     {

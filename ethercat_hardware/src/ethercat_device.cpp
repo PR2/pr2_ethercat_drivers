@@ -100,7 +100,10 @@ void et1x00_error_counters::zero()
 }
 
 
-EthercatPortDiagnostics::EthercatPortDiagnostics() 
+EthercatPortDiagnostics::EthercatPortDiagnostics() :
+  hasLink(false),
+  isClosed(false),
+  hasCommunication(false)
 {
   zeroTotals();
 }
