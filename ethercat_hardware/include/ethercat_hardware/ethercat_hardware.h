@@ -64,8 +64,15 @@ using namespace boost::accumulators;
 struct EthercatHardwareDiagnostics 
 {
   EthercatHardwareDiagnostics();
-  accumulator_set<double, stats<tag::max, tag::mean> > acc_;
-  double max_roundtrip_;
+  void resetMaxTiming();
+  accumulator_set<double, stats<tag::max, tag::mean> > pack_command_acc_; //!< time taken by all devices packCommand functions
+  accumulator_set<double, stats<tag::max, tag::mean> > txandrx_acc_;      //!< time taken by to transmit and recieve process data
+  accumulator_set<double, stats<tag::max, tag::mean> > unpack_state_acc_; //!< time taken by all devices updateState functions
+  accumulator_set<double, stats<tag::max, tag::mean> > publish_acc_;      //!< time taken by any publishing step in main loop
+  double max_pack_command_;
+  double max_txandrx_;
+  double max_unpack_state_;
+  double max_publish_;
   int txandrx_errors_;
   unsigned device_count_;
   bool pd_error_;
@@ -73,6 +80,11 @@ struct EthercatHardwareDiagnostics
   unsigned reset_motors_service_count_; //!< Number of times reset_motor service has been used
   unsigned halt_motors_service_count_;  //!< Number of time halt_motor service call is used
   unsigned halt_motors_error_count_;    //!< Number of transitions into halt state due to device error
+  struct netif_counters counters_;
+  bool input_thread_is_stopped_;
+  bool motors_halted_; //!< True if motors are halted
+
+  static const bool collect_extra_timing_ = true;
 };
 
 
@@ -110,11 +122,7 @@ public:
    * started conversion and publish of data.  
    * This function will not block.
    */
-  void publish(const unsigned char *buffer, 
-               const struct netif_counters &counters,
-               const EthercatHardwareDiagnostics &diagnostics, 
-               bool halt_motors, 
-               bool input_thread_is_stopped);
+  void publish(const unsigned char *buffer, const EthercatHardwareDiagnostics &diagnostics);
  
   /*!
    * \brief Stops publishing thread.  May block.
@@ -140,6 +148,15 @@ private:
   void diagnosticsThreadFunc();
 
 
+  /*!
+   * \brief Helper function for converting timing for diagnostics
+   */  
+  static void timingInformation(
+        diagnostic_updater::DiagnosticStatusWrapper &status, 
+        const string &key, 
+        const accumulator_set<double, stats<tag::max, tag::mean> > &acc,
+        double max);
+
   boost::mutex diagnostics_mutex_; //!< mutex protects all class data and cond variable
   boost::condition_variable diagnostics_cond_;
   bool diagnostics_ready_;
@@ -149,14 +166,11 @@ private:
   realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
 
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
-  struct netif_counters counters_;
   unsigned char *diagnostics_buffer_;
   unsigned int buffer_size_;
   EthercatDevice **slaves_;
   unsigned int num_slaves_;
   string interface_;
-  bool halt_motors_; //!< True if motors are halted
-  bool input_thread_is_stopped_; //!< True if EML input thread has stopped (because of error)
 
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
@@ -237,6 +251,8 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
+  void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher
+  static void updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc);
   EthercatHardwareDiagnostics diagnostics_;
   EthercatHardwareDiagnosticsPublisher diagnostics_publisher_;
   ros::Time last_published_;

@@ -43,8 +43,7 @@
 #include <boost/foreach.hpp>
 
 EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
-  acc_(),
-  max_roundtrip_(0),
+
   txandrx_errors_(0),
   device_count_(0),
   pd_error_(false),
@@ -54,6 +53,14 @@ EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
   halt_motors_error_count_(0)
 {
 
+}
+
+void EthercatHardwareDiagnostics::resetMaxTiming()
+{
+  max_pack_command_  = 0.0;
+  max_txandrx_       = 0.0;
+  max_unpack_state_  = 0.0;
+  max_publish_       = 0.0;
 }
 
 EthercatHardware::EthercatHardware(const std::string& name) :
@@ -306,10 +313,7 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
 
 void EthercatHardwareDiagnosticsPublisher::publish(
          const unsigned char *buffer, 
-         const struct netif_counters &counters,
-         const EthercatHardwareDiagnostics &diagnostics,
-         bool halt_motors, 
-         bool input_thread_is_stopped)
+         const EthercatHardwareDiagnostics &diagnostics)
 {
   boost::try_to_lock_t try_lock;
   boost::unique_lock<boost::mutex> lock(diagnostics_mutex_, try_lock);
@@ -317,10 +321,7 @@ void EthercatHardwareDiagnosticsPublisher::publish(
   {
     // Make copies of diagnostic data for dianostic thread
     memcpy(diagnostics_buffer_, buffer, buffer_size_);
-    counters_ = counters;
     diagnostics_ = diagnostics;
-    halt_motors_ = halt_motors;
-    input_thread_is_stopped_ = input_thread_is_stopped;
     // Trigger diagnostics publish thread
     diagnostics_ready_ = true;
     diagnostics_cond_.notify_one();
@@ -350,6 +351,17 @@ void EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc()
   }
 }
 
+void EthercatHardwareDiagnosticsPublisher::timingInformation(
+        diagnostic_updater::DiagnosticStatusWrapper &status, 
+        const string &key, 
+        const accumulator_set<double, stats<tag::max, tag::mean> > &acc,
+        double max)
+{
+  status.addf(key + " Avg (us)",       "%5.4f", extract_result<tag::mean>(acc) * 1e6); // Average over last 1 second
+  status.addf(key + " 1 Sec Max (us)", "%5.4f", extract_result<tag::max>(acc) * 1e6);  // Max over last 1 second
+  status.addf(key + " Max (us)",       "%5.4f", max * 1e6);                            // Max since start
+}
+
 void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 {  
   // Publish status of EtherCAT master
@@ -357,7 +369,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.clear();    
 
   status_.name = "EtherCAT Master";
-  if (halt_motors_)
+  if (diagnostics_.motors_halted_)
   {
     if (diagnostics_.halt_after_reset_) 
     {
@@ -376,7 +388,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.mergeSummary(status_.ERROR, "Error sending proccess data");
   }
 
-  status_.add("Motors halted", halt_motors_ ? "true" : "false");
+  status_.add("Motors halted", diagnostics_.motors_halted_ ? "true" : "false");
   status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
   status_.add("Interface", interface_);
@@ -387,15 +399,14 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.mergeSummary(status_.WARN, "Number of EtherCAT devices changed");
   }
 
-  // Roundtrip
-  diagnostics_.max_roundtrip_ = std::max(diagnostics_.max_roundtrip_, 
-       extract_result<tag::max>(diagnostics_.acc_));
-  status_.addf("Average roundtrip time (us)", "%.4f", extract_result<tag::mean>(diagnostics_.acc_) * 1e6);
+  timingInformation(status_, "Roundtrip time", diagnostics_.txandrx_acc_, diagnostics_.max_txandrx_);
+  if (diagnostics_.collect_extra_timing_)
+  {
+    timingInformation(status_, "Pack command time", diagnostics_.pack_command_acc_, diagnostics_.max_pack_command_);
+    timingInformation(status_, "Unpack state time", diagnostics_.unpack_state_acc_, diagnostics_.max_unpack_state_);
+    timingInformation(status_, "Publish time", diagnostics_.publish_acc_, diagnostics_.max_publish_);
+  }
 
-  accumulator_set<double, stats<tag::max, tag::mean> > blank;
-  diagnostics_.acc_ = blank;
-
-  status_.addf("Maximum roundtrip time (us)", "%.4f", diagnostics_.max_roundtrip_ * 1e6);
   status_.addf("EtherCAT Process Data txandrx errors", "%d", diagnostics_.txandrx_errors_);
 
   status_.addf("Reset motors service count", "%d", diagnostics_.reset_motors_service_count_);
@@ -403,8 +414,8 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.addf("Halt motors error count", "%d", diagnostics_.halt_motors_error_count_);
 
   { // Publish ethercat network interface counters 
-    const struct netif_counters *c = &counters_;
-    status_.add("Input Thread",       (input_thread_is_stopped_ ? "Stopped" : "Running"));
+    const struct netif_counters *c = &diagnostics_.counters_;
+    status_.add("Input Thread",       (diagnostics_.input_thread_is_stopped_ ? "Stopped" : "Running"));
     status_.addf("Sent Packets",        "%lld", c->sent);
     status_.addf("Received Packets",    "%lld", c->received);
     status_.addf("Collected Packets",   "%lld", c->collected);
@@ -452,12 +463,13 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 
 void EthercatHardware::update(bool reset, bool halt)
 {
+  // Update current time
+  ros::Time update_start_time(ros::Time::now());
+  hw_->current_time_ = update_start_time;
+
   unsigned char *this_buffer, *prev_buffer;
   bool old_halt_motors = halt_motors_;
   bool halt_motors_error = false;  // True if motors halted due to error
-
-  // Update current time
-  hw_->current_time_ = ros::Time::now();
 
   // Convert HW Interface commands to MCB-specific buffers
   this_buffer = this_buffer_;
@@ -475,14 +487,14 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     ++diagnostics_.reset_motors_service_count_;
     reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
-    last_reset_ = ros::Time::now();
+    last_reset_ = update_start_time;
     diagnostics_.halt_after_reset_ = false;
   }
   bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
   if (reset_devices)
   {
     halt_motors_ = false;
-    diagnostics_.max_roundtrip_ = 0;
+    diagnostics_.resetMaxTiming();
     diagnostics_.pd_error_ = false;
   }
 
@@ -496,12 +508,14 @@ void EthercatHardware::update(bool reset, bool halt)
   }
 
   // Transmit process data
-  ros::Time start = ros::Time::now();
+  ros::Time txandrx_start_time(ros::Time::now()); // Also end time for pack_command_stage
+  diagnostics_.pack_command_acc_((txandrx_start_time-update_start_time).toSec());
 
   // Send/receive device proccess data
   bool success = txandrx_PD(buffer_size_, this_buffer_, 5);
 
-  diagnostics_.acc_((ros::Time::now() - start).toSec());
+  ros::Time txandrx_end_time(ros::Time::now());  // Also begining of unpack_state 
+  diagnostics_.txandrx_acc_((txandrx_end_time - txandrx_start_time).toSec());
 
   if (!success)
   {
@@ -534,16 +548,23 @@ void EthercatHardware::update(bool reset, bool halt)
     prev_buffer_ = tmp;
   }
 
-  if ((hw_->current_time_ - last_published_) > ros::Duration(1.0))
+  ros::Time unpack_end_time;
+  if (diagnostics_.collect_extra_timing_)
   {
-    last_published_ = hw_->current_time_;
-    diagnostics_publisher_.publish(this_buffer_, ni_->counters, diagnostics_, halt_motors_, ni_->is_stopped);
+    unpack_end_time = ros::Time::now();  // also start of publish time                            
+    diagnostics_.unpack_state_acc_((unpack_end_time - txandrx_end_time).toSec());
+  }
+
+  if ((update_start_time - last_published_) > ros::Duration(1.0))
+  {
+    last_published_ = update_start_time;
+    publishDiagnostics();
   }
 
   if (halt_motors_ != old_halt_motors ||
-      (hw_->current_time_ - motor_last_published_) > ros::Duration(1.0))
+      (update_start_time - motor_last_published_) > ros::Duration(1.0))
   {
-    motor_last_published_ = hw_->current_time_;
+    motor_last_published_ = update_start_time;
     motor_publisher_.lock();
     motor_publisher_.msg_.data = halt_motors_;
     motor_publisher_.unlockAndPublish();
@@ -552,11 +573,47 @@ void EthercatHardware::update(bool reset, bool halt)
   if ((halt_motors_ && !old_halt_motors) && (halt_motors_error))
   {
     ++diagnostics_.halt_motors_error_count_;
-    if ((ros::Time::now() - last_reset_) < ros::Duration(0.5))
+    if ((update_start_time - last_reset_) < ros::Duration(0.5))
     {
       diagnostics_.halt_after_reset_ = true;
     }
   }    
+
+  if (diagnostics_.collect_extra_timing_)
+  {
+    ros::Time publish_end_time(ros::Time::now());  
+    diagnostics_.publish_acc_((publish_end_time - unpack_end_time).toSec());
+  }
+}
+
+void EthercatHardware::updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc)
+{
+  max = std::max(max, extract_result<tag::max>(acc));
+}
+
+void EthercatHardware::publishDiagnostics()
+{
+  // Update max timing values
+  updateAccMax(diagnostics_.max_pack_command_, diagnostics_.pack_command_acc_);
+  updateAccMax(diagnostics_.max_txandrx_,      diagnostics_.txandrx_acc_);
+  updateAccMax(diagnostics_.max_unpack_state_, diagnostics_.unpack_state_acc_);
+  updateAccMax(diagnostics_.max_publish_,      diagnostics_.publish_acc_);
+
+  // Grab stats and counters from input thread
+  diagnostics_.counters_ = ni_->counters;
+  diagnostics_.input_thread_is_stopped_ = bool(ni_->is_stopped);
+
+  diagnostics_.motors_halted_ = halt_motors_;
+
+  // Pass diagnostic data to publisher thread
+  diagnostics_publisher_.publish(this_buffer_, diagnostics_);
+
+  // Clear statistics accumulators
+  static accumulator_set<double, stats<tag::max, tag::mean> > blank;
+  diagnostics_.pack_command_acc_ = blank;
+  diagnostics_.txandrx_acc_      = blank;
+  diagnostics_.unpack_state_acc_ = blank;
+  diagnostics_.publish_acc_      = blank;
 }
 
 EthercatDevice *
