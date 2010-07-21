@@ -204,19 +204,11 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   // Configure slaves
   BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
-  {
-    unsigned product_code = sh->get_product_code();
-    unsigned serial = sh->get_serial();
-    uint32_t revision = sh->get_revision();
+  {    
     unsigned slave = sh->get_station_address()-1;
-    
     if ((slaves_[slave] = configSlave(sh)) == NULL)
-    {
-      ROS_FATAL("Unable to configure slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
-                slave, product_code, product_code, serial, serial, revision, revision);
-      if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
-        ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
-      ROS_FATAL("Perhaps you should power-cycle the MCBs");
+    {      
+      ROS_FATAL("Unable to configure slave #%d", slave);
       sleep(1);
       ROS_BREAK();
     }
@@ -617,20 +609,36 @@ void EthercatHardware::publishDiagnostics()
   diagnostics_.publish_acc_      = blank;
 }
 
+
 EthercatDevice *
 EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 {
   static int start_address = 0x00010000;
-
   EthercatDevice *p = NULL;
   stringstream str;
-  str << sh->get_product_code();
+  unsigned product_code = sh->get_product_code();
+  unsigned serial = sh->get_serial();
+  uint32_t revision = sh->get_revision();
+  unsigned slave = sh->get_station_address()-1;
+
+  str << product_code;
   try {
     p = device_loader_.createClassInstance(str.str());
   }
   catch (pluginlib::LibraryLoadException &e)
   {
     p = NULL;
+    ROS_FATAL("Unable to load plugin for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+              slave, product_code, product_code, serial, serial, revision, revision);
+    if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
+    {
+      ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
+      ROS_FATAL("Perhaps you should power-cycle the MCBs");
+    }
+    else 
+    {
+      ROS_FATAL("%s", e.what());
+    }
   }
   if (p) {
     p->construct(sh, start_address);
