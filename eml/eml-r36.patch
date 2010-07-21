@@ -627,7 +627,17 @@ Index: src/dll/ethercat_slave_memory.cxx
  }
  
  unsigned char * 
-@@ -160,6 +160,7 @@
+@@ -147,7 +147,8 @@
+     WriteOp(write_op),
+     ReloadOp(reload_op),
+     WriteError(write_error),
+-    Busy(busy)
++    Busy(busy),
++    AcknowledgeError(false)
+ {}
+ 
+ EC_SIIControlStatus::EC_SIIControlStatus(const unsigned char * a_buffer)
+@@ -160,6 +161,7 @@
    ReadOp = (bool) ((byte & 0x100) >> 8);
    WriteOp = (bool) ((byte & 0x200) >> 9);
    ReloadOp = (bool) ((byte & 0x400) >> 10);
@@ -635,7 +645,7 @@ Index: src/dll/ethercat_slave_memory.cxx
    WriteError = (bool) ((byte & 0x4000) >> 14);
    Busy = (bool) ((byte & 0x8000) >> 15);
  }
-@@ -173,6 +174,7 @@
+@@ -173,6 +175,7 @@
    byte |= ((EC_UINT) ReadOp ) << 8;
    byte |= ((EC_UINT) WriteOp ) << 9;
    byte |= ((EC_UINT) ReloadOp) << 10;
@@ -643,7 +653,7 @@ Index: src/dll/ethercat_slave_memory.cxx
    byte |= ((EC_UINT) WriteError) << 14;
    byte |= ((EC_UINT) Busy) << 15;
    return host2nw(a_buffer,byte);
-@@ -202,7 +204,7 @@
+@@ -202,7 +205,7 @@
  EC_FMMU::EC_FMMU(const unsigned char * a_buffer)
    : EC_DataStruct(EC_Slave_RD[FMMU_0].size)
  {
@@ -652,7 +662,7 @@ Index: src/dll/ethercat_slave_memory.cxx
  }
  
  unsigned char *
-@@ -256,7 +258,7 @@
+@@ -256,7 +259,7 @@
  EC_SyncMan::EC_SyncMan(const unsigned char * a_buffer)
    : EC_DataStruct(EC_Slave_RD[Sync_Manager_0].size)
  {
@@ -873,7 +883,16 @@ Index: src/al/ethercat_FSM.cxx
 ===================================================================
 --- src/al/ethercat_FSM.cxx	(revision 36)
 +++ src/al/ethercat_FSM.cxx	(working copy)
-@@ -98,11 +98,11 @@
+@@ -83,6 +83,8 @@
+ 		if (succeed == true){
+ 			static const EC_UINT AL_Status_Size = EC_Slave_RD[AL_Status].size;
+ 			unsigned char AL_Status_data[AL_Status_Size];
++                        for (unsigned i=0; i<AL_Status_Size; ++i)
++                          AL_Status_data[i] = 0;
+ 			NPRD_Telegram AL_status_telegram(m_logic_instance->get_idx(),
+ 														m_SH->get_station_address(),
+ 														EC_Slave_RD[AL_Status].ado,
+@@ -98,11 +100,11 @@
  				if ((status.State == a_state ) && (status.Change == false))
  					return true;
  				else 
@@ -887,7 +906,7 @@ Index: src/al/ethercat_FSM.cxx
  			struct timespec sleept;
  			sleept.tv_sec = 0;
  			sleept.tv_nsec = 10*1000*1000; //10ms
-@@ -115,7 +115,7 @@
+@@ -115,7 +117,7 @@
      tries++;
    }
    // Should never get here...
@@ -896,7 +915,7 @@ Index: src/al/ethercat_FSM.cxx
    return false;
  }
  
-@@ -143,7 +143,7 @@
+@@ -143,7 +145,7 @@
    EC_Ethernet_Frame address_frame(&address_tg);
    bool succeed = m_dll_instance->txandrx(&address_frame);
    if (succeed == false){
@@ -905,7 +924,7 @@ Index: src/al/ethercat_FSM.cxx
      return succeed;
    }
    struct timespec sleept;
-@@ -167,7 +167,7 @@
+@@ -167,7 +169,7 @@
      EC_Ethernet_Frame mbx_conf_frame(&mbx_conf_tg);
      succeed = m_dll_instance->txandrx(&mbx_conf_frame);
      if (succeed == false){
@@ -914,7 +933,7 @@ Index: src/al/ethercat_FSM.cxx
        return succeed;
      }
  	 nanosleep( &sleept, 0);
-@@ -179,7 +179,7 @@
+@@ -179,7 +181,7 @@
      mbx_conf_tg.set_wkc(m_logic_instance->get_wkc());
      succeed = m_dll_instance->txandrx(&mbx_conf_frame);
      if (succeed == false){
@@ -923,7 +942,7 @@ Index: src/al/ethercat_FSM.cxx
        return succeed;
      }
  	 nanosleep( &sleept, 0);
-@@ -219,6 +219,7 @@
+@@ -219,6 +221,7 @@
    EC_Ethernet_Frame fmmu_frame(&fmmu_tg);
    unsigned int i = 0;
    
@@ -931,7 +950,7 @@ Index: src/al/ethercat_FSM.cxx
    while ((succeed == true) && (i < m_SH->get_fmmu_config()->get_num_used_fmmus()))
      {
        (*(m_SH->get_fmmu_config()))[i].dump(fmmu_data);
-@@ -234,7 +235,7 @@
+@@ -234,7 +237,7 @@
  
    if (succeed == false) 
      {
@@ -940,7 +959,7 @@ Index: src/al/ethercat_FSM.cxx
        return false;
      }
    
-@@ -264,7 +265,7 @@
+@@ -264,7 +267,7 @@
      }
    if (succeed == false) 
      {
@@ -949,7 +968,7 @@ Index: src/al/ethercat_FSM.cxx
        return false;
      }
    
-@@ -316,6 +317,12 @@
+@@ -316,6 +319,12 @@
  
  // ==================================================
  
@@ -962,7 +981,7 @@ Index: src/al/ethercat_FSM.cxx
  bool
  EC_ESM_InitState::to_state(EC_ESM * a_ESM, EC_State a_state)
  {
-@@ -349,6 +356,12 @@
+@@ -349,6 +358,12 @@
    return succeed;
  }
  
@@ -975,7 +994,7 @@ Index: src/al/ethercat_FSM.cxx
  bool
  EC_ESM_PreOpState::to_state(EC_ESM * a_ESM, EC_State a_state)
  {
-@@ -379,6 +392,12 @@
+@@ -379,6 +394,12 @@
    return succeed;
  }
  
@@ -988,7 +1007,7 @@ Index: src/al/ethercat_FSM.cxx
  bool
  EC_ESM_SafeOpState::to_state(EC_ESM * a_ESM, EC_State a_state)
  {
-@@ -409,6 +428,13 @@
+@@ -409,6 +430,13 @@
    return succeed;
  }
  
@@ -1322,7 +1341,16 @@ Index: src/al/ethercat_AL.cxx
    // 6: Set device state to init
  	EC_ALControl al_control(EC_INIT_STATE,false);
  	unsigned char AL_Control_data[EC_Slave_RD[AL_Control].size];
-@@ -260,7 +282,7 @@
+@@ -231,6 +253,8 @@
+   // 7: Check device state for init
+ 	static const EC_UINT AL_Status_Size = EC_Slave_RD[AL_Status].size;
+ 	unsigned char AL_Status_data[AL_Status_Size];
++        for (unsigned i=0; i<AL_Status_Size; ++i)
++          AL_Status_data[i] = 0;
+   /* Note: cannot initialize data array, since the compiler does not
+ 	recognize AL_Status_Size as being const :-(  An option would be
+ 	to include a for loop, but as this data is filled in by the slave,
+@@ -260,7 +284,7 @@
  				EC_ALStatus status(AL_Status_data);
  				if (status.State != EC_INIT_STATE)
  				{
@@ -1331,7 +1359,7 @@ Index: src/al/ethercat_AL.cxx
  					succeed = false;
  				}
  				ringpos++;
-@@ -274,10 +296,10 @@
+@@ -274,10 +298,10 @@
  				AL_status_telegram.set_idx(m_logic_instance->get_idx());
  			}
  			else 
@@ -1344,7 +1372,7 @@ Index: src/al/ethercat_AL.cxx
  			struct timespec sleept;
  			sleept.tv_sec = 0;
  			sleept.tv_nsec = 10*1000*1000; //10ms
-@@ -312,7 +334,7 @@
+@@ -312,7 +336,7 @@
    EC_Ethernet_Frame SII_control_frame(&SII_control_tg);
    succeed = m_dll_instance->txandrx(&SII_control_frame);
    if (!succeed){
@@ -1353,7 +1381,7 @@ Index: src/al/ethercat_AL.cxx
      return false;
    }
    // BIG FAT WARNING:  USING 2 TELEGRAMS FOR WRITING AS PROGRAMMED
-@@ -362,19 +384,24 @@
+@@ -362,19 +386,24 @@
        // Check if EEPROM still busy
        EC_SIIControlStatus siics(a_buffer);
        if (siics.Busy){
@@ -1381,7 +1409,7 @@ Index: src/al/ethercat_AL.cxx
    return false;
  }
  
-@@ -388,7 +415,7 @@
+@@ -388,7 +417,7 @@
        return m_slave_handler[i];
      else i++;
    }
@@ -1510,7 +1538,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  		sleep(1);
  		tries++;
  	}
-@@ -88,25 +145,38 @@
+@@ -88,27 +145,41 @@
  		return -1;
  	}
  	
@@ -1555,8 +1583,11 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +    //printf("Input thread recv timeout has been set to %u usecs.\n", SOCKET_TIMEOUT_USEC);
  	}
  
++	memset(&addr,0,sizeof(addr));
  	addr.sll_family   = AF_PACKET;
-@@ -123,8 +193,41 @@
+ 	addr.sll_protocol = htons(0x88A4);
+ 	addr.sll_ifindex  = ifr.ifr_ifindex;
+@@ -123,8 +194,41 @@
  }
  
  int close_socket(struct netif *ni) {
@@ -1599,7 +1630,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	while(ret < 0 && tries < MAX_TRIES_SOCKET) {
  		ret = close(ni->socket_private);
  		tries++;
-@@ -132,6 +235,13 @@
+@@ -132,6 +236,13 @@
  	}
  	if(ret < 0)
  		perror("Failed to close socket");
@@ -1613,7 +1644,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	return ret;
  }
  
-@@ -142,112 +252,807 @@
+@@ -142,112 +253,808 @@
  	unsigned char  data [MAX_ETH_DATA];
  };
  
@@ -2447,6 +2478,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +
  	ni->socket_private = sock;
 +  memset(&ni->counters, 0, sizeof(ni->counters));
++  ni->next_pkt_index = 0;
 +  ni->tx_seqnum = 0;
 +  ni->rx_seqnum = 0xffff;
 +

@@ -60,6 +60,123 @@
 #include <std_msgs/Bool.h>
 
 using namespace boost::accumulators;
+ 
+struct EthercatHardwareDiagnostics 
+{
+  EthercatHardwareDiagnostics();
+  void resetMaxTiming();
+  accumulator_set<double, stats<tag::max, tag::mean> > pack_command_acc_; //!< time taken by all devices packCommand functions
+  accumulator_set<double, stats<tag::max, tag::mean> > txandrx_acc_;      //!< time taken by to transmit and recieve process data
+  accumulator_set<double, stats<tag::max, tag::mean> > unpack_state_acc_; //!< time taken by all devices updateState functions
+  accumulator_set<double, stats<tag::max, tag::mean> > publish_acc_;      //!< time taken by any publishing step in main loop
+  double max_pack_command_;
+  double max_txandrx_;
+  double max_unpack_state_;
+  double max_publish_;
+  int txandrx_errors_;
+  unsigned device_count_;
+  bool pd_error_;
+  bool halt_after_reset_; //!< True if motor halt soon after motor reset 
+  unsigned reset_motors_service_count_; //!< Number of times reset_motor service has been used
+  unsigned halt_motors_service_count_;  //!< Number of time halt_motor service call is used
+  unsigned halt_motors_error_count_;    //!< Number of transitions into halt state due to device error
+  struct netif_counters counters_;
+  bool input_thread_is_stopped_;
+  bool motors_halted_; //!< True if motors are halted
+
+  static const bool collect_extra_timing_ = true;
+};
+
+
+/*!
+ * \brief Publishes EthercatHardware diagnostics.
+ *
+ * All the string formating used for creatign diagnostics is too 
+ * slow to be run in the realtime thread. Instead, a copy of the raw 
+ * diagnostics data is made and a separate thread does the string conversion 
+ * and publishing.
+ * Previously, the diagnostics data used by publishing thread was contained
+ * in the EthercatHardware class.  However, this allowed the publishing thread
+ * access to other non thread-safe data.
+ * This class keeps the diagnostics data used by the publish thread explicitly
+ * separate.
+ */
+class EthercatHardwareDiagnosticsPublisher
+{
+public:
+
+  EthercatHardwareDiagnosticsPublisher(const std::string &name);
+  ~EthercatHardwareDiagnosticsPublisher();
+
+  /*!
+   * \brief Initializes hardware publish.
+   * \param buffer_size size of proccess data buffer
+   * \param number of EtherCAT slave devices
+   */
+  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves);
+
+  /*!
+   * \brief Triggers publishing of new diagnostics data
+   *
+   * Makes copy of diagnostics data and triggers internal thread to 
+   * started conversion and publish of data.  
+   * This function will not block.
+   */
+  void publish(const unsigned char *buffer, const EthercatHardwareDiagnostics &diagnostics);
+ 
+  /*!
+   * \brief Stops publishing thread.  May block.
+   */
+  void stop();
+   
+private:
+
+  /*!
+   * \brief Publishes diagnostics
+   *
+   * Takes internally saved diagnostics data and converts to a ROS 
+   * diagnostics status message.  
+   * This function performs a lot of string formatting, so it is slow.
+   */
+  void publishDiagnostics();
+
+  /*!
+   * \brief Publishing thread main loop
+   *
+   * Waits for condition variable to start publishing internal data.
+   */
+  void diagnosticsThreadFunc();
+
+
+  /*!
+   * \brief Helper function for converting timing for diagnostics
+   */  
+  static void timingInformation(
+        diagnostic_updater::DiagnosticStatusWrapper &status, 
+        const string &key, 
+        const accumulator_set<double, stats<tag::max, tag::mean> > &acc,
+        double max);
+
+  boost::mutex diagnostics_mutex_; //!< mutex protects all class data and cond variable
+  boost::condition_variable diagnostics_cond_;
+  bool diagnostics_ready_;
+  boost::thread diagnostics_thread_;
+
+  // TOOD : Don't need realtime publisher for diagnostics data, normal ROS publisher should do
+  realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
+
+  EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
+  unsigned char *diagnostics_buffer_;
+  unsigned int buffer_size_;
+  EthercatDevice **slaves_;
+  unsigned int num_slaves_;
+  string interface_;
+
+  vector<diagnostic_msgs::DiagnosticStatus> statuses_;
+  vector<diagnostic_msgs::KeyValue> values_;
+  diagnostic_updater::DiagnosticStatusWrapper status_;
+};
+
 
 class EthercatHardware
 {
@@ -89,11 +206,6 @@ public:
   void init(char *interface, bool allow_unprogrammed);
 
   /*!
-   * \brief Publish diagnostic messages
-   */
-  void publishDiagnostics();
-
-  /*!
    * \brief Collects diagnotics from all devices.
    */
   void collectDiagnostics();
@@ -105,10 +217,21 @@ public:
    */
   bool txandrx_PD(unsigned buffer_size, unsigned char* buffer, unsigned tries);
 
+  /*!
+   * \brief Ask one or all EtherCAT devices to publish (motor) traces
+   * \param position device ring position to publish trace for.  Use -1 to trigger all devices.
+   * \param reason Message to put in trace as reason. 
+   * \param level Level to put in trace (aka ERROR=2, WARN=1, OK=0)
+   * \param delay Publish trace after delay cyles.  For 1kHz realtime loop 1cycle = 1ms.
+   * \return Return true if device supports publishing trace.  False, if not.   
+   *         If all devices are triggered, returns true if any device publishes trace.
+   */
+  bool publishTrace(int position, const string &reason, unsigned level, unsigned delay);
+
   pr2_hardware_interface::HardwareInterface *hw_;
 
 private:
-  void diagnosticsThreadFunc();
+  static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
   struct netif *ni_;
   string interface_;
@@ -123,32 +246,20 @@ private:
   unsigned char *this_buffer_;
   unsigned char *prev_buffer_;
   unsigned char *buffers_;
-  unsigned char *diagnostics_buffer_;
   unsigned int buffer_size_;
 
   bool halt_motors_;
   unsigned int reset_state_;
 
-  realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
-  realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
-  struct EthercatHardwareDiagnostics {
-    EthercatHardwareDiagnostics() : acc_() { }
-    accumulator_set<double, stats<tag::max, tag::mean> > acc_;
-    double max_roundtrip_;
-    int txandrx_errors_;
-    unsigned device_count_;
-    bool pd_error_;
-  } diagnostics_;
-  boost::condition_variable diagnostics_cond_;
-  boost::mutex diagnostics_mutex_;
-  boost::thread diagnostics_thread_;
-  bool diagnostics_ready_;
-
+  void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher
+  static void updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc);
+  EthercatHardwareDiagnostics diagnostics_;
+  EthercatHardwareDiagnosticsPublisher diagnostics_publisher_;
   ros::Time last_published_;
+  ros::Time last_reset_;
+
+  realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
   ros::Time motor_last_published_;
-  
-  vector<diagnostic_msgs::DiagnosticStatus> statuses_;
-  vector<diagnostic_msgs::KeyValue> values_;
 
   EthercatOobCom *oob_com_;  
 

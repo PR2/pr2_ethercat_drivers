@@ -38,6 +38,8 @@
 #include <dll/ethercat_logical_addressed_telegram.h>
 #include <dll/ethercat_frame.h>
 
+#include <iomanip>
+
 bool et1x00_error_counters::isGreaterThan(unsigned value) const
 {
   if ((pdi_error>value) || (epu_error>value)) {
@@ -98,7 +100,10 @@ void et1x00_error_counters::zero()
 }
 
 
-EthercatPortDiagnostics::EthercatPortDiagnostics() 
+EthercatPortDiagnostics::EthercatPortDiagnostics() :
+  hasLink(false),
+  isClosed(false),
+  hasCommunication(false)
 {
   zeroTotals();
 }
@@ -539,18 +544,34 @@ void EthercatDevice::ethercatDiagnostics(diagnostic_updater::DiagnosticStatusWra
 }
 
 
-void EthercatDevice::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *)
+void EthercatDevice::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   stringstream str;
-  str << "EtherCAT Device (" << sh_->get_ring_position() << ")";
+  str << "EtherCAT Device (" << std::setw(2) << std::setfill('0') << sh_->get_ring_position() << ")";
   d.name = str.str();
+  str.str("");
+  str << sh_->get_product_code() << '-' << sh_->get_serial();
+  d.hardware_id = str.str();
+
   d.message = "";
   d.level = 0;
 
+  d.clear();
   d.addf("Position", "%02d", sh_->get_ring_position());
   d.addf("Product code", "%08x", sh_->get_product_code());
   d.addf("Serial", "%08x", sh_->get_serial());
   d.addf("Revision", "%08x", sh_->get_revision());
 
   this->ethercatDiagnostics(d, 4); //assume unknown device has 4 ports
+}
+
+void EthercatDevice::multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer)
+{
+  // Clean up recycled status object before reusing it.
+  diagnostic_status_.clearSummary();
+  diagnostic_status_.clear();
+
+  // If child-class does not implement multiDiagnostics(), fall back to using slave's diagnostic() function
+  diagnostics(diagnostic_status_, buffer);
+  vec.push_back(diagnostic_status_);
 }

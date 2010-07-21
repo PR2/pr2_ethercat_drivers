@@ -160,6 +160,8 @@ WG0XDiagnostics::WG0XDiagnostics() :
   bridge_over_temp_total_(0),
   operate_disable_total_(0),
   watchdog_disable_total_(0),
+  lock_errors_(0),
+  checksum_errors_(0),
   zero_offset_(0),
   cached_zero_offset_(0)
 {
@@ -216,6 +218,17 @@ WG0X::~WG0X()
   delete sh_->get_fmmu_config();
   delete sh_->get_pd_config();
   delete motor_model_;
+}
+
+WG06::WG06() :
+  accelerometer_samples_(0), 
+  accelerometer_missed_samples_(0),
+  first_publish_(true),
+  last_pressure_time_(0),
+  pressure_publisher_(0),
+  accel_publisher_(0)
+{
+
 }
   
 WG06::~WG06()
@@ -836,7 +849,13 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   {
     WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
     WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
-    int count = min(uint8_t(4), uint8_t(status->accel_count_ - last_status->accel_count_));
+    int count = uint8_t(status->accel_count_ - last_status->accel_count_);
+    accelerometer_samples_ += count;
+    // Only most recent 4 samples of accelerometer data is available in status data
+    // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
+    // If count is greater than 4, then some data has been "missed".
+    accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
+    count = min(4, count);
     accelerometer_.state_.samples_.resize(count);
     accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
     for (int i = 0; i < count; ++i)
@@ -1066,6 +1085,16 @@ end:
   return rv;
 }
 
+bool WG0X::publishTrace(const string &reason, unsigned level, unsigned delay)
+{
+  if (motor_model_) 
+  {
+    motor_model_->flagPublish(reason, level, delay);
+    return true;
+  }
+  return false;
+}
+
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
@@ -1271,6 +1300,7 @@ int WG0X::readEeprom(EthercatCom *com)
 {
   assert(sizeof(actuator_info_) == 264);
   WG0XSpiEepromCmd cmd;
+  memset(&cmd,0,sizeof(cmd));
   cmd.build_read(ACTUATOR_INFO_PAGE);
   if (sendSpiCommand(com, &cmd)) {
     fprintf(stderr, "ERROR SENDING SPI EEPROM READ COMMAND\n");
@@ -1478,7 +1508,7 @@ bool WG0X::clearReadMailbox(EthercatCom *com)
   // Create Ethernet packet with two EtherCAT telegrams inside of it : 
   //  - One telegram to read first byte of mailbox
   //  - One telegram to read last byte of mailbox
-  unsigned char unused[1];
+  unsigned char unused[1] = {0};
   NPRD_Telegram read_start(
             logic->get_idx(),
             station_addr,
@@ -1563,7 +1593,7 @@ bool WG0X::waitForReadMailboxReady(EthercatCom *com)
   
   do {      
     // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus;
+    uint8_t SyncManStatus=0;
     const unsigned SyncManAddr = 0x805+(MBX_STATUS_SYNCMAN_NUM*8);
     if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
       ++good_results;
@@ -1615,7 +1645,7 @@ bool WG0X::waitForWriteMailboxReady(EthercatCom *com)
   
   do {      
     // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus;
+    uint8_t SyncManStatus=0;
     const unsigned SyncManAddr = 0x805+(MBX_COMMAND_SYNCMAN_NUM*8);
     if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
       ++good_results;
@@ -1687,7 +1717,7 @@ bool WG0X::writeMailboxInternal(EthercatCom *com, void const *data, unsigned len
   //  2. Write data into write mailbox
   {
     // Build frame with 2-NPRD + 2 NPWR
-    unsigned char unused[1];
+    unsigned char unused[1] = {0};
     NPWR_Telegram write_start(
                               logic->get_idx(),
                               station_addr,
@@ -1900,7 +1930,7 @@ bool WG0X::readMailboxInternal(EthercatCom *com, void *data, unsigned length)
     read_length = length;
  }
 
-  unsigned char unused[1];
+  unsigned char unused[1] = {0};
   NPRD_Telegram read_start(
                            logic->get_idx(),
                            station_addr,
@@ -2072,6 +2102,7 @@ int WG0X::readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned 
   //   is the right data, or just junk left over from last time.
   { 
     WG0XMbxCmd stat;
+    memset(&stat,0,sizeof(stat));
     // Read data + 1byte checksum from mailbox
     if (!readMailboxInternal(com, &stat, length+1)) 
     {
@@ -2439,8 +2470,49 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   WG0X::diagnostics(d, buffer);
-  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+  
+  pr2_hardware_interface::AccelerometerCommand acmd(accelerometer_.command_);
 
+  const char * range_str = 
+    (acmd.range_ == 0) ? "+/-2G" :
+    (acmd.range_ == 1) ? "+/-4G" :
+    (acmd.range_ == 2) ? "+/-8G" :
+    "INVALID";
+
+  const char * bandwidth_str = 
+    (acmd.bandwidth_ == 6) ? "1500Hz" :
+    (acmd.bandwidth_ == 5)  ? "750Hz" :
+    (acmd.bandwidth_ == 4)  ? "375Hz" :
+    (acmd.bandwidth_ == 3)  ? "190Hz" :
+    (acmd.bandwidth_ == 2)  ? "100Hz" :
+    (acmd.bandwidth_ == 1)   ? "50Hz" :
+    (acmd.bandwidth_ == 0)   ? "25Hz" :
+    "INVALID";
+
+  // Board revB=1 and revA=0 does not have accelerometer
+  bool has_accelerometer = (board_major_ >= 2);
+  double sample_frequency = 0.0;
+  ros::Time current_time(ros::Time::now());
+  if (!first_publish_)
+  {
+    sample_frequency = double(accelerometer_samples_) / (current_time - last_publish_time_).toSec();
+    {
+      if (((sample_frequency < 2000) || (sample_frequency > 4000)) && has_accelerometer)
+      {
+        d.mergeSummary(d.WARN, "Bad accelerometer sampling frequency");
+      }
+    }
+  }
+  accelerometer_samples_ = 0;
+  last_publish_time_ = current_time;
+  first_publish_ = false;
+
+  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+  d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
+  d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
+  d.addf("Accelerometer sample frequency", "%f", sample_frequency);
+  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
+                                   
 }
 
 void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
