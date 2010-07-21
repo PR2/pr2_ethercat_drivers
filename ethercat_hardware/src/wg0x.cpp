@@ -219,6 +219,17 @@ WG0X::~WG0X()
   delete sh_->get_pd_config();
   delete motor_model_;
 }
+
+WG06::WG06() :
+  accelerometer_samples_(0), 
+  accelerometer_missed_samples_(0),
+  first_publish_(true),
+  last_pressure_time_(0),
+  pressure_publisher_(0),
+  accel_publisher_(0)
+{
+
+}
   
 WG06::~WG06()
 {
@@ -838,7 +849,13 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   {
     WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
     WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
-    int count = min(uint8_t(4), uint8_t(status->accel_count_ - last_status->accel_count_));
+    int count = uint8_t(status->accel_count_ - last_status->accel_count_);
+    accelerometer_samples_ += count;
+    // Only most recent 4 samples of accelerometer data is available in status data
+    // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
+    // If count is greater than 4, then some data has been "missed".
+    accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
+    count = min(4, count);
     accelerometer_.state_.samples_.resize(count);
     accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
     for (int i = 0; i < count; ++i)
@@ -2453,8 +2470,49 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
 void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   WG0X::diagnostics(d, buffer);
-  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+  
+  pr2_hardware_interface::AccelerometerCommand acmd(accelerometer_.command_);
 
+  const char * range_str = 
+    (acmd.range_ == 0) ? "+/-2G" :
+    (acmd.range_ == 1) ? "+/-4G" :
+    (acmd.range_ == 2) ? "+/-8G" :
+    "INVALID";
+
+  const char * bandwidth_str = 
+    (acmd.bandwidth_ == 6) ? "1500Hz" :
+    (acmd.bandwidth_ == 5)  ? "750Hz" :
+    (acmd.bandwidth_ == 4)  ? "375Hz" :
+    (acmd.bandwidth_ == 3)  ? "190Hz" :
+    (acmd.bandwidth_ == 2)  ? "100Hz" :
+    (acmd.bandwidth_ == 1)   ? "50Hz" :
+    (acmd.bandwidth_ == 0)   ? "25Hz" :
+    "INVALID";
+
+  // Board revB=1 and revA=0 does not have accelerometer
+  bool has_accelerometer = (board_major_ >= 2);
+  double sample_frequency = 0.0;
+  ros::Time current_time(ros::Time::now());
+  if (!first_publish_)
+  {
+    sample_frequency = double(accelerometer_samples_) / (current_time - last_publish_time_).toSec();
+    {
+      if (((sample_frequency < 2000) || (sample_frequency > 4000)) && has_accelerometer)
+      {
+        d.mergeSummary(d.WARN, "Bad accelerometer sampling frequency");
+      }
+    }
+  }
+  accelerometer_samples_ = 0;
+  last_publish_time_ = current_time;
+  first_publish_ = false;
+
+  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
+  d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
+  d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
+  d.addf("Accelerometer sample frequency", "%f", sample_frequency);
+  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
+                                   
 }
 
 void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)

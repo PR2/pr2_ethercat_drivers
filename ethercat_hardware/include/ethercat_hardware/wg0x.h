@@ -640,7 +640,7 @@ struct WG06Pressure
 class WG06 : public WG0X
 {
 public:
-  WG06() : last_pressure_time_(0), pressure_publisher_(0), accel_publisher_(0) {}
+  WG06();
   ~WG06();
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
@@ -653,6 +653,11 @@ public:
 private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
+
+  unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
+  unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed
+  ros::Time last_publish_time_; //!< Time diagnostics was last published
+  bool first_publish_; 
 
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
