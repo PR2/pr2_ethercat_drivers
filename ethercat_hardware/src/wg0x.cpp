@@ -642,14 +642,14 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       double zero_offset;
       if (readAppRam(&com, zero_offset))
       {
-        ROS_INFO("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
+        ROS_DEBUG("Read calibration from device %s: %f", actuator_info_.name_, zero_offset);
         actuator_.state_.zero_offset_ = zero_offset;
         cached_zero_offset_ = zero_offset;
         calibration_status_ = SAVED_CALIBRATION;
       }
       else
       {
-        ROS_INFO("No calibration offset was stored on device %s", actuator_info_.name_);
+        ROS_DEBUG("No calibration offset was stored on device %s", actuator_info_.name_);
       }
     }
     else{
@@ -712,7 +712,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   {
     if (tryLockWG0XDiagnostics())
     {
-      ROS_INFO("Calibration change of %s, new %f, old %f", actuator_info_.name_, zero_offset, cached_zero_offset_);
+      ROS_DEBUG("Calibration change of %s, new %f, old %f", actuator_info_.name_, zero_offset, cached_zero_offset_);
       cached_zero_offset_ = zero_offset;
       wg0x_collect_diagnostics_.zero_offset_ = zero_offset;
       calibration_status_ = CONTROLLER_CALIBRATION;
@@ -1199,7 +1199,7 @@ void WG0X::collectDiagnostics(EthercatCom *com)
 
     if (has_app_ram_ && dg.zero_offset_ != dg.cached_zero_offset_){
       if (writeAppRam(com, dg.zero_offset_)){
-	ROS_INFO("Writing new calibration to device %s, new %f, old %f", actuator_info_.name_, dg.zero_offset_, dg.cached_zero_offset_);
+	ROS_DEBUG("Writing new calibration to device %s, new %f, old %f", actuator_info_.name_, dg.zero_offset_, dg.cached_zero_offset_);
 	dg.cached_zero_offset_ = dg.zero_offset_;
       }
       else{
