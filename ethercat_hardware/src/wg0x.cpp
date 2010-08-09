@@ -199,7 +199,7 @@ WG0X::WG0X() :
   fpga_internal_reset_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
-  has_app_ram_(false),
+  app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL)
 {
   int error;
@@ -353,7 +353,7 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 {
   if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
   {
-    has_app_ram_ = true;
+    app_ram_status_ = APP_RAM_PRESENT;
   }
 
   int retval = WG0X::initialize(hw, allow_unprogrammed);
@@ -386,7 +386,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 {
   if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
   {
-    has_app_ram_ = true;
+    app_ram_status_ = APP_RAM_PRESENT;
   }
 
   int retval = WG0X::initialize(hw, allow_unprogrammed);
@@ -450,6 +450,9 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
 int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
+  // WG021 has no use for application ram
+  app_ram_status_ = APP_RAM_NOT_APPLICABLE;
+
   int retval = WG0X::initialize(hw, allow_unprogrammed);
 
   // Register digital outs with pr2_hardware_interface::HardwareInterface
@@ -637,7 +640,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     }
 
     // If it is supported, read application ram data.
-    if (has_app_ram_)
+    if (app_ram_status_ == APP_RAM_PRESENT)
     {
       double zero_offset;
       if (readAppRam(&com, zero_offset))
@@ -652,8 +655,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         ROS_DEBUG("No calibration offset was stored on device %s", actuator_info_.name_);
       }
     }
-    else{
+    else if (app_ram_status_ == APP_RAM_MISSING)
+    {
       ROS_WARN("Device %s does not support storing calibration offsets", actuator_info_.name_);
+    }
+    else if (app_ram_status_ == APP_RAM_NOT_APPLICABLE)
+    {
+      // don't produce warning
     }
 
   }
@@ -1197,7 +1205,8 @@ void WG0X::collectDiagnostics(EthercatCom *com)
   { // Try writing zero offset to to WG0X devices that have application ram
     WG0XDiagnostics &dg(wg0x_collect_diagnostics_);
 
-    if (has_app_ram_ && dg.zero_offset_ != dg.cached_zero_offset_){
+    if ((app_ram_status_ == APP_RAM_PRESENT) && (dg.zero_offset_ != dg.cached_zero_offset_))
+    {
       if (writeAppRam(com, dg.zero_offset_)){
 	ROS_DEBUG("Writing new calibration to device %s, new %f, old %f", actuator_info_.name_, dg.zero_offset_, dg.cached_zero_offset_);
 	dg.cached_zero_offset_ = dg.zero_offset_;
