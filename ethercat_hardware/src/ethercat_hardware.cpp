@@ -279,7 +279,9 @@ EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(const
   publisher_(ros::NodeHandle(name), "/diagnostics", 1),
   diagnostics_buffer_(NULL),
   slaves_(NULL),
-  num_slaves_(0)
+  num_slaves_(0),
+  last_dropped_packet_count_(0),
+  last_dropped_packet_time_(0)
 {
   diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
@@ -357,6 +359,8 @@ void EthercatHardwareDiagnosticsPublisher::timingInformation(
 
 void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 {  
+  ros::Time now(ros::Time::now());
+
   // Publish status of EtherCAT master
   status_.clearSummary();
   status_.clear();    
@@ -432,6 +436,19 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
       rx_late_pkt_rtt_us_avg = ((double)c->rx_late_pkt_rtt_us_sum)/((double)c->rx_late_pkt);
     }
     status_.addf("RX Late Packet Avg RTT", "%f", rx_late_pkt_rtt_us_avg);
+
+    // Check for newly dropped packets
+    if (c->dropped > last_dropped_packet_count_)
+    {
+      last_dropped_packet_time_ = now;
+      last_dropped_packet_count_ = c->dropped;
+    }
+  }
+
+  // Create error message if packet has been dropped recently
+  if ((last_dropped_packet_count_ > 0) && ((now - last_dropped_packet_time_).toSec() < dropped_packet_warning_hold_time_))
+  {
+    status_.mergeSummaryf(status_.WARN, "Dropped packets in last %d seconds", dropped_packet_warning_hold_time_);
   }
 
   statuses_.clear();
