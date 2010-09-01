@@ -14,6 +14,7 @@
 
 #include <boost/utility.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/thread/condition.hpp>  // Missing from realtime_publisher : wg-ros-pkg Ticket #4682
 
 class MotorModel : private boost::noncopyable
 {

@@ -513,7 +513,15 @@ protected:
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
 
-  bool has_app_ram_; // True if device support application ram
+  //! Different possible states for application ram on device. 
+  //  Application ram is non-volitile memory that application can use to store temporary
+  //  data between runs.
+  //  Currently app ram is used to store zero offset of joint after calibration
+  //    PRESENT - App ram is available
+  //    MISSING - App ram is missing but would typically be availble
+  //    NOT_APPLICABLE - App ram is not availble, but is is not needed for this type of device 
+  enum AppRamStatus { APP_RAM_PRESENT=1, APP_RAM_MISSING=2, APP_RAM_NOT_APPLICABLE=3 };
+  AppRamStatus app_ram_status_; 
   bool readAppRam(EthercatCom *com, double &zero_offset);
   bool writeAppRam(EthercatCom *com, double zero_offset);
 
