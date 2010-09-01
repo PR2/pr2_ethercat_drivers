@@ -82,7 +82,7 @@ struct EthercatHardwareDiagnostics
   unsigned halt_motors_error_count_;    //!< Number of transitions into halt state due to device error
   struct netif_counters counters_;
   bool input_thread_is_stopped_;
-  bool motors_halted_; //!< True if motors are halted
+  bool motors_halted_; //!< True if motors are halted  
 
   static const bool collect_extra_timing_ = true;
 };
@@ -171,6 +171,13 @@ private:
   EthercatDevice **slaves_;
   unsigned int num_slaves_;
   string interface_;
+
+  //! Count of dropped packets last diagnostics cycle
+  uint64_t last_dropped_packet_count_;
+  //! Time last packet was dropped 0 otherwise.  Used for warning about dropped packets. 
+  ros::Time last_dropped_packet_time_; 
+  //! Number of seconds since late dropped packet to keep warning 
+  static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
