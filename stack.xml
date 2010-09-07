@@ -13,7 +13,8 @@
   <depend stack="diagnostics" /> <!-- diagnostic_updater -->
   <depend stack="pr2_common" /> <!-- pr2_msgs -->
   <depend stack="pr2_mechanism" /> <!-- pr2_hardware_interface, realtime_tools -->
-  <depend stack="ros" /> <!-- wxswig, rostest, rospy, roscpp -->
+  <depend stack="ros" /> <!-- rostest, rospy, roscpp -->
+  <depend stack="rx" /> <!-- wxswig -->
   <depend stack="visualization_common" /> <!-- visualization_msgs -->
 
 </stack>
