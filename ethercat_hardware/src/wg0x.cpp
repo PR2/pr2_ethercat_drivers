@@ -35,6 +35,7 @@
 #include <iomanip>
 
 #include <math.h>
+#include <stddef.h>
 
 #include <ethercat_hardware/wg0x.h>
 
@@ -44,6 +45,7 @@
 #include <dll/ethercat_frame.h>
 
 #include <boost/crc.hpp>
+#include <boost/static_assert.hpp>
 
 PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
 PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
@@ -560,9 +562,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     return -1;
   }
 
-  boost::crc_32_type crc32;
-  crc32.process_bytes(&actuator_info_, sizeof(actuator_info_)-sizeof(actuator_info_.crc32_));
-  if (actuator_info_.crc32_ == crc32.checksum())
+  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
+  boost::crc_32_type crc32_256, crc32_264;  
+  crc32_256.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_256_));
+  crc32_264.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_264_));
+  if ((actuator_info_.crc32_264_ == crc32_264.checksum()) || (actuator_info_.crc32_256_ == crc32_256.checksum()))
   {
     if (actuator_info_.major_ != 0 || actuator_info_.minor_ != 2)
     {
@@ -604,7 +610,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     ROS_WARN("WARNING: Device #%02d (%d%05d) is not programmed", 
              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
-    actuator_info_.crc32_ = 0;
+    actuator_info_.crc32_264_ = 0;
+    actuator_info_.crc32_256_ = 0;
   }
   else
   {
@@ -1162,7 +1169,18 @@ int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
 
 int WG0X::readEeprom(EthercatCom *com)
 {
-  assert(sizeof(actuator_info_) == 264);
+  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
+
+  // Since we don't know the size of the eeprom there is not always 264 bytes available.
+  // This may try to read 264 bytes, but only the first 256 bytes may be valid.  
+  // To any odd issue, zero out read buffer before asking for eeprom data.
+  memset(&actuator_info_,0,sizeof(actuator_info_));  
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) 
+  {
+    fprintf(stderr, "ERROR ZEROING EEPROM PAGE DATA\n");
+    return -1;
+  }
+
   WG0XSpiEepromCmd cmd;
   cmd.build_read(ACTUATOR_INFO_PAGE);
   if (sendSpiCommand(com, &cmd)) {
