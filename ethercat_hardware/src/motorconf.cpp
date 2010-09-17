@@ -220,8 +220,11 @@ void programDevice(int device, WG0XActuatorInfo &config, char *name, string expe
       ROS_INFO("Programming device %d, to be named: %s\n", device, name);
       strcpy(config.name_, name);
       boost::crc_32_type crc32;
-      crc32.process_bytes(&config, sizeof(config)-sizeof(config.crc32_));
-      config.crc32_ = crc32.checksum();
+      crc32.process_bytes(&config, offsetof(WG0XActuatorInfo, crc32_256_));
+      config.crc32_256_ = crc32.checksum();
+      crc32.reset();
+      crc32.process_bytes(&config, offsetof(WG0XActuatorInfo, crc32_264_));
+      config.crc32_264_ = crc32.checksum();
       wg->program(&config);
     }
     else
