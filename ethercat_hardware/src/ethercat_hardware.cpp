@@ -64,12 +64,13 @@ void EthercatHardwareDiagnostics::resetMaxTiming()
 }
 
 EthercatHardware::EthercatHardware(const std::string& name) :
+  node_(ros::NodeHandle(name)),
   hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
   diagnostics_publisher_(name), 
-  motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), 
+  motor_publisher_(node_, "motors_halted", 1, true), 
   device_loader_("ethercat_hardware", "EthercatDevice")
 {
-
+  
 }
 
 EthercatHardware::~EthercatHardware()
@@ -271,6 +272,24 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   }
 
   diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
+
+  { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
+    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000ns = 1ms
+    int timeout;
+    if (!node_.getParam("realtime_socket_timeout", timeout))
+    {
+      timeout = DEFAULT_TIMEOUT; 
+    }
+    if ((timeout <= 1) || (timeout >= 1000000))
+    {
+      ROS_ERROR("Invalid timeout (%d) for socket, using default\n", timeout);
+      timeout = DEFAULT_TIMEOUT;
+    }
+    if (set_socket_timeout(ni_, timeout))
+    {
+      ROS_ERROR("Error setting socket timeout to %d\n", timeout);      
+    }
+  }
 }
 
 

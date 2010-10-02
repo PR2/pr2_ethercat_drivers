@@ -240,6 +240,8 @@ public:
 private:
   static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
+  ros::NodeHandle node_;
+
   struct netif *ni_;
   string interface_;
 
