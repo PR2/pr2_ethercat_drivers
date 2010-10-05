@@ -42,8 +42,8 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware(const std::string& name) :
-  node_(ros::NodeHandle(name)),
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
+  hw_(0), node_(ros::NodeHandle(name)),
+  ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
   motor_publisher_(node_, "motors_halted", 1, true), 
   publisher_(node_, "/diagnostics", 1), 
   device_loader_("ethercat_hardware", "EthercatDevice")
