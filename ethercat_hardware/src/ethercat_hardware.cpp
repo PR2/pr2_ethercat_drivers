@@ -64,9 +64,9 @@ void EthercatHardwareDiagnostics::resetMaxTiming()
 }
 
 EthercatHardware::EthercatHardware(const std::string& name) :
-  node_(ros::NodeHandle(name)),
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
-  diagnostics_publisher_(name), 
+  hw_(0), node_(ros::NodeHandle(name)),
+  ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
+  diagnostics_publisher_(node_), 
   motor_publisher_(node_, "motors_halted", 1, true), 
   device_loader_("ethercat_hardware", "EthercatDevice")
 {
@@ -282,20 +282,21 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     }
     if ((timeout <= 1) || (timeout >= 1000000))
     {
-      ROS_ERROR("Invalid timeout (%d) for socket, using default\n", timeout);
+      ROS_ERROR("Invalid timeout (%d) for socket, using default", timeout);
       timeout = DEFAULT_TIMEOUT;
     }
     if (set_socket_timeout(ni_, timeout))
     {
-      ROS_ERROR("Error setting socket timeout to %d\n", timeout);      
+      ROS_ERROR("Error setting socket timeout to %d", timeout);      
     }
   }
 }
 
 
-EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(const std::string &name) :
+EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node) :
+  node_(node),
   diagnostics_ready_(false),
-  publisher_(ros::NodeHandle(name), "/diagnostics", 1),
+  publisher_(node_, "/diagnostics", 1),
   diagnostics_buffer_(NULL),
   slaves_(NULL),
   num_slaves_(0),

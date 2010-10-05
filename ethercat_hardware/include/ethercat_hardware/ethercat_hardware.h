@@ -105,7 +105,7 @@ class EthercatHardwareDiagnosticsPublisher
 {
 public:
 
-  EthercatHardwareDiagnosticsPublisher(const std::string &name);
+  EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node);
   ~EthercatHardwareDiagnosticsPublisher();
 
   /*!
@@ -156,6 +156,8 @@ private:
         const string &key, 
         const accumulator_set<double, stats<tag::max, tag::mean> > &acc,
         double max);
+
+  ros::NodeHandle node_;
 
   boost::mutex diagnostics_mutex_; //!< mutex protects all class data and cond variable
   boost::condition_variable diagnostics_cond_;
