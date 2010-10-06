@@ -1026,8 +1026,8 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   } else {
     consecutive_drops_ = 0;
   }
-  // Detect timestamps going in reverse or changing by more than 1000 seconds = 1,000,000 msec
-  if ( timestamp_jump(this_status->timestamp_,last_timestamp_,1000000) )
+  // Detect timestamps going in reverse or changing by more than 10 seconds = 10,000,000 usec
+  if ( timestamp_jump(this_status->timestamp_,last_timestamp_,10000000) )
   {
     timestamp_jump_detected_ = true;
   }
