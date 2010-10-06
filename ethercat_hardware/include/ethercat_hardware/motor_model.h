@@ -26,7 +26,7 @@ public:
   void checkPublish();
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void sample(const ethercat_hardware::MotorTraceSample &s);
-  bool verify(std::string &reason, int &level) const;
+  bool verify();
   void reset();
 protected:
   unsigned trace_size_;
@@ -44,6 +44,8 @@ protected:
   std::string publish_reason_;
   //bool new_max_current_error_;
   //bool new_max_voltage_error_;
+  int diagnostics_level_;
+  std::string diagnostics_reason_;
 
   class SimpleFilter
   {
@@ -69,9 +71,9 @@ protected:
     double max_filtered_value_;
   };  
 
-  // Lock around filter values, 
+  // Lock around values used for diagnostics, 
   // filter updates and diagnostic publishing are called from same different threads
-  boost::mutex filter_mutex_; 
+  boost::mutex diagnostics_mutex_; 
   Filter motor_voltage_error_;
   Filter abs_motor_voltage_error_;
   Filter measured_voltage_error_;
