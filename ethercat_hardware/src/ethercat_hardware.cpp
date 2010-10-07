@@ -40,7 +40,6 @@
 
 #include <net/if.h>
 #include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <boost/foreach.hpp>
 
 EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
@@ -241,19 +240,16 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   this_buffer_ = buffers_;
   prev_buffer_ = buffers_ + buffer_size_;
 
-  // Make sure motors are disabled, also collect two buffers worth of status data (for later).
+  // Make sure motors are disabled, also collect status data
   memset(this_buffer_, 0, 2 * buffer_size_);
-  if (!txandrx_PD(buffer_size_, prev_buffer_, 20))
-  {
-    ROS_FATAL("No communication with devices (1)");
-    ROS_BREAK();
-  }
-  usleep(1000);
   if (!txandrx_PD(buffer_size_, this_buffer_, 20))
   {
-    ROS_FATAL("No communication with devices (2)");
+    ROS_FATAL("No communication with devices");
     ROS_BREAK();
   }
+  
+  // prev_buffer should contain valid status data when update function is first used
+  memcpy(prev_buffer_, this_buffer_, buffer_size_);
 
   // Create pr2_hardware_interface::HardwareInterface
   hw_ = new pr2_hardware_interface::HardwareInterface();
@@ -294,17 +290,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       ROS_ERROR("Error setting socket timeout to %d", timeout);      
     }
   }
-
-  // Hint to OS that unpack functions for all device plugins should be loaded into memory
-  {
-    //static const unsigned page_size = 0x1000; //4096 bytes - default page size on x86
-    for (unsigned int slave = 0; slave < num_slaves_; ++slave)
-    {
-      slaves_[slave]->unpackState(this_buffer_, prev_buffer_);
-    }
-    ROS_ERROR("Pre-fetching unpack state");
-  }
-
 }
 
 
@@ -503,9 +488,6 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 
 void EthercatHardware::update(bool reset, bool halt)
 {
-  static int cycle_counter = 0;
-  ++cycle_counter;
-
   // Update current time
   ros::Time update_start_time(ros::Time::now());
   hw_->current_time_ = update_start_time;
@@ -532,7 +514,6 @@ void EthercatHardware::update(bool reset, bool halt)
     reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
     last_reset_ = update_start_time;
     diagnostics_.halt_after_reset_ = false;
-    ROS_WARN("Reset @ cycle %d", cycle_counter);
   }
   bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
   if (reset_devices)
@@ -595,13 +576,8 @@ void EthercatHardware::update(bool reset, bool halt)
   ros::Time unpack_end_time;
   if (diagnostics_.collect_extra_timing_)
   {
-    unpack_end_time = ros::Time::now();  // also start of publish time                   
+    unpack_end_time = ros::Time::now();  // also start of publish time                            
     diagnostics_.unpack_state_acc_((unpack_end_time - txandrx_end_time).toSec());
-    double unpack_time = (unpack_end_time - txandrx_end_time).toSec() * 1000000.0;
-    if (unpack_time > 100.0)
-    {
-      ROS_WARN("Unpack state took %f usec @ cycle %d", unpack_time, cycle_counter);
-    }
   }
 
   if ((update_start_time - last_published_) > ros::Duration(1.0))
