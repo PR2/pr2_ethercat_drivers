@@ -1080,7 +1080,7 @@ end:
     // Publish trace when:
     //  * device goes into safety lockout
     //  * controller request motor trace to be published
-    bool new_error = in_lockout_ && !has_error_;
+    bool new_error = in_lockout_ && !resetting_ && !has_error_;
     if (new_error || publish_motor_trace_.command_.data_)
     {
       const char* reason = (new_error) ? "Safety Lockout" : "Publishing manually triggered";
