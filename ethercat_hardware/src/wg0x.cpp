@@ -197,6 +197,7 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
 }
 
 WG0X::WG0X() :
+  max_current_(0.0),
   too_many_dropped_packets_(false),
   status_checksum_error_(false),
   timestamp_jump_detected_(false),
@@ -593,6 +594,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     return -1;
   }
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
+  double board_max_current = double(config_info_.absolute_current_limit_) * config_info_.nominal_current_scale_;
 
   if (readEeprom(&com) < 0)
   {
@@ -670,6 +672,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       // don't produce warning
     }
 
+    // Make sure motor current limit is less than board current limit
+    if (actuator_info_.max_current_ > board_max_current)
+    {
+      ROS_WARN("WARNING: Device #%02d : motor current limit (%f) greater than board current limit (%f)", 
+               sh_->get_ring_position(), actuator_info_.max_current_, board_max_current);
+    }
+    max_current_ = std::min(board_max_current, actuator_info_.max_current_);
   }
   else if (allow_unprogrammed)
   {
@@ -677,6 +686,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     actuator_info_.crc32_264_ = 0;
     actuator_info_.crc32_256_ = 0;
+
+    max_current_ = board_max_current;
   }
   else
   {
@@ -750,7 +761,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   actuator_.state_.last_commanded_current_ = current;
 
   // Truncate the current to limit
-  current = max(min(current, actuator_info_.max_current_), -actuator_info_.max_current_);
+  current = max(min(current, max_current_), -max_current_);
 
   // Pack command structures into EtherCAT buffer
   WG0XCommand *c = (WG0XCommand *)buffer;
@@ -798,9 +809,9 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   }
   resetting_ = reset;
 
-  // Truncate the current to limit
+  // Truncate the current to limit (do not allow negative current)
   projector_.state_.last_commanded_current_ = cmd.current_;
-  cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
+  cmd.current_ = max(min(cmd.current_, max_current_), 0.0);
 
   // Pack command structures into EtherCAT buffer
   WG021Command *c = (WG021Command *)buffer;
@@ -944,6 +955,8 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.num_encoder_errors_ = this_status->num_encoder_errors_;
 
   state.motor_voltage_ = this_status->motor_voltage_ * config_info_.nominal_voltage_scale_;
+
+  state.max_effort_ = max_current_ * actuator_info_.encoder_reduction_ * actuator_info_.motor_torque_constant_; 
 
   return verifyState(this_status, prev_status);
 }
@@ -1128,6 +1141,8 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
+
+  state.max_current_ = max_current_;
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);

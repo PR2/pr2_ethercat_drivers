@@ -486,6 +486,7 @@ protected:
 
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
+  double max_current_;         //!< min(board current limit, actuator current limit)
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
