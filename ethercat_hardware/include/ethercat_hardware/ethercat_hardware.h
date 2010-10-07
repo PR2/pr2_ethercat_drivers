@@ -164,8 +164,7 @@ private:
   bool diagnostics_ready_;
   boost::thread diagnostics_thread_;
 
-  // TOOD : Don't need realtime publisher for diagnostics data, normal ROS publisher should do
-  realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
+  ros::Publisher publisher_;
 
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
   unsigned char *diagnostics_buffer_;
@@ -181,7 +180,7 @@ private:
   //! Number of seconds since late dropped packet to keep warning 
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
-  vector<diagnostic_msgs::DiagnosticStatus> statuses_;
+  diagnostic_msgs::DiagnosticArray diagnostic_array_;
   vector<diagnostic_msgs::KeyValue> values_;
   diagnostic_updater::DiagnosticStatusWrapper status_;
 };

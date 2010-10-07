@@ -296,7 +296,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node) :
   node_(node),
   diagnostics_ready_(false),
-  publisher_(node_, "/diagnostics", 1),
+  publisher_(node_.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1)),
   diagnostics_buffer_(NULL),
   slaves_(NULL),
   num_slaves_(0),
@@ -321,8 +321,7 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Initialize diagnostic data structures
-  publisher_.msg_.status.reserve(num_slaves_ + 1);
-  statuses_.reserve(num_slaves_ + 1);
+  diagnostic_array_.status.reserve(num_slaves_ + 1);
   values_.reserve(10);
 }
 
@@ -347,7 +346,7 @@ void EthercatHardwareDiagnosticsPublisher::stop()
 {
   diagnostics_thread_.interrupt();
   diagnostics_thread_.join();
-  publisher_.stop();
+  publisher_.shutdown();
 }
 
 void EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc()
@@ -471,24 +470,20 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.mergeSummaryf(status_.WARN, "Dropped packets in last %d seconds", dropped_packet_warning_hold_time_);
   }
 
-  statuses_.clear();
-  statuses_.push_back(status_);
+  diagnostic_array_.status.clear();
+  diagnostic_array_.status.push_back(status_);
 
   // Also, collect diagnostic statuses of all EtherCAT device
   unsigned char *current = diagnostics_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    slaves_[s]->multiDiagnostics(statuses_, current);
+    slaves_[s]->multiDiagnostics(diagnostic_array_.status, current);
     current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   // Publish status of each EtherCAT device
-  if (publisher_.trylock())
-  {
-    publisher_.msg_.set_status_vec(statuses_);
-    publisher_.msg_.header.stamp = ros::Time::now();
-    publisher_.unlockAndPublish();
-  }
+  diagnostic_array_.header.stamp = ros::Time::now();
+  publisher_.publish(diagnostic_array_);
 }
 
 void EthercatHardware::update(bool reset, bool halt)
