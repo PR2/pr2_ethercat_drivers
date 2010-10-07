@@ -312,8 +312,10 @@ struct WG0XActuatorInfo
   double motor_torque_constant_; // Motor torque constant
   double encoder_reduction_;    // Reduction and sign between motor and encoder
   uint32_t pulses_per_revolution_; // # of encoder ticks per revolution
-  uint8_t pad[48];              // Pad entire structure to 264 bytes
-  uint32_t crc32_;              // CRC32 over structure (minus last 4 bytes)
+  uint8_t pad1[40];              // Pad structure to 256-4 bytes.  
+  uint32_t crc32_256_;          // CRC32 of first 256-4 bytes. (minus 4 bytes for first CRC)
+  uint8_t pad2[4];              // Pad structure to 264-4 bytes
+  uint32_t crc32_264_;          // CRC32 over entire structure (minus 4 bytes for second CRC)
 };
 
 struct WG0XStatus
@@ -470,7 +472,6 @@ public:
 
 
   void program(WG0XActuatorInfo *);
-  bool isProgrammed() { return actuator_info_.crc32_ != 0;}
 
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   virtual void collectDiagnostics(EthercatCom *com);
