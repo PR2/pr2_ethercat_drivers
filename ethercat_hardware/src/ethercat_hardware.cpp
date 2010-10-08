@@ -42,7 +42,11 @@
 #include <sys/ioctl.h>
 
 EthercatHardware::EthercatHardware(const std::string& name) :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), publisher_(ros::NodeHandle(name), "/diagnostics", 1), device_loader_("ethercat_hardware", "EthercatDevice")
+  hw_(0), node_(ros::NodeHandle(name)),
+  ni_(0), this_buffer_(0), prev_buffer_(0), diagnostics_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
+  motor_publisher_(node_, "motors_halted", 1, true), 
+  publisher_(node_, "/diagnostics", 1), 
+  device_loader_("ethercat_hardware", "EthercatDevice")
 {
   diagnostics_.max_roundtrip_ = 0;
   diagnostics_.txandrx_errors_ = 0;
@@ -232,6 +236,24 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   publisher_.msg_.status.reserve(num_slaves_ + 1);
   statuses_.reserve(num_slaves_ + 1);
   values_.reserve(10);
+  
+  { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
+    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000ns = 1ms
+    int timeout;
+    if (!node_.getParam("realtime_socket_timeout", timeout))
+    {
+      timeout = DEFAULT_TIMEOUT; 
+    }
+    if ((timeout <= 1) || (timeout >= 1000000))
+    {
+      ROS_ERROR("Invalid timeout (%d) for socket, using default", timeout);
+      timeout = DEFAULT_TIMEOUT;
+    }
+    if (set_socket_timeout(ni_, timeout))
+    {
+      ROS_ERROR("Error setting socket timeout to %d", timeout);      
+    }
+  }
 }
 
 void EthercatHardware::diagnosticsThreadFunc()

@@ -110,6 +110,8 @@ public:
 private:
   void diagnosticsThreadFunc();
 
+  ros::NodeHandle node_;
+
   struct netif *ni_;
   string interface_;
 
