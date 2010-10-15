@@ -261,6 +261,8 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
+  unsigned max_pd_retries_; //!< Max number of times to retry sending process data before halting motors
+
   void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher
   static void updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc);
   EthercatHardwareDiagnostics diagnostics_;
