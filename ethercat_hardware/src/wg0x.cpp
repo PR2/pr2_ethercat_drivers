@@ -201,6 +201,7 @@ WG0X::WG0X() :
   fpga_internal_reset_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
+  last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL)
 {
@@ -757,9 +758,24 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 }
 
+void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
+{
+  WG0X::packCommand(buffer, halt, reset);
+
+  if (reset)
+  {
+    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
+  }
+}
+
 void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   WG0X::packCommand(buffer, halt, reset);
+
+  if (reset)
+  {
+    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
+  }
 
   WG0XCommand *c = (WG0XCommand *)buffer;
 
@@ -2482,6 +2498,11 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   if (motor_model_) 
   {
     motor_model_->diagnostics(d);
+  }
+
+  if (last_num_encoder_errors_ != status->num_encoder_errors_)
+  {
+    d.mergeSummaryf(d.WARN, "Encoder errors detected");
   }
 
   d.addf("Packet count", "%d", status->packet_count_);
