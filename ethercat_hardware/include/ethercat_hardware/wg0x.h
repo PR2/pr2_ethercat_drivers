@@ -518,6 +518,7 @@ protected:
   double cached_zero_offset_;
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
+  unsigned last_num_encoder_errors_;  //!< Number of encoder errors the last time motors were reset
 
   //! Different possible states for application ram on device. 
   //  Application ram is non-volitile memory that application can use to store temporary
@@ -635,6 +636,7 @@ class WG05 : public WG0X
 {
 public:
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
+  void packCommand(unsigned char *buffer, bool halt, bool reset);  
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
   {
