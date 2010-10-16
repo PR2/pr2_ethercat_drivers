@@ -309,7 +309,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     int max_pd_retries = 20000 / timeout;  // timeout is in nanoseconds : 20msec = 20000nsec 
     static const int MAX_RETRIES=50, MIN_RETRIES=1;
     node_.getParam("max_pd_retries", max_pd_retries);
-    node_.setParam("max_pd_retries_", 1234);
     // Make sure motor halt due to dropped packet takes less than 1/10 of a second
     if ((max_pd_retries * timeout) > (MAX_TIMEOUT))
     {
