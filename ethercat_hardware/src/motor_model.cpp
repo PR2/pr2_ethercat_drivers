@@ -26,7 +26,7 @@ MotorModel::MotorModel(unsigned trace_size) :
 
 void MotorModel::reset()
 {
-  filter_mutex_.lock();
+  diagnostics_mutex_.lock();
   {
     motor_voltage_error_.reset();
     abs_motor_voltage_error_.reset();
@@ -38,8 +38,10 @@ void MotorModel::reset()
     abs_measured_current_.reset();    
     abs_board_voltage_.reset();
     abs_position_delta_.reset();
+    diagnostics_level_ = 0;
+    diagnostics_reason_ = "OK";
   }
-  filter_mutex_.unlock();
+  diagnostics_mutex_.unlock();
   previous_pwm_saturated_ = false;
   publish_delay_ = -1;
   publish_level_ = -1;
@@ -150,8 +152,10 @@ void MotorModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
   double abs_current_error; 
   double abs_current_error_max;
   double est_motor_resistance;
+  std::string reason;
+  int level;
 
-  filter_mutex_.lock(); 
+  diagnostics_mutex_.lock(); 
   {
     motor_voltage_error         = motor_voltage_error_.filter(); 
     motor_voltage_error_max     = motor_voltage_error_.filter_max(); 
@@ -162,8 +166,13 @@ void MotorModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
     abs_current_error           = abs_current_error_.filter(); 
     abs_current_error_max       = abs_current_error_.filter_max(); 
     est_motor_resistance        = motor_resistance_.filter();
+    reason                      = diagnostics_reason_;
+    level                       = diagnostics_level_;
   }
-  filter_mutex_.unlock();
+  diagnostics_mutex_.unlock();
+
+  if (level > 0)
+    d.mergeSummary(level, reason);
 
   d.addf("Motor Voltage Error %", "%f",        100.0 * motor_voltage_error);
   d.addf("Max Motor Voltage Error %", "%f",    100.0 * motor_voltage_error_max);
@@ -222,7 +231,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
 
   // Don't update filters if MCB is not enabled (halted)
   if (s.enabled) {
-    filter_mutex_.lock();
+    diagnostics_mutex_.lock();
     
     // Compare measured voltage to motor voltage.  Identify errors with broken inductor leads, etc
     measured_voltage_error_.sample(s.measured_motor_voltage - board_voltage);
@@ -267,7 +276,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
     // Update filtered resistance estimate with resistance calculated this cycle
     motor_resistance_.sample(est_motor_resistance, 0.005 * est_motor_resistance_accuracy);
 
-    filter_mutex_.unlock();
+    diagnostics_mutex_.unlock();
   }
 
   { // Add motor trace sample to trace buffer
@@ -301,7 +310,7 @@ void MotorModel::sample(const ethercat_hardware::MotorTraceSample &s)
  *  \param level  filled in with 2 (ERROR) or 1 (WARN).
  *  \return returns false if motor should halt
  */
-bool MotorModel::verify(std::string &reason, int &level) const
+bool MotorModel::verify()
 {
   const int ERROR = 2;
   const int WARN = 1;
@@ -315,20 +324,20 @@ bool MotorModel::verify(std::string &reason, int &level) const
   bool is_measured_voltage_error = abs_measured_voltage_error_.filter() > measured_voltage_error_limit;
   bool is_motor_voltage_error    = abs_motor_voltage_error_.filter() > 1.0; // 1.0 = 100% motor_voltage_error_limit  
 
-  int new_level = GOOD;
-  std::string new_reason;
+  int level = GOOD;
+  std::string reason;
 
   // Check back-EMF consistency
   if (is_motor_voltage_error || is_measured_voltage_error) 
   {
     rv = false;
-    new_level = ERROR;
-    new_reason = "Problem with the MCB, motor, encoder, or actuator model.";  
+    level = ERROR;
+    reason = "Problem with the MCB, motor, encoder, or actuator model.";  
 
     if( is_measured_voltage_error ) 
     {
       // Problem with board
-      new_reason += " Board may be damaged.";
+      reason += " Board may be damaged.";
     }
     else if (is_motor_voltage_error) 
     {
@@ -341,22 +350,22 @@ bool MotorModel::verify(std::string &reason, int &level) const
       if ((abs_measured_current_.filter() < current_epsilon) && (abs_current_error_.filter() > current_epsilon))
       {
         //measured_current_ ~= 0 -> motor open-circuit likely
-        new_reason += " Current near zero - check for unconnected motor leads.";
+        reason += " Current near zero - check for unconnected motor leads.";
       }
       else if (abs_board_voltage_.filter() < epsilon)
       {
         //motor_voltage_ ~= 0 -> motor short-circuit likely
-        new_reason += " Voltage near zero - check for short circuit.";
+        reason += " Voltage near zero - check for short circuit.";
       }
       else if (abs_velocity_.filter() < epsilon)
       {
         // motor_velocity == 0 -> encoder failure likely
-        new_reason += " Velocity near zero - check for encoder error.";
+        reason += " Velocity near zero - check for encoder error.";
       }
       else if (abs_position_delta_.filter() < encoder_tick_delta)
       {
         // encoder changing by only 0 or 1 ticks --> check for disconnected wire.
-        new_reason += " Encoder delta below 1 - check encoder wiring.";
+        reason += " Encoder delta below 1 - check encoder wiring.";
       }
     }
   }
@@ -364,24 +373,28 @@ bool MotorModel::verify(std::string &reason, int &level) const
   {
     //complain and shut down
     rv = false;
-    new_level = ERROR;
-    new_reason = "Current loop error too large (MCB failing to hit desired current)";
+    level = ERROR;
+    reason = "Current loop error too large (MCB failing to hit desired current)";
   }
   else if (abs_motor_voltage_error_.filter() > 0.7)
   {
-    new_level = WARN;
-    new_reason = "Potential problem with the MCB, motor, encoder, or actuator model.";  
+    level = WARN;
+    reason = "Potential problem with the MCB, motor, encoder, or actuator model.";  
   }
   else if (abs_current_error_.filter() > (current_error_limit_ * 0.7))
   {
-    new_level = WARN;
-    new_reason = "Potential current loop error (MCB failing to hit desired current)";  
+    level = WARN;
+    reason = "Potential current loop error (MCB failing to hit desired current)";  
   }
 
-  if (new_level > level) 
+  if (level > diagnostics_level_) 
   {
-    level = new_level;
-    reason = new_reason;
+    if (level == ERROR)      
+      flagPublish(reason, level, 100);
+    diagnostics_mutex_.lock();
+    diagnostics_level_ = level;
+    diagnostics_reason_ = reason;
+    diagnostics_mutex_.unlock();
   }    
 
   return rv;

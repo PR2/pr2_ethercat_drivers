@@ -312,8 +312,10 @@ struct WG0XActuatorInfo
   double motor_torque_constant_; // Motor torque constant
   double encoder_reduction_;    // Reduction and sign between motor and encoder
   uint32_t pulses_per_revolution_; // # of encoder ticks per revolution
-  uint8_t pad[48];              // Pad entire structure to 264 bytes
-  uint32_t crc32_;              // CRC32 over structure (minus last 4 bytes)
+  uint8_t pad1[40];              // Pad structure to 256-4 bytes.  
+  uint32_t crc32_256_;          // CRC32 of first 256-4 bytes. (minus 4 bytes for first CRC)
+  uint8_t pad2[4];              // Pad structure to 264-4 bytes
+  uint32_t crc32_264_;          // CRC32 over entire structure (minus 4 bytes for second CRC)
 };
 
 struct WG0XStatus
@@ -470,7 +472,6 @@ public:
 
 
   void program(WG0XActuatorInfo *);
-  bool isProgrammed() { return actuator_info_.crc32_ != 0;}
 
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   virtual void collectDiagnostics(EthercatCom *com);
@@ -485,6 +486,7 @@ protected:
 
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
+  double max_current_;         //!< min(board current limit, actuator current limit)
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
@@ -500,18 +502,23 @@ protected:
     MODE_RESET = (1 << 7)
   };
 
-  string reason_;
-  int level_;
-  string safetyDisableString(uint8_t status);
+  static string modeString(uint8_t mode);
+  static string safetyDisableString(uint8_t status);
   bool in_lockout_;
   bool resetting_;
   bool has_error_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
+  bool too_many_dropped_packets_;
+  bool status_checksum_error_;
   bool timestamp_jump_detected_;
   bool fpga_internal_reset_detected_;
+
+  void clearErrorFlags(void);
+
   double cached_zero_offset_;
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
+  unsigned last_num_encoder_errors_;  //!< Number of encoder errors the last time motors were reset
 
   //! Different possible states for application ram on device. 
   //  Application ram is non-volitile memory that application can use to store temporary
@@ -629,6 +636,7 @@ class WG05 : public WG0X
 {
 public:
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
+  void packCommand(unsigned char *buffer, bool halt, bool reset);  
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
   enum
   {
@@ -661,6 +669,8 @@ public:
 private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
+
+  bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
 
   unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
   unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed

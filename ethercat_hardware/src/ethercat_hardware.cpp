@@ -64,12 +64,14 @@ void EthercatHardwareDiagnostics::resetMaxTiming()
 }
 
 EthercatHardware::EthercatHardware(const std::string& name) :
-  hw_(0), ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
-  diagnostics_publisher_(name), 
-  motor_publisher_(ros::NodeHandle(name), "motors_halted", 1, true), 
+  hw_(0), node_(ros::NodeHandle(name)),
+  ni_(0), this_buffer_(0), prev_buffer_(0), buffer_size_(0), halt_motors_(true), reset_state_(0), 
+  max_pd_retries_(10),
+  diagnostics_publisher_(node_), 
+  motor_publisher_(node_, "motors_halted", 1, true), 
   device_loader_("ethercat_hardware", "EthercatDevice")
 {
-
+  
 }
 
 EthercatHardware::~EthercatHardware()
@@ -271,12 +273,63 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   }
 
   diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
+
+  { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
+    // Allow timeout to be configured at program load time with rosparam.  
+    // This will allow tweaks for systems with different realtime performace
+    static const int MAX_TIMEOUT = 100000;   // 100ms = 100,000us
+    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000us = 1ms
+    int timeout;
+    if (!node_.getParam("realtime_socket_timeout", timeout))
+    {
+      timeout = DEFAULT_TIMEOUT; 
+    }
+    if ((timeout <= 1) || (timeout > MAX_TIMEOUT))
+    {
+      int old_timeout = timeout; 
+      timeout = std::max(1, std::min(MAX_TIMEOUT, timeout));
+      ROS_WARN("Invalid timeout (%d) for socket, using %d", old_timeout, timeout);
+    }
+    if (set_socket_timeout(ni_, timeout))
+    {
+      ROS_FATAL("Error setting socket timeout to %d", timeout);      
+      sleep(1);
+      ROS_BREAK();
+    }
+
+    // When packet constaining process data is does not return after a given timeout, it is 
+    // assumed to be dropped and the process data will automatically get re-sent.
+    // After a number of retries, the driver will halt motors as a safety precaution.
+    // 
+    // The following code allows the number of process data retries to be changed with a rosparam. 
+    // This is needed because lowering the txandrx timeout makes it more likely that a 
+    // performance hickup in network or OS causes will cause the motors to halt.
+    //
+    // If number of retries is not specified, use a formula that allows 20ms of dropped packets
+    int max_pd_retries = 20000 / timeout;  // timeout is in nanoseconds : 20msec = 20000nsec 
+    static const int MAX_RETRIES=50, MIN_RETRIES=1;
+    node_.getParam("max_pd_retries", max_pd_retries);
+    // Make sure motor halt due to dropped packet takes less than 1/10 of a second
+    if ((max_pd_retries * timeout) > (MAX_TIMEOUT))
+    {
+      max_pd_retries = MAX_TIMEOUT / timeout;
+      ROS_WARN("Max PD retries is too large for given timeout.  Limiting value to %d", max_pd_retries);
+    }
+    if ((max_pd_retries < MIN_RETRIES) || (max_pd_retries > MAX_RETRIES))
+    {
+      max_pd_retries = std::max(MIN_RETRIES,std::min(MAX_RETRIES,max_pd_retries));
+      ROS_WARN("Limiting max PD retries to %d", max_pd_retries);
+    }
+    max_pd_retries = std::max(MIN_RETRIES,std::min(MAX_RETRIES,max_pd_retries));
+    max_pd_retries_ = max_pd_retries;
+  }
 }
 
 
-EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(const std::string &name) :
+EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node) :
+  node_(node),
   diagnostics_ready_(false),
-  publisher_(ros::NodeHandle(name), "/diagnostics", 1),
+  publisher_(node_.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1)),
   diagnostics_buffer_(NULL),
   slaves_(NULL),
   num_slaves_(0),
@@ -301,8 +354,7 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Initialize diagnostic data structures
-  publisher_.msg_.status.reserve(num_slaves_ + 1);
-  statuses_.reserve(num_slaves_ + 1);
+  diagnostic_array_.status.reserve(num_slaves_ + 1);
   values_.reserve(10);
 }
 
@@ -327,7 +379,7 @@ void EthercatHardwareDiagnosticsPublisher::stop()
 {
   diagnostics_thread_.interrupt();
   diagnostics_thread_.join();
-  publisher_.stop();
+  publisher_.shutdown();
 }
 
 void EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc()
@@ -451,24 +503,20 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.mergeSummaryf(status_.WARN, "Dropped packets in last %d seconds", dropped_packet_warning_hold_time_);
   }
 
-  statuses_.clear();
-  statuses_.push_back(status_);
+  diagnostic_array_.status.clear();
+  diagnostic_array_.status.push_back(status_);
 
   // Also, collect diagnostic statuses of all EtherCAT device
   unsigned char *current = diagnostics_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    slaves_[s]->multiDiagnostics(statuses_, current);
+    slaves_[s]->multiDiagnostics(diagnostic_array_.status, current);
     current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   // Publish status of each EtherCAT device
-  if (publisher_.trylock())
-  {
-    publisher_.msg_.set_status_vec(statuses_);
-    publisher_.msg_.header.stamp = ros::Time::now();
-    publisher_.unlockAndPublish();
-  }
+  diagnostic_array_.header.stamp = ros::Time::now();
+  publisher_.publish(diagnostic_array_);
 }
 
 void EthercatHardware::update(bool reset, bool halt)
@@ -522,7 +570,7 @@ void EthercatHardware::update(bool reset, bool halt)
   diagnostics_.pack_command_acc_((txandrx_start_time-update_start_time).toSec());
 
   // Send/receive device proccess data
-  bool success = txandrx_PD(buffer_size_, this_buffer_, 5);
+  bool success = txandrx_PD(buffer_size_, this_buffer_, max_pd_retries_);
 
   ros::Time txandrx_end_time(ros::Time::now());  // Also begining of unpack_state 
   diagnostics_.txandrx_acc_((txandrx_end_time - txandrx_start_time).toSec());

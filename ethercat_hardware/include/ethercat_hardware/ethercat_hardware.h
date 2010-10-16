@@ -105,7 +105,7 @@ class EthercatHardwareDiagnosticsPublisher
 {
 public:
 
-  EthercatHardwareDiagnosticsPublisher(const std::string &name);
+  EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node);
   ~EthercatHardwareDiagnosticsPublisher();
 
   /*!
@@ -157,13 +157,14 @@ private:
         const accumulator_set<double, stats<tag::max, tag::mean> > &acc,
         double max);
 
+  ros::NodeHandle node_;
+
   boost::mutex diagnostics_mutex_; //!< mutex protects all class data and cond variable
   boost::condition_variable diagnostics_cond_;
   bool diagnostics_ready_;
   boost::thread diagnostics_thread_;
 
-  // TOOD : Don't need realtime publisher for diagnostics data, normal ROS publisher should do
-  realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
+  ros::Publisher publisher_;
 
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
   unsigned char *diagnostics_buffer_;
@@ -179,7 +180,7 @@ private:
   //! Number of seconds since late dropped packet to keep warning 
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
-  vector<diagnostic_msgs::DiagnosticStatus> statuses_;
+  diagnostic_msgs::DiagnosticArray diagnostic_array_;
   vector<diagnostic_msgs::KeyValue> values_;
   diagnostic_updater::DiagnosticStatusWrapper status_;
 };
@@ -240,6 +241,8 @@ public:
 private:
   static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
+  ros::NodeHandle node_;
+
   struct netif *ni_;
   string interface_;
 
@@ -257,6 +260,8 @@ private:
 
   bool halt_motors_;
   unsigned int reset_state_;
+
+  unsigned max_pd_retries_; //!< Max number of times to retry sending process data before halting motors
 
   void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher
   static void updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc);
