@@ -74,7 +74,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
  #include <stdlib.h>
  
  #define ETHERCAT_DEVICE_NAME_MAX_LENGTH 256
-@@ -50,20 +51,91 @@
+@@ -50,20 +51,92 @@
  #define externC extern "C"
  #else
  
@@ -152,6 +152,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
 +  uint64_t dropped;
 +  uint64_t tx_error;
 +  uint64_t tx_net_down;
++  uint64_t tx_would_block;
 +  uint64_t tx_full;
 +  uint64_t rx_runt_pkt;
 +  uint64_t rx_not_ecat;
@@ -170,7 +171,7 @@ Index: include/ethercat/arch-RTnet/ethercat/netif.h
  /// Generic ethercat interface towards lower level drivers. 
  /** It should be readily re-implemented for different OSes such as
      RTAI, linux, ...     etc. (For the ease of porting the interface
-@@ -75,12 +147,76 @@
+@@ -75,12 +148,76 @@
        packages/io/eth/current/src/ethercatmaster/eth_drv.c
        and mapped in eth_drv_init()
     */
@@ -1644,7 +1645,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
  	return ret;
  }
  
-@@ -142,112 +253,808 @@
+@@ -142,112 +253,817 @@
  	unsigned char  data [MAX_ETH_DATA];
  };
  
@@ -1756,8 +1757,17 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +    if (error == ENETDOWN) {
 +      ++ni->counters.tx_net_down;
 +      if ((ni->counters.tx_net_down & 0xFFF) == 1) {
-+        ec_log(EC_LOG_FATAL, "%s: %lld times : %s\n", 
++        ec_log(EC_LOG_FATAL, "%s: %llu times : %s\n", 
 +               __func__, (unsigned long long) ni->counters.tx_net_down, my_strerror(error,errbuf,sizeof(errbuf)));
++      }
++    } 
++    else if (error == EWOULDBLOCK)
++    {
++      ++ni->counters.tx_would_block;
++      if ((ni->counters.tx_would_block & 0xFFF) == 1)
++      {
++        ec_log(EC_LOG_FATAL, "%s: %llu times : Cannot Send : would block\n", 
++               __func__, (unsigned long long) ni->counters.tx_would_block);
 +      }
 +    } else {
 +    ec_log(EC_LOG_FATAL, "%s: Cannot Send : %s\n", 
@@ -1897,7 +1907,7 @@ Index: src/arch/posix/ethercat_posix_drv.c
 +    ++ni->counters.rx_other_eml;
 +    if ((ni->counters.rx_other_eml & 0x3FF) == 1) {
 +      ec_log(EC_LOG_WARNING, 
-+             "%s: received %lld packets sent out from another EML instance\n",
++             "%s: received %llu packets sent out from another EML instance\n",
 +             __func__, (unsigned long long) ni->counters.rx_other_eml);
 +    }
 +    return RECOVERABLE_ERROR;
