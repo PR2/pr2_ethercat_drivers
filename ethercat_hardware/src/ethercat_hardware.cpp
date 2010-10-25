@@ -357,6 +357,8 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
   statuses_.reserve(num_slaves_ + 1);
   values_.reserve(10);
 
+  ethernet_interface_info_.initialize(interface);
+
   diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
@@ -442,7 +444,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.add("Motors halted", diagnostics_.motors_halted_ ? "true" : "false");
   status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
-  status_.add("Interface", interface_);
+  ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
 
   // Produce warning if number of devices changed after device initalization

@@ -43,6 +43,7 @@
 
 #include "ethercat_hardware/ethercat_device.h"
 #include "ethercat_hardware/ethercat_com.h"
+#include "ethercat_hardware/ethernet_interface_info.h"
 
 #include <realtime_tools/realtime_publisher.h>
 
@@ -180,6 +181,9 @@ private:
   ros::Time last_dropped_packet_time_; 
   //! Number of seconds since late dropped packet to keep warning 
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
+
+  //! Information about Ethernet interface used for EtherCAT communication
+  EthernetInterfaceInfo ethernet_interface_info_;
 
   vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
