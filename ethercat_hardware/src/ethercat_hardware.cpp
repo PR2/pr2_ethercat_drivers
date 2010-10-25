@@ -476,6 +476,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.addf("TX Errors",           "%llu", (unsigned long long)c->tx_error);
     status_.addf("TX Network Down",     "%llu", (unsigned long long)c->tx_net_down);
     status_.addf("TX Would Block",      "%llu", (unsigned long long)c->tx_would_block);
+    status_.addf("TX No Buffers",       "%llu", (unsigned long long)c->tx_no_bufs);
     status_.addf("TX Queue Full",       "%llu", (unsigned long long)c->tx_full);
     status_.addf("RX Runt Packet",      "%llu", (unsigned long long)c->rx_runt_pkt);
     status_.addf("RX Not EtherCAT",     "%llu", (unsigned long long)c->rx_not_ecat);
@@ -767,6 +768,7 @@ void EthercatHardware::printCounters(std::ostream &os)
      << " tx_error      = " << c.tx_error << endl
      << " tx_net_down   = " << c.tx_net_down << endl
      << " tx_would_block= " << c.tx_would_block << endl
+     << " tx_no_bufs    = " << c.tx_no_bufs << endl
      << " tx_full       = " << c.tx_full << endl
      << " rx_runt_pkt   = " << c.rx_runt_pkt << endl
      << " rx_not_ecat   = " << c.rx_not_ecat << endl
