@@ -336,7 +336,6 @@ EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::
   last_dropped_packet_count_(0),
   last_dropped_packet_time_(0)
 {
-  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
@@ -357,6 +356,8 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
   publisher_.msg_.status.reserve(num_slaves_ + 1);
   statuses_.reserve(num_slaves_ + 1);
   values_.reserve(10);
+
+  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 void EthercatHardwareDiagnosticsPublisher::publish(
