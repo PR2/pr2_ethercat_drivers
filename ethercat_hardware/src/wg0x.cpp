@@ -2422,15 +2422,29 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   }
 
   {
-    static const double WG05_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
+
     const WG0XDiagnosticsInfo &di(p.diagnostics_info_);
     //d.addf("PDO Command IRQ Count", "%d", di.pdo_command_irq_count_);
     d.addf("MBX Command IRQ Count", "%d", di.mbx_command_irq_count_);
     d.addf("PDI Timeout Error Count", "%d", di.pdi_timeout_error_count_);
     d.addf("PDI Checksum Error Count", "%d", di.pdi_checksum_error_count_);
     unsigned product = sh_->get_product_code();
-    if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) {
-      d.addf("Supply Current", "%f", di.supply_current_in_ * WG05_SUPPLY_CURRENT_SCALE);
+
+    // Current scale 
+    if ((product == WG05::PRODUCT_CODE) && (board_major_ == 1))
+    {
+      // WG005B measure current going into and out-of H-bridge (not entire board)
+      static const double WG005B_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
+      double bridge_supply_current = double(di.supply_current_in_) * WG005B_SUPPLY_CURRENT_SCALE;
+      d.addf("Bridge Supply Current", "%f", bridge_supply_current);
+    }
+    else if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) 
+    {
+      // WG005[CDEF] measures curret going into entire board.  It cannot measure negative (regenerative) current values.
+      // WG021A == WG005E,  WG021B == WG005F
+      static const double WG005_SUPPLY_CURRENT_SCALE = ((82.0 * 2.5) / (0.01 * 5100.0 * 32768.0));
+      double supply_current = double(di.supply_current_in_) * WG005_SUPPLY_CURRENT_SCALE;
+      d.addf("Supply Current", "%f",  supply_current);
     }
     d.addf("Configured Offset A", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_A_);
     d.addf("Configured Offset B", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_B_);

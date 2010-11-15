@@ -43,6 +43,7 @@
 
 #include "ethercat_hardware/ethercat_device.h"
 #include "ethercat_hardware/ethercat_com.h"
+#include "ethercat_hardware/ethernet_interface_info.h"
 
 #include <realtime_tools/realtime_publisher.h>
 
@@ -181,6 +182,8 @@ private:
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
   diagnostic_msgs::DiagnosticArray diagnostic_array_;
+  //! Information about Ethernet interface used for EtherCAT communication
+  EthernetInterfaceInfo ethernet_interface_info_;
   vector<diagnostic_msgs::KeyValue> values_;
   diagnostic_updater::DiagnosticStatusWrapper status_;
 };

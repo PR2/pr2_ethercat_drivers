@@ -336,7 +336,6 @@ EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::
   last_dropped_packet_count_(0),
   last_dropped_packet_time_(0)
 {
-  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
@@ -356,6 +355,10 @@ void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, u
   // Initialize diagnostic data structures
   diagnostic_array_.status.reserve(num_slaves_ + 1);
   values_.reserve(10);
+
+  ethernet_interface_info_.initialize(interface);
+
+  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 void EthercatHardwareDiagnosticsPublisher::publish(
@@ -440,7 +443,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.add("Motors halted", diagnostics_.motors_halted_ ? "true" : "false");
   status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
-  status_.add("Interface", interface_);
+  ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
 
   // Produce warning if number of devices changed after device initalization
@@ -465,23 +468,25 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   { // Publish ethercat network interface counters 
     const struct netif_counters *c = &diagnostics_.counters_;
     status_.add("Input Thread",       (diagnostics_.input_thread_is_stopped_ ? "Stopped" : "Running"));
-    status_.addf("Sent Packets",        "%lld", c->sent);
-    status_.addf("Received Packets",    "%lld", c->received);
-    status_.addf("Collected Packets",   "%lld", c->collected);
-    status_.addf("Dropped Packets",     "%lld", c->dropped);
-    status_.addf("TX Errors",           "%lld", c->tx_error);
-    status_.addf("TX Network Down",     "%lld", c->tx_net_down);
-    status_.addf("TX Queue Full",       "%lld", c->tx_full);
-    status_.addf("RX Runt Packet",      "%lld", c->rx_runt_pkt);
-    status_.addf("RX Not EtherCAT",     "%lld", c->rx_not_ecat);
-    status_.addf("RX Other EML",        "%lld", c->rx_other_eml);
-    status_.addf("RX Bad Index",        "%lld", c->rx_bad_index);
-    status_.addf("RX Bad Sequence",     "%lld", c->rx_bad_seqnum);
-    status_.addf("RX Duplicate Sequence", "%lld", c->rx_dup_seqnum);    
-    status_.addf("RX Duplicate Packet", "%lld", c->rx_dup_pkt);    
-    status_.addf("RX Bad Order",        "%lld", c->rx_bad_order);    
-    status_.addf("RX Late Packet",      "%lld", c->rx_late_pkt);
-    status_.addf("RX Late Packet RTT",  "%lld", c->rx_late_pkt_rtt_us);
+    status_.addf("Sent Packets",        "%llu", (unsigned long long)c->sent);
+    status_.addf("Received Packets",    "%llu", (unsigned long long)c->received);
+    status_.addf("Collected Packets",   "%llu", (unsigned long long)c->collected);
+    status_.addf("Dropped Packets",     "%llu", (unsigned long long)c->dropped);
+    status_.addf("TX Errors",           "%llu", (unsigned long long)c->tx_error);
+    status_.addf("TX Network Down",     "%llu", (unsigned long long)c->tx_net_down);
+    status_.addf("TX Would Block",      "%llu", (unsigned long long)c->tx_would_block);
+    status_.addf("TX No Buffers",       "%llu", (unsigned long long)c->tx_no_bufs);
+    status_.addf("TX Queue Full",       "%llu", (unsigned long long)c->tx_full);
+    status_.addf("RX Runt Packet",      "%llu", (unsigned long long)c->rx_runt_pkt);
+    status_.addf("RX Not EtherCAT",     "%llu", (unsigned long long)c->rx_not_ecat);
+    status_.addf("RX Other EML",        "%llu", (unsigned long long)c->rx_other_eml);
+    status_.addf("RX Bad Index",        "%llu", (unsigned long long)c->rx_bad_index);
+    status_.addf("RX Bad Sequence",     "%llu", (unsigned long long)c->rx_bad_seqnum);
+    status_.addf("RX Duplicate Sequence", "%llu", (unsigned long long)c->rx_dup_seqnum);    
+    status_.addf("RX Duplicate Packet", "%llu", (unsigned long long)c->rx_dup_pkt);    
+    status_.addf("RX Bad Order",        "%llu", (unsigned long long)c->rx_bad_order);    
+    status_.addf("RX Late Packet",      "%llu", (unsigned long long)c->rx_late_pkt);
+    status_.addf("RX Late Packet RTT",  "%llu", (unsigned long long)c->rx_late_pkt_rtt_us);
     
     double rx_late_pkt_rtt_us_avg = 0.0;
     if (c->rx_late_pkt > 0) {
@@ -757,6 +762,8 @@ void EthercatHardware::printCounters(std::ostream &os)
      << " dropped       = " << c.dropped << endl
      << " tx_error      = " << c.tx_error << endl
      << " tx_net_down   = " << c.tx_net_down << endl
+     << " tx_would_block= " << c.tx_would_block << endl
+     << " tx_no_bufs    = " << c.tx_no_bufs << endl
      << " tx_full       = " << c.tx_full << endl
      << " rx_runt_pkt   = " << c.rx_runt_pkt << endl
      << " rx_not_ecat   = " << c.rx_not_ecat << endl
