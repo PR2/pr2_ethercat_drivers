@@ -272,13 +272,12 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     }
   }
 
-  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
 
   { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
     // Allow timeout to be configured at program load time with rosparam.  
     // This will allow tweaks for systems with different realtime performace
     static const int MAX_TIMEOUT = 100000;   // 100ms = 100,000us
-    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000us = 1ms
+    static const int DEFAULT_TIMEOUT = 20000; // default to timeout to 20000us = 20ms
     int timeout;
     if (!node_.getParam("realtime_socket_timeout", timeout))
     {
@@ -296,6 +295,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       sleep(1);
       ROS_BREAK();
     }
+    timeout_ = timeout;
 
     // When packet constaining process data is does not return after a given timeout, it is 
     // assumed to be dropped and the process data will automatically get re-sent.
@@ -305,8 +305,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     // This is needed because lowering the txandrx timeout makes it more likely that a 
     // performance hickup in network or OS causes will cause the motors to halt.
     //
-    // If number of retries is not specified, use a formula that allows 20ms of dropped packets
-    int max_pd_retries = 20000 / timeout;  // timeout is in nanoseconds : 20msec = 20000nsec 
+    // If number of retries is not specified, use a formula that allows 100ms of dropped packets
+    int max_pd_retries = MAX_TIMEOUT / timeout;  // timeout is in nanoseconds : 20msec = 20000usec 
     static const int MAX_RETRIES=50, MIN_RETRIES=1;
     node_.getParam("max_pd_retries", max_pd_retries);
     // Make sure motor halt due to dropped packet takes less than 1/10 of a second
@@ -323,6 +323,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     max_pd_retries = std::max(MIN_RETRIES,std::min(MAX_RETRIES,max_pd_retries));
     max_pd_retries_ = max_pd_retries;
   }
+
+  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_, timeout_, max_pd_retries_);
 }
 
 
@@ -343,12 +345,14 @@ EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
   delete[] diagnostics_buffer_;
 }
 
-void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves)
+void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves, unsigned timeout, unsigned max_pd_retries)
 {
   interface_ = interface;
   buffer_size_ = buffer_size;
   slaves_ = slaves;
   num_slaves_ = num_slaves;
+  timeout_ = timeout;
+  max_pd_retries_ = max_pd_retries;
 
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
@@ -445,6 +449,9 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
   ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
+
+  status_.addf("Timeout (us)", "%d", timeout_);
+  status_.addf("Max PD Retries", "%d", max_pd_retries_);
 
   // Produce warning if number of devices changed after device initalization
   if (num_slaves_ != diagnostics_.device_count_) {
