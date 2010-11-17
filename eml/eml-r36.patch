@@ -1124,7 +1124,7 @@ Index: src/al/ethercat_process_data.cxx
        }
 +
 +      // Receive every packet that was sent  
-+      for(unsigned i=0; i<index; ++i) {
++      for(int i=index-1; i>=0; --i) {
 +        if (handles[i] != -1) {
 +          if (!m_dll_instance->rx(m_lrw_frame[i],handles[i])) {
 +            ec_log(EC_LOG_ERROR, "PD_Buffer: Error receiving PD\n");
