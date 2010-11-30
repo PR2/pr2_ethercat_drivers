@@ -614,6 +614,7 @@ private:
 
   // Not all devices will need this (WG021) 
   MotorModel *motor_model_; 
+  bool disable_motor_model_checking_;
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
 

@@ -206,7 +206,8 @@ WG0X::WG0X() :
   calibration_status_(NO_CALIBRATION),
   last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
-  motor_model_(NULL)
+  motor_model_(NULL),
+  disable_motor_model_checking_(false)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -553,6 +554,13 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
     ROS_FATAL("A digital out of the name '%s' already exists", publish_motor_trace_.name_.c_str());
     ROS_BREAK();
     return false;
+  }
+
+  // When working with experimental setups we don't want motor model to halt motors when it detects a problem.
+  // Allow rosparam to disable motor model halting for a specific motor.
+  if (!ros::NodeHandle().getParam(ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
+  {
+    disable_motor_model_checking_ = false;
   }
 
   return true;
@@ -1083,11 +1091,17 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
-  if (state.is_enabled_ && motor_model_ && !motor_model_->verify())
+  if (state.is_enabled_ && motor_model_)
   {
-    // Motor model will automatically publish a motor trace when there is an error
-    rv = false;
-    goto end;
+    if (!disable_motor_model_checking_)
+    {
+      if(!motor_model_->verify())
+      {
+        // Motor model will automatically publish a motor trace when there is an error
+        rv = false;
+        goto end;
+      }
+    }
   }
 
 end:
@@ -2526,6 +2540,10 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   if (motor_model_) 
   {
     motor_model_->diagnostics(d);
+    if (disable_motor_model_checking_)
+    {
+      d.mergeSummaryf(d.WARN, "Motor model disabled");      
+    }
   }
 
   if (last_num_encoder_errors_ != status->num_encoder_errors_)
