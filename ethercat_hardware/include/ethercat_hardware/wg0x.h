@@ -490,6 +490,10 @@ protected:
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
+  double pwm_ratio_;
+  pr2_hardware_interface::AnalogIn pwm_ratio_analog_in_;
+  double supply_voltage_;
+  pr2_hardware_interface::AnalogIn supply_voltage_analog_in_;
 
   enum
   {

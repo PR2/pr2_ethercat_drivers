@@ -645,6 +645,27 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           ROS_BREAK();
           return -1;
       }
+
+      // Register extra values for pr2_hardware_interface that are not contained in ActuatorState
+      pwm_ratio_analog_in_.name_ = string(actuator_info_.name_) + "_pwm_ratio";
+      if (hw && !hw->addAnalogIn(&pwm_ratio_analog_in_))
+      {
+        ROS_FATAL("An analog input with the name '%s' already exists.  Device #%02d has a duplicate name", 
+                  pwm_ratio_analog_in_.name_.c_str(), sh_->get_ring_position());
+        ROS_BREAK();
+        return -1;
+      }
+      pwm_ratio_analog_in_.state_.state_.resize(1);  // Reserve 1-location for PWM ratio value
+
+      supply_voltage_analog_in_.name_ = string(actuator_info_.name_) + "_supply_voltage";
+      if (hw && !hw->addAnalogIn(&supply_voltage_analog_in_))
+      {
+        ROS_FATAL("An analog input with the name '%s' already exists.  Device #%02d has a duplicate name", 
+                  supply_voltage_analog_in_.name_.c_str(), sh_->get_ring_position());
+        ROS_BREAK();
+        return -1;
+      }
+      supply_voltage_analog_in_.state_.state_.resize(1);  // Reserve 1-location for supply voltage value
     }
 
     // Register digital out with pr2_hardware_interface::HardwareInterface
@@ -982,6 +1003,12 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   state.max_effort_ = max_current_ * actuator_info_.encoder_reduction_ * actuator_info_.motor_torque_constant_; 
 
+  pwm_ratio_      = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
+  supply_voltage_ = double(this_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
+
+  pwm_ratio_analog_in_.state_.state_[0] = pwm_ratio_;
+  supply_voltage_analog_in_.state_.state_[0] = supply_voltage_;
+
   return verifyState(this_status, prev_status);
 }
 
@@ -1036,13 +1063,13 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     // Collect data for motor model
     ethercat_hardware::MotorTraceSample &s(motor_trace_sample_);
     double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
-    double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
-    double pwm_ratio = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
+    //double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
+    //double pwm_ratio = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
     s.timestamp        = state.timestamp_;
     s.enabled          = state.is_enabled_;
-    s.supply_voltage   = supply_voltage;
+    s.supply_voltage   = supply_voltage_;
     s.measured_motor_voltage = state.motor_voltage_;
-    s.programmed_pwm   = pwm_ratio;
+    s.programmed_pwm   = pwm_ratio_;
     s.executed_current = last_executed_current;
     s.measured_current = state.last_measured_current_;
     s.velocity         = state.velocity_;
