@@ -498,9 +498,7 @@ protected:
   double supply_voltage_;
   pr2_hardware_interface::AnalogIn supply_voltage_analog_in_;
 
-  boost::shared_ptr<tirt::Context> state_context_;
   tirt::Publisher<mcb_msgs::MCBActuatorState> pub_actuator_;
-  boost::shared_ptr<tirt::Context> command_context_;
   tirt::Subscriber<mcb_msgs::MCBActuatorCommand> sub_actuator_;
 
   enum

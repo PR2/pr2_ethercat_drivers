@@ -40,6 +40,8 @@
 
 #include <iomanip>
 
+boost::shared_ptr<tirt::Context> g_ethercat_tirt_context;
+
 bool et1x00_error_counters::isGreaterThan(unsigned value) const
 {
   if ((pdi_error>value) || (epu_error>value)) {
@@ -128,21 +130,21 @@ EthercatDeviceDiagnostics::EthercatDeviceDiagnostics() :
   errorCountersPrev_.zero();
 }
 
-void EthercatDeviceDiagnostics::zeroTotals() 
+void EthercatDeviceDiagnostics::zeroTotals()
 {
   pdiErrorTotal_=0;
   epuErrorTotal_=0;
   portDiagnostics_[0].zeroTotals();
   portDiagnostics_[1].zeroTotals();
   portDiagnostics_[2].zeroTotals();
-  portDiagnostics_[3].zeroTotals();  
+  portDiagnostics_[3].zeroTotals();
 }
 
 
 void EthercatDeviceDiagnostics::accumulate(const et1x00_error_counters &n, const et1x00_error_counters &p)
-{  
+{
   pdiErrorTotal_ += n.pdi_error - p.pdi_error;
-  epuErrorTotal_ += n.epu_error - p.epu_error; 
+  epuErrorTotal_ += n.epu_error - p.epu_error;
   for (unsigned i=0; i<4; ++i) {
     EthercatPortDiagnostics &pt(portDiagnostics_[i]);
     pt.rxErrorTotal           += n.port[i].rx_error      - p.port[i].rx_error     ;
@@ -164,7 +166,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
   // Device should respond to its node address, if it does not either:
   //  1. communication to device is not possible (lost/broken link)
   //  2. device was reset, and its fixed address setting is now 0
-  { 
+  {
     // Send a packet with both a Fixed address read (NPRW) and a positional read (APRD)
     // If the NPRD has a working counter == 0, but the APRD sees the correct number of devices,
     // then the node has likely been reset.
@@ -178,22 +180,22 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
                                 sizeof(dl_status),
                                 (unsigned char*) &dl_status);
     // Use positional read to re-count number of devices on chain
-    unsigned char buf[1];    
+    unsigned char buf[1];
     EC_UINT address = 0x0000;
     APRD_Telegram aprd_telegram(logic->get_idx(),  // Index
                                 0,                 // Slave position on ethercat chain (auto increment address) (
-                                address,           // ESC physical memory address (start address) 
+                                address,           // ESC physical memory address (start address)
                                 logic->get_wkc(),  // Working counter
                                 sizeof(buf),       // Data Length,
                                 buf);              // Buffer to put read result into
-    
+
 
 
     // Chain both telegrams together
     nprd_telegram.attach(&aprd_telegram);
 
     EC_Ethernet_Frame frame(&nprd_telegram);
-    
+
     // Send/Recv data from slave
     if (!com->txandrx_once(&frame)) {
       // no response - broken link to device
@@ -207,7 +209,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
         resetDetected_ = true;
         goto end;
       }
-    } 
+    }
     else if (devicesRespondingToNodeAddress_ > 1) {
       // Can't determine much if two (or more) devices are responding to same request.
       goto end;
@@ -215,7 +217,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
     else {
       resetDetected_ = false;
     }
-    
+
     // fill in port status information
     for (unsigned i=0;i<4;++i) {
       EthercatPortDiagnostics &pt(portDiagnostics_[i]);
@@ -230,7 +232,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
     assert(sizeof(e) == (0x314-0x300));
     if (0 != EthercatDevice::readData(com, sh, e.BASE_ADDR, &e, sizeof(e), EthercatDevice::FIXED_ADDR)) {
       goto end;
-    }   
+    }
 
     // If this previously tried to clear the error counters but d/n get a response
     // then use the newly read values to guess if they got cleared or not.
@@ -248,7 +250,7 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
     this->accumulate(e, errorCountersPrev_);
     errorCountersPrev_ = e;
 
-    // re-read and clear communication error counters    
+    // re-read and clear communication error counters
     if(e.isGreaterThan(50)) {
       if (0 != EthercatDevice::readWriteData(com, sh, e.BASE_ADDR, &e, sizeof(e), EthercatDevice::FIXED_ADDR)) {
         // Packet got lost... Can't know for sure that error counters got cleared
@@ -260,10 +262,10 @@ void EthercatDeviceDiagnostics::collect(EthercatCom *com, EtherCAT_SlaveHandler 
       errorCountersPrev_.zero();
     }
   }
-  
+
   // Everything was read successfully
   diagnosticsValid_ = true;
-  
+
  end:
   return;
 }
@@ -275,7 +277,7 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     numPorts=4;
   }
   assert(numPorts > 0);
-  
+
   d.addf("Reset detected", "%s", (resetDetected_ ? "Yes" : "No"));
   d.addf("Valid", "%s", (diagnosticsValid_ ? "Yes" : "No"));
 
@@ -286,25 +288,25 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     const EthercatPortDiagnostics &pt(portDiagnostics_[i]);
     port.str(""); port << " Port " << i;
     os.str(""); os << "Status" << port.str();
-    d.addf(os.str(), "%s Link, %s, %s Comm", 
+    d.addf(os.str(), "%s Link, %s, %s Comm",
            pt.hasLink ? "Has":"No",
            pt.isClosed ? "Closed":"Open",
-           pt.hasCommunication ? "Has":"No"); 
+           pt.hasCommunication ? "Has":"No");
     os.str(""); os << "RX Error" << port.str();
-    d.addf(os.str(), "%lld", pt.rxErrorTotal); 
+    d.addf(os.str(), "%lld", pt.rxErrorTotal);
     os.str(""); os << "Forwarded RX Error" << port.str();
-    d.addf(os.str(), "%lld", pt.forwardedRxErrorTotal); 
+    d.addf(os.str(), "%lld", pt.forwardedRxErrorTotal);
     os.str(""); os << "Invalid Frame" << port.str();
     d.addf(os.str(), "%lld", pt.invalidFrameTotal);
     os.str(""); os << "Lost Link" << port.str();
     d.addf(os.str(), "%lld", pt.lostLinkTotal);
   }
-  
-  if (resetDetected_) 
+
+  if (resetDetected_)
   {
     d.mergeSummaryf(d.ERROR, "Device reset likely");
   }
-  else if (devicesRespondingToNodeAddress_ > 1) 
+  else if (devicesRespondingToNodeAddress_ > 1)
   {
     d.mergeSummaryf(d.ERROR, "More than one device (%d) responded to node address", devicesRespondingToNodeAddress_);
   }
@@ -313,11 +315,11 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
     {
       d.mergeSummaryf(d.WARN, "Have not yet collected diagnostics");
     }
-    else if (!diagnosticsValid_) 
+    else if (!diagnosticsValid_)
     {
       d.mergeSummaryf(d.WARN, "Could not collect diagnostics");
     }
-    else 
+    else
     {
       if (!portDiagnostics_[0].hasLink) {
         d.mergeSummaryf(d.WARN, "No link on port 0");
@@ -343,7 +345,7 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   if (error != 0) {
     ROS_FATAL("Initializing diagnositcsLock failed : %s", strerror(error));
     ROS_BREAK();
-  }    
+  }
 }
 
 EthercatDevice::EthercatDevice() : use_ros_(true)
@@ -359,27 +361,27 @@ EthercatDevice::~EthercatDevice()
 void EthercatDevice::collectDiagnostics(EthercatCom *com)
 {
   // Really, should not need this lock, since there should only be one thread updating diagnostics.
-  pthread_mutex_lock(&diagnosticsLock_);  
-  
+  pthread_mutex_lock(&diagnosticsLock_);
+
   // Get references to diagnostics... code is easier to read
   unsigned oldDiagnosticsIndex = (newDiagnosticsIndex_+1)&1;
   const EthercatDeviceDiagnostics &newDiag = deviceDiagnostics[newDiagnosticsIndex_];
   EthercatDeviceDiagnostics &oldDiag = deviceDiagnostics[oldDiagnosticsIndex];
 
   // copy new diagnostics values in old diagnostics, because diagnostic data use accumumlators
-  oldDiag = newDiag; 
+  oldDiag = newDiag;
 
-  // Collect diagnostics data into "old" buffer.  
+  // Collect diagnostics data into "old" buffer.
   // This way the "new" buffer is never changed while the publishing thread may be using it.
   oldDiag.collect(com, sh_);
 
-  // Got new diagnostics... swap buffers.  
-  // Publisher thread uses "new" buffer.  New to lock while swapping buffers.  
-  // Note : this is just changing an integer value, so it only takes a couple of instructions.  
-  pthread_mutex_lock(&newDiagnosticsIndexLock_);    
+  // Got new diagnostics... swap buffers.
+  // Publisher thread uses "new" buffer.  New to lock while swapping buffers.
+  // Note : this is just changing an integer value, so it only takes a couple of instructions.
+  pthread_mutex_lock(&newDiagnosticsIndexLock_);
   newDiagnosticsIndex_=oldDiagnosticsIndex;
   pthread_mutex_unlock(&newDiagnosticsIndexLock_);
-  
+
   // Done, unlock
   pthread_mutex_unlock(&diagnosticsLock_);
 }
@@ -389,22 +391,22 @@ int EthercatDevice::readWriteData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  
 {
   unsigned char *p = (unsigned char *)buffer;
   EC_Logic *logic = EC_Logic::instance();
-  
+
   NPRW_Telegram nprw_telegram(logic->get_idx(),
                               sh->get_station_address(),
                               address,
                               logic->get_wkc(),
                               length,
                               p);
-  
+
   APRW_Telegram aprw_telegram(logic->get_idx(),  // Index
                               -sh->get_ring_position(), // Slave position on ethercat chain (auto increment address) (
-                              address,               // ESC physical memory address (start address) 
+                              address,               // ESC physical memory address (start address)
                               logic->get_wkc(),  // Working counter
                               length,                   // Data Length,
                               p);             // Buffer to put read result into
 
-  // Put read telegram in ethercat/ethernet frame  
+  // Put read telegram in ethercat/ethernet frame
   EC_Telegram * telegram = NULL;
   if (addrMode == FIXED_ADDR) {
     telegram = &nprw_telegram;
@@ -414,10 +416,10 @@ int EthercatDevice::readWriteData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  
     assert(0);
     return -1;
   }
-  
+
   // Put telegram in ethercat/ethernet frame
   EC_Ethernet_Frame frame(telegram);
-  
+
   // Send/Recv data from slave
   if (!com->txandrx_once(&frame)) {
     return -1;
@@ -428,7 +430,7 @@ int EthercatDevice::readWriteData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  
     return -2;
   }
 
-  return 0;  
+  return 0;
 }
 
 
@@ -436,22 +438,22 @@ int EthercatDevice::readData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  EC_UI
 {
   unsigned char *p = (unsigned char *)buffer;
   EC_Logic *logic = EC_Logic::instance();
-  
+
   NPRD_Telegram nprd_telegram(logic->get_idx(),
                               sh->get_station_address(),
                               address,
                               logic->get_wkc(),
                               length,
                               p);
-  
+
   APRD_Telegram aprd_telegram(logic->get_idx(),  // Index
                               -sh->get_ring_position(), // Slave position on ethercat chain (auto increment address) (
-                              address,               // ESC physical memory address (start address) 
+                              address,               // ESC physical memory address (start address)
                               logic->get_wkc(),  // Working counter
                               length,                   // Data Length,
                               p);             // Buffer to put read result into
 
-  // Put read telegram in ethercat/ethernet frame  
+  // Put read telegram in ethercat/ethernet frame
   EC_Telegram * telegram = NULL;
   if (addrMode == FIXED_ADDR) {
     telegram = &nprd_telegram;
@@ -490,15 +492,15 @@ int EthercatDevice::writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  EC_U
                               logic->get_wkc(),
                               length,
                               p);
-  
+
   APWR_Telegram apwr_telegram(logic->get_idx(),  // Index
                               -sh->get_ring_position(), // Slave position on ethercat chain (auto increment address) (
-                              address,               // ESC physical memory address (start address) 
+                              address,               // ESC physical memory address (start address)
                               logic->get_wkc(),  // Working counter
                               length,                   // Data Length,
                               p);             // Buffer to put read result into
 
-  // Put read telegram in ethercat/ethernet frame  
+  // Put read telegram in ethercat/ethernet frame
   EC_Telegram * telegram = NULL;
   if (addrMode == FIXED_ADDR) {
     telegram = &npwr_telegram;
@@ -516,11 +518,11 @@ int EthercatDevice::writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  EC_U
   if (!com->txandrx(&frame)) {
     return -1;
   }
-  
+
   if (telegram->get_wkc() != 1) {
     return -2;
   }
-  
+
   return 0;
 }
 
@@ -533,7 +535,7 @@ void EthercatDevice::ethercatDiagnostics(diagnostic_updater::DiagnosticStatusWra
   }
 
   // By locking index, diagnostics double-buffer cannot be swapped.
-  // Update thread is only allowed to change 'old' diagnostics buffer, 
+  // Update thread is only allowed to change 'old' diagnostics buffer,
   //  so new buffer data cannot be changed while index lock is held.
   pthread_mutex_lock(&newDiagnosticsIndexLock_);
 

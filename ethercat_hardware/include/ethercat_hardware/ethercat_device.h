@@ -51,8 +51,13 @@
 #include <ethercat_hardware/ethercat_com.h>
 
 #include <pluginlib/class_list_macros.h>
+#include <tirt/tirt.h>
 
 using namespace std;
+
+// Hack.  Global for stashing ethercat's tirt context to avoid
+// changing all the method signatures.
+extern boost::shared_ptr<tirt::Context> g_ethercat_tirt_context;
 
 struct et1x00_error_counters
 {
@@ -88,9 +93,9 @@ struct EthercatPortDiagnostics
   bool isClosed;
   bool hasCommunication;
   uint64_t rxErrorTotal;
-  uint64_t invalidFrameTotal; 
+  uint64_t invalidFrameTotal;
   uint64_t forwardedRxErrorTotal;
-  uint64_t lostLinkTotal; 
+  uint64_t lostLinkTotal;
 };
 
 struct EthercatDeviceDiagnostics
@@ -101,15 +106,15 @@ public:
   // Collects diagnostic data from specific ethercat slave, and updates object state
   //
   // com  EtherCAT communication object is used send/recv packets to/from ethercat chain.
-  // sh   slaveHandler of device to collect Diagnostics from 
+  // sh   slaveHandler of device to collect Diagnostics from
   // prev previously collected diagnostics (can be pointer to this object)
   //
   // collectDiagnotics will send/recieve multiple packets, and may considerable amount of time complete.
-  // 
+  //
   void collect(EthercatCom *com, EtherCAT_SlaveHandler *sh);
 
-  // Puts reviously diagnostic collected diagnostic state to DiagnosticStatus object 
-  // 
+  // Puts reviously diagnostic collected diagnostic state to DiagnosticStatus object
+  //
   // d         DiagnositcState to add diagnostics to.
   // numPorts  Number of ports device is supposed to have.  4 is max, 1 is min.
   void publish(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned numPorts=4) const;
@@ -140,11 +145,11 @@ public:
   virtual ~EthercatDevice();
 
   virtual int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=0) = 0;
-  
+
   /**
    * \param reset  when asserted this will clear diagnostic error conditions device safety disable
    * \param halt   while asserted will disable actuator, usually by disabling H-bridge
-   */ 
+   */
   virtual void packCommand(unsigned char *buffer, bool halt, bool reset) {}
 
   virtual bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer) {return true;}
@@ -153,8 +158,8 @@ public:
    * \brief For EtherCAT devices that publish more than one EtherCAT Status message.
    * If sub-class implements multiDiagnostics() then diagnostics() is not used.
    * \param vec     Vector of diagnostics status messages. Slave appends one or more new diagnostic status'.
-   * \param buffer  Pointer to slave process data.\ 
-   */  
+   * \param buffer  Pointer to slave process data.\
+   */
   virtual void multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer);
 
   /**
@@ -165,7 +170,7 @@ public:
    */
   virtual void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer);
 
-  /** 
+  /**
    * \brief Adds diagnostic information for EtherCAT ports.
    * \param d       EtherCAT port diagnostics information will be appended.
    * \param buffer  Number of communication ports slave has.
@@ -174,13 +179,13 @@ public:
 
   virtual void collectDiagnostics(EthercatCom *com);
 
-  /** 
-   * \brief Asks device to publish (motor) trace. Only works for devices that support it. 
-   * \param reason Message to put in trace as reason. 
+  /**
+   * \brief Asks device to publish (motor) trace. Only works for devices that support it.
+   * \param reason Message to put in trace as reason.
    * \param level Level to put in trace (aka ERROR=2, WARN=1, OK=0)
    * \param delay Publish trace after delay cyles.  For 1kHz realtime loop 1cycle = 1ms.
    * \return Return true if device support publishing trace.  False, if not.
-   */  
+   */
   virtual bool publishTrace(const string &reason, unsigned level, unsigned delay) {return false;}
 
   enum AddrMode {FIXED_ADDR=0, POSITIONAL_ADDR=1};
@@ -192,18 +197,18 @@ public:
   inline int writeData(EthercatCom *com, EC_UINT address, void const* buffer, EC_UINT length, AddrMode addrMode) {
     return writeData(com, sh_, address, buffer, length, addrMode);
   }
-  
+
   /*!
    * \brief Read data from device ESC.
    */
   static int readData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  EC_UINT address, void *buffer, EC_UINT length, AddrMode addrMode);
   inline int readData(EthercatCom *com, EC_UINT address, void *buffer, EC_UINT length, AddrMode addrMode) {
     return readData(com, sh_, address, buffer, length, addrMode);
-  }  
+  }
 
   /*!
    * \brief Read then write data to ESC.
-   */  
+   */
   static int readWriteData(EthercatCom *com, EtherCAT_SlaveHandler *sh,  EC_UINT address, void *buffer, EC_UINT length, AddrMode addrMode);
   inline int readWriteData(EthercatCom *com, EC_UINT address, void *buffer, EC_UINT length, AddrMode addrMode) {
     return readWriteData(com, sh_, address, buffer, length, addrMode);
@@ -214,15 +219,15 @@ public:
   EtherCAT_SlaveHandler *sh_;
   unsigned int command_size_;
   unsigned int status_size_;
-  
+
   // The device diagnostics are collected with a non-readtime thread that calls collectDiagnostics()
   // The device published from the realtime loop by indirectly invoking ethercatDiagnostics()
-  // To avoid blocking of the realtime thread (for long) a double buffer is used the 
+  // To avoid blocking of the realtime thread (for long) a double buffer is used the
   // The publisher thread will lock newDiagnosticsIndex when publishing data.
   // The collection thread will lock deviceDiagnostics when updating deviceDiagnostics
   // The collection thread will also lock newDiagnosticsIndex at end of update, just before swapping buffers.
   unsigned newDiagnosticsIndex_;
-  pthread_mutex_t newDiagnosticsIndexLock_;  
+  pthread_mutex_t newDiagnosticsIndexLock_;
   EthercatDeviceDiagnostics deviceDiagnostics[2];
   pthread_mutex_t diagnosticsLock_;
 

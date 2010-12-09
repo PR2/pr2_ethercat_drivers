@@ -669,11 +669,10 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
       // Attaches the actuator to tirt
       ros::NodeHandle nh;
-      state_context_.reset(new tirt::Context(nh, actuator_.name_ + "_state"));
-      command_context_.reset(new tirt::Context(nh, actuator_.name_ + "_command"));
-      pub_actuator_ = state_context_->advertise<mcb_msgs::MCBActuatorState>(
+      assert(g_ethercat_tirt_context);
+      pub_actuator_ = g_ethercat_tirt_context->advertise<mcb_msgs::MCBActuatorState>(
         actuator_.name_ + "/mcb_state", 50);
-      sub_actuator_ = command_context_->subscribe<mcb_msgs::MCBActuatorCommand>(
+      sub_actuator_ = g_ethercat_tirt_context->subscribe<mcb_msgs::MCBActuatorCommand>(
         actuator_.name_ + "/mcb_command", 1);
     }
 
