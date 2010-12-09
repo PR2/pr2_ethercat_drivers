@@ -673,7 +673,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       command_context_.reset(new tirt::Context(nh, actuator_.name_ + "_command"));
       pub_actuator_ = state_context_->advertise<mcb_msgs::MCBActuatorState>(
         actuator_.name_ + "/mcb_state", 50);
-      sub_actuator_ = state_context_->subscribe<mcb_msgs::MCBActuatorCommand>(
+      sub_actuator_ = command_context_->subscribe<mcb_msgs::MCBActuatorCommand>(
         actuator_.name_ + "/mcb_command", 1);
     }
 
