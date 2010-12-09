@@ -39,8 +39,11 @@
 #include <ethercat_hardware/motor_model.h>
 
 #include <realtime_tools/realtime_publisher.h>
+#include <tirt/tirt.h>
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
+#include <mcb_msgs/MCBActuatorState.h>
+#include <mcb_msgs/MCBActuatorCommand.h>
 
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
 
@@ -128,7 +131,7 @@ struct SyncManControl {
       uint8_t pdi_irq_enable  : 1;
       uint8_t watchdog_enable : 1;
       uint8_t res1            : 1;
-    } __attribute__ ((__packed__));      
+    } __attribute__ ((__packed__));
   } __attribute__ ((__packed__));
   //static const unsigned BASE_ADDR=0x804;
   //static unsigned base_addr(unsigned num);
@@ -146,7 +149,7 @@ struct SyncManStatus {
       uint8_t mailbox_status  : 1;
       uint8_t buffer_status   : 2;
       uint8_t res2            : 2;
-    } __attribute__ ((__packed__));      
+    } __attribute__ ((__packed__));
   } __attribute__ ((__packed__));
   //static const unsigned BASE_ADDR=0x805;
   //static unsigned base_addr(unsigned num);
@@ -163,11 +166,11 @@ struct SyncManActivate {
       uint8_t res4 : 4;
       uint8_t ecat_latch_event : 1;
       uint8_t pdi_latch_event : 1;
-    } __attribute__ ((__packed__));      
+    } __attribute__ ((__packed__));
   } __attribute__ ((__packed__));
   static const unsigned BASE_ADDR=0x806;
   static unsigned baseAddress(unsigned num);
-  //void print(std::ostream &os=std::cout) const;  
+  //void print(std::ostream &os=std::cout) const;
   bool writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const;
 } __attribute__ ((__packed__));
 
@@ -180,7 +183,7 @@ struct SyncManPDIControl {
       uint8_t repeat_ack : 1;
       uint8_t res6 : 6;
     } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));      
+  } __attribute__ ((__packed__));
   //static const unsigned BASE_ADDR=0x807;
   //static unsigned base_addr(unsigned num);
   //void print(std::ostream &os=std::cout) const;
@@ -200,12 +203,12 @@ struct SyncMan {
       SyncManPDIControl pdi_control;
     } __attribute__ ((__packed__));
   } __attribute__ ((__packed__));
-  
+
   // Base address for first syncmanager
   static const unsigned BASE_ADDR=0x800;
   // Base address of Nth syncmanager for N=0-7
   static unsigned baseAddress(unsigned num);
-  
+
   bool readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num);
   //void print(unsigned num, std::ostream &os=std::cout) const;
 } __attribute__ ((__packed__));
@@ -421,7 +424,7 @@ struct WG021Command
   uint8_t checksum_;
 }__attribute__ ((__packed__));
 
-struct MbxDiagnostics 
+struct MbxDiagnostics
 {
   MbxDiagnostics();
   uint32_t write_errors_;
@@ -431,7 +434,7 @@ struct MbxDiagnostics
   uint32_t retry_errors_;
 };
 
-struct WG0XDiagnostics 
+struct WG0XDiagnostics
 {
   WG0XDiagnostics();
   void update(const WG0XSafetyDisableStatus &new_status, const WG0XDiagnosticsInfo &new_diagnostics_info);
@@ -441,7 +444,7 @@ struct WG0XDiagnostics
   WG0XSafetyDisableStatus safety_disable_status_;
 
   WG0XDiagnosticsInfo diagnostics_info_;
-  
+
   uint32_t safety_disable_total_;
   uint32_t undervoltage_total_;
   uint32_t over_current_total_;
@@ -495,6 +498,11 @@ protected:
   double supply_voltage_;
   pr2_hardware_interface::AnalogIn supply_voltage_analog_in_;
 
+  boost::shared_ptr<tirt::Context> state_context_;
+  tirt::Publisher<mcb_msgs::MCBActuatorState> pub_actuator_;
+  boost::shared_ptr<tirt::Context> command_context_;
+  tirt::Subscriber<mcb_msgs::MCBActuatorCommand> sub_actuator_;
+
   enum
   {
     MODE_OFF = 0x00,
@@ -542,22 +550,22 @@ protected:
   int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
 
   int writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length);
-  int readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length);  
+  int readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length);
 
   void publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
   void publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
 
-  bool initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw, 
+  bool initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
                             const string &device_description,
-                            double max_pwm_ratio, 
+                            double max_pwm_ratio,
                             double board_resistance,
                             bool poor_measured_motor_voltage);
 
   bool verifyChecksum(const void* buffer, unsigned size);
   static bool timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount);
-  
+
   static const int PWM_MAX = 0x4000;
-  
+
 private:
   // Each WG0X device can only support one mailbox operation at a time
   bool lockMailbox();
@@ -568,7 +576,7 @@ private:
 
   // Mailbox helper functions
   int writeMailbox_(EthercatCom *com, unsigned address, void const *data, unsigned length);
-  int readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length);  
+  int readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length);
   bool verifyDeviceStateForMailboxOperation();
   bool clearReadMailbox(EthercatCom *com);
   bool waitForReadMailboxReady(EthercatCom *com);
@@ -680,7 +688,7 @@ private:
   unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
   unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed
   ros::Time last_publish_time_; //!< Time diagnostics was last published
-  bool first_publish_; 
+  bool first_publish_;
 
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
