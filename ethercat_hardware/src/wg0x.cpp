@@ -668,6 +668,9 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       supply_voltage_analog_in_.state_.state_.resize(1);  // Reserve 1-location for supply voltage value
 
       // Attaches the actuator to tirt
+      ros::NodeHandle nh;
+      state_context_.reset(new tirt::Context(nh, actuator_.name_ + "_state"));
+      command_context_.reset(new tirt::Context(nh, actuator_.name_ + "_command"));
       pub_actuator_ = state_context_->advertise<mcb_msgs::MCBActuatorState>(
         actuator_.name_ + "/mcb_state", 50);
       sub_actuator_ = state_context_->subscribe<mcb_msgs::MCBActuatorCommand>(
