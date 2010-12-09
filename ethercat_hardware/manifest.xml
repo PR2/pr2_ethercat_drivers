@@ -16,7 +16,7 @@ Package for creating a hardware interface to the robot using the EtherCAT motor 
 <depend package="diagnostic_updater" />
 <depend package="pluginlib" />
 
-<depend package="tirt" />
+<depend package="tirt_core" />
 <depend package="mcb_msgs" />
 
 <export>
