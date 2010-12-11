@@ -566,6 +566,21 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   return true;
 }
 
+// Registers analog input with hardware interface
+bool WG0X::registerAnalogIn(pr2_hardware_interface::HardwareInterface *hw, pr2_hardware_interface::AnalogIn &analog_in)
+{
+  if (hw && !hw->addAnalogIn(&analog_in))
+  {
+    ROS_FATAL("An analog input with the name '%s' already exists.  Device #%02d has a duplicate name", 
+              analog_in.name_.c_str(), sh_->get_ring_position());
+    ROS_BREAK();
+    return false;
+  }
+  analog_in.state_.state_.resize(1);  // Reserve 1-location for encoder position
+  return true;
+}
+
+
 int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d",
@@ -648,24 +663,22 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
       // Register extra values for pr2_hardware_interface that are not contained in ActuatorState
       pwm_ratio_analog_in_.name_ = string(actuator_info_.name_) + "_pwm_ratio";
-      if (hw && !hw->addAnalogIn(&pwm_ratio_analog_in_))
+      if (!registerAnalogIn(hw, pwm_ratio_analog_in_))
       {
-        ROS_FATAL("An analog input with the name '%s' already exists.  Device #%02d has a duplicate name", 
-                  pwm_ratio_analog_in_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
       }
-      pwm_ratio_analog_in_.state_.state_.resize(1);  // Reserve 1-location for PWM ratio value
 
       supply_voltage_analog_in_.name_ = string(actuator_info_.name_) + "_supply_voltage";
-      if (hw && !hw->addAnalogIn(&supply_voltage_analog_in_))
+      if (!registerAnalogIn(hw, supply_voltage_analog_in_))
       {
-        ROS_FATAL("An analog input with the name '%s' already exists.  Device #%02d has a duplicate name", 
-                  supply_voltage_analog_in_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
       }
-      supply_voltage_analog_in_.state_.state_.resize(1);  // Reserve 1-location for supply voltage value
+
+      encoder_index_position_analog_in_.name_ = string(actuator_info_.name_) + "_encoder_index_position";
+      if (!registerAnalogIn(hw, encoder_index_position_analog_in_))
+      {
+        return -1;
+      }
 
       // Attaches the actuator to tirt
       ros::NodeHandle nh;
@@ -1021,9 +1034,11 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   pwm_ratio_      = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
   supply_voltage_ = double(this_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
+  double encoder_index_position = double(this_status->encoder_index_pos_);
 
   pwm_ratio_analog_in_.state_.state_[0] = pwm_ratio_;
   supply_voltage_analog_in_.state_.state_[0] = supply_voltage_;
+  encoder_index_position_analog_in_.state_.state_[0] = encoder_index_position;
 
   // Publishes the actuator state over tirt
   mcb_msgs::MCBActuatorState::Ptr msg;

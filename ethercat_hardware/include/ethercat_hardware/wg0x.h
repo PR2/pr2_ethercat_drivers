@@ -493,10 +493,14 @@ protected:
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
+
+  // Use analog inputs to export status information that is not available in hardware interface
   double pwm_ratio_;
   pr2_hardware_interface::AnalogIn pwm_ratio_analog_in_;
   double supply_voltage_;
   pr2_hardware_interface::AnalogIn supply_voltage_analog_in_;
+  pr2_hardware_interface::AnalogIn encoder_index_position_analog_in_;
+  bool registerAnalogIn(pr2_hardware_interface::HardwareInterface *hw, pr2_hardware_interface::AnalogIn &analog_in);
 
   tirt::Publisher<mcb_msgs::MCBActuatorState> pub_actuator_;
   tirt::Subscriber<mcb_msgs::MCBActuatorCommand> sub_actuator_;
