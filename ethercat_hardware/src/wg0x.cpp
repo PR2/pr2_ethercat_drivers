@@ -567,7 +567,7 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
 }
 
 // Registers analog input with hardware interface
-bool WG0X::registerAnalogIn(pr2_hardware_interface::HardwareInterface *hw, pr2_hardware_interface::AnalogIn &analog_in)
+bool WG0X::registerAnalogIn(pr2_hardware_interface::HardwareInterface *hw, pr2_hardware_interface::AnalogIn &analog_in, unsigned size)
 {
   if (hw && !hw->addAnalogIn(&analog_in))
   {
@@ -576,7 +576,7 @@ bool WG0X::registerAnalogIn(pr2_hardware_interface::HardwareInterface *hw, pr2_h
     ROS_BREAK();
     return false;
   }
-  analog_in.state_.state_.resize(1);  // Reserve 1-location for encoder position
+  analog_in.state_.state_.resize(size);  // Reserve location for data
   return true;
 }
 
@@ -663,19 +663,19 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
       // Register extra values for pr2_hardware_interface that are not contained in ActuatorState
       pwm_ratio_analog_in_.name_ = string(actuator_info_.name_) + "_pwm_ratio";
-      if (!registerAnalogIn(hw, pwm_ratio_analog_in_))
+      if (!registerAnalogIn(hw, pwm_ratio_analog_in_, 1))
       {
         return -1;
       }
 
       supply_voltage_analog_in_.name_ = string(actuator_info_.name_) + "_supply_voltage";
-      if (!registerAnalogIn(hw, supply_voltage_analog_in_))
+      if (!registerAnalogIn(hw, supply_voltage_analog_in_, 1))
       {
         return -1;
       }
 
       encoder_index_position_analog_in_.name_ = string(actuator_info_.name_) + "_encoder_index_position";
-      if (!registerAnalogIn(hw, encoder_index_position_analog_in_))
+      if (!registerAnalogIn(hw, encoder_index_position_analog_in_, 2))
       {
         return -1;
       }
@@ -1035,10 +1035,12 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   pwm_ratio_      = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
   supply_voltage_ = double(this_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
   double encoder_index_position = double(this_status->encoder_index_pos_);
+  bool index_has_been_detected = bool(this_status->encoder_status_ & (1<<3));
 
   pwm_ratio_analog_in_.state_.state_[0] = pwm_ratio_;
   supply_voltage_analog_in_.state_.state_[0] = supply_voltage_;
   encoder_index_position_analog_in_.state_.state_[0] = encoder_index_position;
+  encoder_index_position_analog_in_.state_.state_[1] = index_has_been_detected ? 1.0 : 0.0;
 
   // Publishes the actuator state over tirt
   mcb_msgs::MCBActuatorState::Ptr msg;
