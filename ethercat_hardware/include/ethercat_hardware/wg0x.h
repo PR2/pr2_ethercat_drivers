@@ -614,6 +614,14 @@ private:
 
   enum
   {
+    ENCODER_A_STATE = (1 << 0),
+    ENCODER_B_STATE = (1 << 1),
+    ENCODER_INDEX_STATE = (1 << 2),
+    ENCODER_INDEX_DETECTED = (1 << 3)
+  };
+
+  enum
+  {
     SAFETY_DISABLED = (1 << 0),
     SAFETY_UNDERVOLTAGE = (1 << 1),
     SAFETY_OVER_CURRENT = (1 << 2),

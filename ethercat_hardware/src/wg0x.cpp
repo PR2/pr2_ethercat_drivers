@@ -1020,6 +1020,10 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.last_calibration_falling_edge_ = double(this_status->last_calibration_falling_edge_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
   state.is_enabled_ = bool(this_status->mode_ & MODE_ENABLE);
 
+  bool index_reading = bool(this_status->encoder_status_ & ENCODER_INDEX_STATE);
+  bool index_valid   = bool(this_status->encoder_status_ & ENCODER_INDEX_DETECTED);
+  double index_position = double(this_status->encoder_index_pos_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
+
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
 
@@ -1034,13 +1038,11 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   pwm_ratio_      = double(this_status->programmed_pwm_value_) / double(PWM_MAX);
   supply_voltage_ = double(this_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
-  double encoder_index_position = double(this_status->encoder_index_pos_);
-  bool index_has_been_detected = bool(this_status->encoder_status_ & (1<<3));
 
   pwm_ratio_analog_in_.state_.state_[0] = pwm_ratio_;
   supply_voltage_analog_in_.state_.state_[0] = supply_voltage_;
-  encoder_index_position_analog_in_.state_.state_[0] = encoder_index_position;
-  encoder_index_position_analog_in_.state_.state_[1] = index_has_been_detected ? 1.0 : 0.0;
+  encoder_index_position_analog_in_.state_.state_[0] = index_position;
+  encoder_index_position_analog_in_.state_.state_[1] = index_valid ? 1.0 : 0.0;
 
   // Publishes the actuator state over tirt
   mcb_msgs::MCBActuatorState::Ptr msg;
@@ -1057,8 +1059,13 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     msg->calibration_falling_edge_valid = state.calibration_falling_edge_valid_;
     msg->last_calibration_rising_edge = state.last_calibration_rising_edge_;
     msg->last_calibration_falling_edge = state.last_calibration_falling_edge_;
+    msg->index_reading = index_reading;
+    msg->index_valid = index_valid;
+    msg->index_position = index_position;
     msg->is_enabled = state.is_enabled_;
     msg->halted = state.halted_;
+    msg->pwm_ratio = pwm_ratio_;
+    msg->supply_voltage = supply_voltage_;
     msg->last_commanded_current = state.last_commanded_current_;
     msg->last_executed_current = state.last_executed_current_;
     msg->last_measured_current = state.last_measured_current_;
