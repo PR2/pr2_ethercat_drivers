@@ -336,13 +336,13 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   int error = pthread_mutex_init(&newDiagnosticsIndexLock_, NULL);
   if (error != 0) {
     ROS_FATAL("Initializing indexLock failed : %s", strerror(error));
-    ROS_ISSUE_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   error = pthread_mutex_init(&diagnosticsLock_, NULL);
   if (error != 0) {
     ROS_FATAL("Initializing diagnositcsLock failed : %s", strerror(error));
-    ROS_ISSUE_BREAK();
+    exit(EXIT_FAILURE);
   }    
 }
 
