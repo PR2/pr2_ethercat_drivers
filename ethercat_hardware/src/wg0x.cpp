@@ -681,12 +681,15 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       }
 
       // Attaches the actuator to tirt
-      ros::NodeHandle nh;
-      assert(g_ethercat_tirt_context);
-      pub_actuator_ = g_ethercat_tirt_context->advertise<mcb_msgs::MCBActuatorState>(
-        actuator_.name_ + "/mcb_state", 50);
-      sub_actuator_ = g_ethercat_tirt_context->subscribe<mcb_msgs::MCBActuatorCommand>(
-        actuator_.name_ + "/mcb_command", 1);
+      if (use_ros_)
+      {
+        ros::NodeHandle nh;
+        assert(g_ethercat_tirt_context);
+        pub_actuator_ = g_ethercat_tirt_context->advertise<mcb_msgs::MCBActuatorState>(
+          actuator_.name_ + "/mcb_state", 50);
+        sub_actuator_ = g_ethercat_tirt_context->subscribe<mcb_msgs::MCBActuatorCommand>(
+          actuator_.name_ + "/mcb_command", 1);
+      }
     }
 
     // Register digital out with pr2_hardware_interface::HardwareInterface
