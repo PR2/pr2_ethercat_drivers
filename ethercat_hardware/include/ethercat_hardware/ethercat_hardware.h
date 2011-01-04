@@ -43,6 +43,7 @@
 
 #include "ethercat_hardware/ethercat_device.h"
 #include "ethercat_hardware/ethercat_com.h"
+#include "ethercat_hardware/ethernet_interface_info.h"
 
 #include <realtime_tools/realtime_publisher.h>
 
@@ -113,7 +114,8 @@ public:
    * \param buffer_size size of proccess data buffer
    * \param number of EtherCAT slave devices
    */
-  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves);
+  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves,
+                  unsigned timeout, unsigned max_pd_retries);
 
   /*!
    * \brief Triggers publishing of new diagnostics data
@@ -173,6 +175,9 @@ private:
   unsigned int num_slaves_;
   string interface_;
 
+  unsigned timeout_;
+  unsigned max_pd_retries_;
+
   //! Count of dropped packets last diagnostics cycle
   uint64_t last_dropped_packet_count_;
   //! Time last packet was dropped 0 otherwise.  Used for warning about dropped packets. 
@@ -181,6 +186,8 @@ private:
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
   diagnostic_msgs::DiagnosticArray diagnostic_array_;
+  //! Information about Ethernet interface used for EtherCAT communication
+  EthernetInterfaceInfo ethernet_interface_info_;
   vector<diagnostic_msgs::KeyValue> values_;
   diagnostic_updater::DiagnosticStatusWrapper status_;
 };
@@ -261,6 +268,7 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
+  unsigned timeout_;        //!< Timeout (in microseconds) to used for sending/recieving packets once in realtime mode.
   unsigned max_pd_retries_; //!< Max number of times to retry sending process data before halting motors
 
   void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher

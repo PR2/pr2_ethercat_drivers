@@ -481,8 +481,8 @@ public:
 protected:
   uint8_t fw_major_;
   uint8_t fw_minor_;
-  uint8_t board_major_;
-  uint8_t board_minor_;
+  uint8_t board_major_;  //!< Printed circuit board revision (for this value 0=='A', 1=='B')
+  uint8_t board_minor_;  //!< Printed circuit assembly revision
 
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
@@ -614,6 +614,7 @@ private:
 
   // Not all devices will need this (WG021) 
   MotorModel *motor_model_; 
+  bool disable_motor_model_checking_;
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
 

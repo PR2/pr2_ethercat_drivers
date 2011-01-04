@@ -112,7 +112,7 @@ void EthercatHardware::changeState(EtherCAT_SlaveHandler *sh, EC_State new_state
               new_state, slave, product_code, product_code, serial, serial, revision, revision);
     if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
       ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -124,7 +124,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     int error = errno;
     ROS_FATAL("Couldn't open temp socket : %s", strerror(error));
     sleep(1);
-    ROS_BREAK();    
+    exit(EXIT_FAILURE);    
   }
   
   struct ifreq ifr;
@@ -133,7 +133,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     int error = errno;
     ROS_FATAL("Cannot get interface flags for %s: %s", interface, strerror(error));
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   close(sock);
@@ -142,12 +142,12 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (!(ifr.ifr_flags & IFF_UP)) {
     ROS_FATAL("Interface %s is not UP. Try : ifup %s", interface, interface);
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
   if (!(ifr.ifr_flags & IFF_RUNNING)) {
     ROS_FATAL("Interface %s is not RUNNING. Is cable plugged in and device powered?", interface);
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
 
@@ -157,7 +157,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   {
     ROS_FATAL("Unable to initialize interface: %s", interface);
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   oob_com_ = new EthercatOobCom(ni_);
@@ -168,7 +168,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   {
     ROS_FATAL("Unable to initialize Application Layer (AL): %p", al_);
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   num_slaves_ = al_->get_num_slaves();
@@ -176,7 +176,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   {
     ROS_FATAL("Unable to locate any slaves");
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   // Initialize Master
@@ -184,7 +184,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   {
     ROS_FATAL("Unable to initialize EtherCAT_Master: %p", em_);
     sleep(1);
-    ROS_BREAK();
+    exit(EXIT_FAILURE);
   }
 
   slaves_ = new EthercatDevice*[num_slaves_];
@@ -199,7 +199,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     {
       ROS_FATAL("Unable to get slave handler #%d", slave);
       sleep(1);
-      ROS_BREAK();
+      exit(EXIT_FAILURE);
     }
     slave_handles.push_back(sh);
   }
@@ -212,7 +212,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     {      
       ROS_FATAL("Unable to configure slave #%d", slave);
       sleep(1);
-      ROS_BREAK();
+      exit(EXIT_FAILURE);
     }
     buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
   }
@@ -246,7 +246,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (!txandrx_PD(buffer_size_, this_buffer_, 20))
   {
     ROS_FATAL("No communication with devices");
-    ROS_BREAK();
+    sleep(1);
+    exit(EXIT_FAILURE);
   }
   
   // prev_buffer should contain valid status data when update function is first used
@@ -268,17 +269,16 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
                 slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
       sleep(1);
-      ROS_BREAK();
+      exit(EXIT_FAILURE);
     }
   }
 
-  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
 
   { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
     // Allow timeout to be configured at program load time with rosparam.  
     // This will allow tweaks for systems with different realtime performace
     static const int MAX_TIMEOUT = 100000;   // 100ms = 100,000us
-    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000us = 1ms
+    static const int DEFAULT_TIMEOUT = 20000; // default to timeout to 20000us = 20ms
     int timeout;
     if (!node_.getParam("realtime_socket_timeout", timeout))
     {
@@ -294,8 +294,9 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     {
       ROS_FATAL("Error setting socket timeout to %d", timeout);      
       sleep(1);
-      ROS_BREAK();
+      exit(EXIT_FAILURE);
     }
+    timeout_ = timeout;
 
     // When packet constaining process data is does not return after a given timeout, it is 
     // assumed to be dropped and the process data will automatically get re-sent.
@@ -305,8 +306,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     // This is needed because lowering the txandrx timeout makes it more likely that a 
     // performance hickup in network or OS causes will cause the motors to halt.
     //
-    // If number of retries is not specified, use a formula that allows 20ms of dropped packets
-    int max_pd_retries = 20000 / timeout;  // timeout is in nanoseconds : 20msec = 20000nsec 
+    // If number of retries is not specified, use a formula that allows 100ms of dropped packets
+    int max_pd_retries = MAX_TIMEOUT / timeout;  // timeout is in nanoseconds : 20msec = 20000usec 
     static const int MAX_RETRIES=50, MIN_RETRIES=1;
     node_.getParam("max_pd_retries", max_pd_retries);
     // Make sure motor halt due to dropped packet takes less than 1/10 of a second
@@ -323,6 +324,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     max_pd_retries = std::max(MIN_RETRIES,std::min(MAX_RETRIES,max_pd_retries));
     max_pd_retries_ = max_pd_retries;
   }
+
+  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_, timeout_, max_pd_retries_);
 }
 
 
@@ -336,7 +339,6 @@ EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::
   last_dropped_packet_count_(0),
   last_dropped_packet_time_(0)
 {
-  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
@@ -344,18 +346,24 @@ EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
   delete[] diagnostics_buffer_;
 }
 
-void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves)
+void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves, unsigned timeout, unsigned max_pd_retries)
 {
   interface_ = interface;
   buffer_size_ = buffer_size;
   slaves_ = slaves;
   num_slaves_ = num_slaves;
+  timeout_ = timeout;
+  max_pd_retries_ = max_pd_retries;
 
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Initialize diagnostic data structures
   diagnostic_array_.status.reserve(num_slaves_ + 1);
   values_.reserve(10);
+
+  ethernet_interface_info_.initialize(interface);
+
+  diagnostics_thread_ = boost::thread(boost::bind(&EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc, this));
 }
 
 void EthercatHardwareDiagnosticsPublisher::publish(
@@ -440,8 +448,11 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.add("Motors halted", diagnostics_.motors_halted_ ? "true" : "false");
   status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
-  status_.add("Interface", interface_);
+  ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
+
+  status_.addf("Timeout (us)", "%d", timeout_);
+  status_.addf("Max PD Retries", "%d", max_pd_retries_);
 
   // Produce warning if number of devices changed after device initalization
   if (num_slaves_ != diagnostics_.device_count_) {
@@ -465,23 +476,25 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   { // Publish ethercat network interface counters 
     const struct netif_counters *c = &diagnostics_.counters_;
     status_.add("Input Thread",       (diagnostics_.input_thread_is_stopped_ ? "Stopped" : "Running"));
-    status_.addf("Sent Packets",        "%lld", c->sent);
-    status_.addf("Received Packets",    "%lld", c->received);
-    status_.addf("Collected Packets",   "%lld", c->collected);
-    status_.addf("Dropped Packets",     "%lld", c->dropped);
-    status_.addf("TX Errors",           "%lld", c->tx_error);
-    status_.addf("TX Network Down",     "%lld", c->tx_net_down);
-    status_.addf("TX Queue Full",       "%lld", c->tx_full);
-    status_.addf("RX Runt Packet",      "%lld", c->rx_runt_pkt);
-    status_.addf("RX Not EtherCAT",     "%lld", c->rx_not_ecat);
-    status_.addf("RX Other EML",        "%lld", c->rx_other_eml);
-    status_.addf("RX Bad Index",        "%lld", c->rx_bad_index);
-    status_.addf("RX Bad Sequence",     "%lld", c->rx_bad_seqnum);
-    status_.addf("RX Duplicate Sequence", "%lld", c->rx_dup_seqnum);    
-    status_.addf("RX Duplicate Packet", "%lld", c->rx_dup_pkt);    
-    status_.addf("RX Bad Order",        "%lld", c->rx_bad_order);    
-    status_.addf("RX Late Packet",      "%lld", c->rx_late_pkt);
-    status_.addf("RX Late Packet RTT",  "%lld", c->rx_late_pkt_rtt_us);
+    status_.addf("Sent Packets",        "%llu", (unsigned long long)c->sent);
+    status_.addf("Received Packets",    "%llu", (unsigned long long)c->received);
+    status_.addf("Collected Packets",   "%llu", (unsigned long long)c->collected);
+    status_.addf("Dropped Packets",     "%llu", (unsigned long long)c->dropped);
+    status_.addf("TX Errors",           "%llu", (unsigned long long)c->tx_error);
+    status_.addf("TX Network Down",     "%llu", (unsigned long long)c->tx_net_down);
+    status_.addf("TX Would Block",      "%llu", (unsigned long long)c->tx_would_block);
+    status_.addf("TX No Buffers",       "%llu", (unsigned long long)c->tx_no_bufs);
+    status_.addf("TX Queue Full",       "%llu", (unsigned long long)c->tx_full);
+    status_.addf("RX Runt Packet",      "%llu", (unsigned long long)c->rx_runt_pkt);
+    status_.addf("RX Not EtherCAT",     "%llu", (unsigned long long)c->rx_not_ecat);
+    status_.addf("RX Other EML",        "%llu", (unsigned long long)c->rx_other_eml);
+    status_.addf("RX Bad Index",        "%llu", (unsigned long long)c->rx_bad_index);
+    status_.addf("RX Bad Sequence",     "%llu", (unsigned long long)c->rx_bad_seqnum);
+    status_.addf("RX Duplicate Sequence", "%llu", (unsigned long long)c->rx_dup_seqnum);    
+    status_.addf("RX Duplicate Packet", "%llu", (unsigned long long)c->rx_dup_pkt);    
+    status_.addf("RX Bad Order",        "%llu", (unsigned long long)c->rx_bad_order);    
+    status_.addf("RX Late Packet",      "%llu", (unsigned long long)c->rx_late_pkt);
+    status_.addf("RX Late Packet RTT",  "%llu", (unsigned long long)c->rx_late_pkt_rtt_us);
     
     double rx_late_pkt_rtt_us_avg = 0.0;
     if (c->rx_late_pkt > 0) {
@@ -757,6 +770,8 @@ void EthercatHardware::printCounters(std::ostream &os)
      << " dropped       = " << c.dropped << endl
      << " tx_error      = " << c.tx_error << endl
      << " tx_net_down   = " << c.tx_net_down << endl
+     << " tx_would_block= " << c.tx_would_block << endl
+     << " tx_no_bufs    = " << c.tx_no_bufs << endl
      << " tx_full       = " << c.tx_full << endl
      << " rx_runt_pkt   = " << c.rx_runt_pkt << endl
      << " rx_not_ecat   = " << c.rx_not_ecat << endl

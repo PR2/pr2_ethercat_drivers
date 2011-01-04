@@ -206,7 +206,8 @@ WG0X::WG0X() :
   calibration_status_(NO_CALIBRATION),
   last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
-  motor_model_(NULL)
+  motor_model_(NULL),
+  disable_motor_model_checking_(false)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -377,7 +378,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       {
         ROS_FATAL("Initializing motor trace failed");
         sleep(1); // wait for ros to flush rosconsole output
-        ROS_BREAK();
         return -1;
       }
     }
@@ -404,7 +404,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     {
       ROS_FATAL("Initializing motor trace failed");
       sleep(1); // wait for ros to flush rosconsole output
-      ROS_BREAK();
       return -1;
     }
 
@@ -422,7 +421,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
       {
           ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
-          ROS_BREAK();
           return -1;
       }
     }
@@ -441,7 +439,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         if (hw && !hw->addAccelerometer(&accelerometer_))
         {
             ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
-            ROS_BREAK();
             return -1;
         }
       }
@@ -478,7 +475,6 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
     if (hw && !hw->addDigitalOut(digital_outs[i].d))
     {
         ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_outs[i].d->name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
   }
@@ -489,7 +485,6 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
     if (hw && !hw->addProjector(&projector_))
     {
         ROS_FATAL("A projector of the name '%s' already exists.  Device #%02d has a duplicate name", projector_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
     projector_.command_.enable_ = true;
@@ -551,8 +546,14 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   publish_motor_trace_.state_.data_ = 0;
   if (!hw->addDigitalOut(&publish_motor_trace_)) {
     ROS_FATAL("A digital out of the name '%s' already exists", publish_motor_trace_.name_.c_str());
-    ROS_BREAK();
     return false;
+  }
+
+  // When working with experimental setups we don't want motor model to halt motors when it detects a problem.
+  // Allow rosparam to disable motor model halting for a specific motor.
+  if (!ros::NodeHandle().getParam(ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
+  {
+    disable_motor_model_checking_ = false;
   }
 
   return true;
@@ -574,7 +575,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (fw_major_ != 1 || fw_minor_ < 7)
     {
       ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
-      ROS_BREAK();
       return -1;
     }
   }
@@ -583,7 +583,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if ((fw_major_ == 0 && fw_minor_ < 4) /*|| (fw_major_ == 1 && fw_minor_ < 0)*/)
     {
       ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
-      ROS_BREAK();
       return -1;
     }
   }
@@ -591,7 +590,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   if (readMailbox(&com, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_)) != 0)
   {
     ROS_FATAL("Unable to load configuration information");
-    ROS_BREAK();
     return -1;
   }
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
@@ -600,7 +598,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   if (readEeprom(&com) < 0)
   {
     ROS_FATAL("Unable to read actuator info from EEPROM");
-    ROS_BREAK();
     return -1;
   }
 
@@ -619,7 +616,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       else
       {
         ROS_FATAL("Unsupported actuator info version (%d.%d != 0.2).  Please reprogram device #%02d", actuator_info_.major_, actuator_info_.minor_, sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
       }
     }
@@ -634,9 +630,9 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (hw && !hw->addActuator(&actuator_))
       {
           ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
-          ROS_BREAK();
           return -1;
       }
+
     }
 
     // Register digital out with pr2_hardware_interface::HardwareInterface
@@ -644,7 +640,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (hw && !hw->addDigitalOut(&digital_out_))
     {
         ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
 
@@ -694,7 +689,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     ROS_FATAL("Device #%02d (%d%05d) is not programmed, aborting...", 
               sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
-    ROS_BREAK();
     return -1;
   }
 
@@ -709,7 +703,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     c = elt->FirstChildElement((a)); \
     if (!c || !(attr = c->GetText())) { \
       ROS_FATAL("Actuator is missing the attribute "#a); \
-      ROS_BREAK(); \
+      exit(EXIT_FAILURE); \
     } \
   } \
 }
@@ -1083,11 +1077,17 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
-  if (state.is_enabled_ && motor_model_ && !motor_model_->verify())
+  if (state.is_enabled_ && motor_model_)
   {
-    // Motor model will automatically publish a motor trace when there is an error
-    rv = false;
-    goto end;
+    if (!disable_motor_model_checking_)
+    {
+      if(!motor_model_->verify())
+      {
+        // Motor model will automatically publish a motor trace when there is an error
+        rv = false;
+        goto end;
+      }
+    }
   }
 
 end:
@@ -2422,15 +2422,29 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   }
 
   {
-    static const double WG05_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
+
     const WG0XDiagnosticsInfo &di(p.diagnostics_info_);
     //d.addf("PDO Command IRQ Count", "%d", di.pdo_command_irq_count_);
     d.addf("MBX Command IRQ Count", "%d", di.mbx_command_irq_count_);
     d.addf("PDI Timeout Error Count", "%d", di.pdi_timeout_error_count_);
     d.addf("PDI Checksum Error Count", "%d", di.pdi_checksum_error_count_);
     unsigned product = sh_->get_product_code();
-    if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) {
-      d.addf("Supply Current", "%f", di.supply_current_in_ * WG05_SUPPLY_CURRENT_SCALE);
+
+    // Current scale 
+    if ((product == WG05::PRODUCT_CODE) && (board_major_ == 1))
+    {
+      // WG005B measure current going into and out-of H-bridge (not entire board)
+      static const double WG005B_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
+      double bridge_supply_current = double(di.supply_current_in_) * WG005B_SUPPLY_CURRENT_SCALE;
+      d.addf("Bridge Supply Current", "%f", bridge_supply_current);
+    }
+    else if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) 
+    {
+      // WG005[CDEF] measures curret going into entire board.  It cannot measure negative (regenerative) current values.
+      // WG021A == WG005E,  WG021B == WG005F
+      static const double WG005_SUPPLY_CURRENT_SCALE = ((82.0 * 2.5) / (0.01 * 5100.0 * 32768.0));
+      double supply_current = double(di.supply_current_in_) * WG005_SUPPLY_CURRENT_SCALE;
+      d.addf("Supply Current", "%f",  supply_current);
     }
     d.addf("Configured Offset A", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_A_);
     d.addf("Configured Offset B", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_B_);
@@ -2512,6 +2526,10 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   if (motor_model_) 
   {
     motor_model_->diagnostics(d);
+    if (disable_motor_model_checking_)
+    {
+      d.mergeSummaryf(d.WARN, "Motor model disabled");      
+    }
   }
 
   if (last_num_encoder_errors_ != status->num_encoder_errors_)
