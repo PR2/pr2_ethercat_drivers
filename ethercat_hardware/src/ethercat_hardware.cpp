@@ -112,7 +112,8 @@ void EthercatHardware::changeState(EtherCAT_SlaveHandler *sh, EC_State new_state
               new_state, slave, product_code, product_code, serial, serial, revision, revision);
     if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
       ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -123,8 +124,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (sock < 0) {
     int error = errno;
     ROS_FATAL("Couldn't open temp socket : %s", strerror(error));
-    sleep(1);
-    ROS_BREAK();    
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
   
   struct ifreq ifr;
@@ -132,8 +133,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
     int error = errno;
     ROS_FATAL("Cannot get interface flags for %s: %s", interface, strerror(error));
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
   close(sock);
@@ -141,13 +142,13 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   if (!(ifr.ifr_flags & IFF_UP)) {
     ROS_FATAL("Interface %s is not UP. Try : ifup %s", interface, interface);
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
   if (!(ifr.ifr_flags & IFF_RUNNING)) {
     ROS_FATAL("Interface %s is not RUNNING. Is cable plugged in and device powered?", interface);
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
 
@@ -156,8 +157,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((ni_ = init_ec(interface)) == NULL)
   {
     ROS_FATAL("Unable to initialize interface: %s", interface);
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
   oob_com_ = new EthercatOobCom(ni_);
@@ -167,24 +168,24 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((al_ = EtherCAT_AL::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize Application Layer (AL): %p", al_);
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
   num_slaves_ = al_->get_num_slaves();
   if (num_slaves_ == 0)
   {
     ROS_FATAL("Unable to locate any slaves");
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
   // Initialize Master
   if ((em_ = EtherCAT_Master::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize EtherCAT_Master: %p", em_);
-    sleep(1);
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
 
   slaves_ = new EthercatDevice*[num_slaves_];
@@ -198,8 +199,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (sh == NULL)
     {
       ROS_FATAL("Unable to get slave handler #%d", slave);
-      sleep(1);
-      ROS_BREAK();
+      sleep(1); // wait for ros to flush rosconsole output
+      exit(EXIT_FAILURE);
     }
     slave_handles.push_back(sh);
   }
@@ -211,8 +212,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if ((slaves_[slave] = configSlave(sh)) == NULL)
     {      
       ROS_FATAL("Unable to configure slave #%d", slave);
-      sleep(1);
-      ROS_BREAK();
+      sleep(1); // wait for ros to flush rosconsole output
+      exit(EXIT_FAILURE);
     }
     buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
   }
@@ -246,7 +247,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (!txandrx_PD(buffer_size_, this_buffer_, 20))
   {
     ROS_FATAL("No communication with devices");
-    ROS_BREAK();
+    sleep(1); // wait for ros to flush rosconsole output
+    exit(EXIT_FAILURE);
   }
   
   // prev_buffer should contain valid status data when update function is first used
@@ -267,8 +269,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
       ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
                 slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
-      sleep(1);
-      ROS_BREAK();
+      sleep(1); // wait for ros to flush rosconsole output
+      exit(EXIT_FAILURE);
     }
   }
 
@@ -293,8 +295,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (set_socket_timeout(ni_, timeout))
     {
       ROS_FATAL("Error setting socket timeout to %d", timeout);      
-      sleep(1);
-      ROS_BREAK();
+      sleep(1); // wait for ros to flush rosconsole output
+      exit(EXIT_FAILURE);
     }
 
     // When packet constaining process data is does not return after a given timeout, it is 

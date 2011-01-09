@@ -375,8 +375,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
       {
         ROS_FATAL("Initializing motor trace failed");
-        sleep(1); // wait for ros to flush rosconsole output
-        ROS_BREAK();
         return -1;
       }
     }
@@ -402,8 +400,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
     {
       ROS_FATAL("Initializing motor trace failed");
-      sleep(1); // wait for ros to flush rosconsole output
-      ROS_BREAK();
       return -1;
     }
 
@@ -421,7 +417,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
       {
           ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
-          ROS_BREAK();
           return -1;
       }
     }
@@ -440,7 +435,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         if (hw && !hw->addAccelerometer(&accelerometer_))
         {
             ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
-            ROS_BREAK();
             return -1;
         }
       }
@@ -477,7 +471,6 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
     if (hw && !hw->addDigitalOut(digital_outs[i].d))
     {
         ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_outs[i].d->name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
   }
@@ -488,7 +481,6 @@ int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_
     if (hw && !hw->addProjector(&projector_))
     {
         ROS_FATAL("A projector of the name '%s' already exists.  Device #%02d has a duplicate name", projector_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
     projector_.command_.enable_ = true;
@@ -550,7 +542,6 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   publish_motor_trace_.state_.data_ = 0;
   if (!hw->addDigitalOut(&publish_motor_trace_)) {
     ROS_FATAL("A digital out of the name '%s' already exists", publish_motor_trace_.name_.c_str());
-    ROS_BREAK();
     return false;
   }
 
@@ -573,7 +564,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (fw_major_ != 1 || fw_minor_ < 7)
     {
       ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
-      ROS_BREAK();
       return -1;
     }
   }
@@ -582,7 +572,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if ((fw_major_ == 0 && fw_minor_ < 4) /*|| (fw_major_ == 1 && fw_minor_ < 0)*/)
     {
       ROS_FATAL("Unsupported firmware revision %d.%02d", fw_major_, fw_minor_);
-      ROS_BREAK();
       return -1;
     }
   }
@@ -590,7 +579,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   if (readMailbox(&com, WG0XConfigInfo::CONFIG_INFO_BASE_ADDR, &config_info_, sizeof(config_info_)) != 0)
   {
     ROS_FATAL("Unable to load configuration information");
-    ROS_BREAK();
     return -1;
   }
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
@@ -598,7 +586,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   if (readEeprom(&com) < 0)
   {
     ROS_FATAL("Unable to read actuator info from EEPROM");
-    ROS_BREAK();
     return -1;
   }
 
@@ -617,7 +604,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       else
       {
         ROS_FATAL("Unsupported actuator info version (%d.%d != 0.2).  Please reprogram device #%02d", actuator_info_.major_, actuator_info_.minor_, sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
       }
     }
@@ -632,7 +618,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (hw && !hw->addActuator(&actuator_))
       {
           ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
-          ROS_BREAK();
           return -1;
       }
     }
@@ -642,7 +627,6 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (hw && !hw->addDigitalOut(&digital_out_))
     {
         ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_out_.name_.c_str(), sh_->get_ring_position());
-        ROS_BREAK();
         return -1;
     }
 
@@ -683,24 +667,10 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     ROS_FATAL("Device #%02d (%d%05d) is not programmed, aborting...", 
               sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
-    ROS_BREAK();
     return -1;
   }
 
   return 0;
-}
-
-#define GET_ATTR(a) \
-{ \
-  TiXmlElement *c; \
-  attr = elt->Attribute((a)); \
-  if (!attr) { \
-    c = elt->FirstChildElement((a)); \
-    if (!c || !(attr = c->GetText())) { \
-      ROS_FATAL("Actuator is missing the attribute "#a); \
-      ROS_BREAK(); \
-    } \
-  } \
 }
 
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
