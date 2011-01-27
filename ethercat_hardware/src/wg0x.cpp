@@ -2372,11 +2372,11 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   
   if (wg0x_publish_diagnostics_.first_)
   {
-    d.mergeSummaryf(d.WARN, "Have not yet collected WG0X diagnostics");
+    d.mergeSummary(d.WARN, "Have not yet collected WG0X diagnostics");
   }
   else if (!wg0x_publish_diagnostics_.valid_) 
   {
-    d.mergeSummaryf(d.WARN, "Could not collect WG0X diagnostics");
+    d.mergeSummary(d.WARN, "Could not collect WG0X diagnostics");
   }
 
   WG0XDiagnostics const &p(wg0x_publish_diagnostics_);

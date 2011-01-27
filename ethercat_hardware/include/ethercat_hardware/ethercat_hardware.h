@@ -175,7 +175,9 @@ private:
   unsigned int num_slaves_;
   string interface_;
 
+  //! Timeout controls how long EtherCAT driver waits for packet before declaring it as dropped.
   unsigned timeout_;
+  //! Number of times (in a row) to retry sending process data (realtime data) before halting motors 
   unsigned max_pd_retries_;
 
   //! Count of dropped packets last diagnostics cycle

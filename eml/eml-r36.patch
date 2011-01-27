@@ -411,6 +411,14 @@ Index: include/dll/ethercat_slave_memory.h
  };
  
  /// Class representing a bit position within a byte
+@@ -630,6 +633,7 @@
+   EC_BufferType BufferType;
+   EC_Direction Direction;
+   bool ALEventEnable;
++  bool ECATEventEnable;
+   bool WatchdogEnable;
+   bool WriteEvent;
+   bool ReadEvent;
 Index: include/al/ethercat_slave_conf.h
 ===================================================================
 --- include/al/ethercat_slave_conf.h	(revision 36)
@@ -664,7 +672,15 @@ Index: src/dll/ethercat_slave_memory.cxx
  }
  
  unsigned char *
-@@ -256,7 +259,7 @@
+@@ -245,6 +248,7 @@
+     BufferType(buffer_type),
+     Direction(direction),
+     ALEventEnable(AL_event_enable),
++    ECATEventEnable(false),
+     WatchdogEnable(watchdog_enable),
+     WriteEvent(write_event),
+     ReadEvent(read_event),
+@@ -256,7 +260,7 @@
  EC_SyncMan::EC_SyncMan(const unsigned char * a_buffer)
    : EC_DataStruct(EC_Slave_RD[Sync_Manager_0].size)
  {
@@ -673,6 +689,15 @@ Index: src/dll/ethercat_slave_memory.cxx
  }
  
  unsigned char *
+@@ -265,7 +269,7 @@
+   a_buffer = host2nw(a_buffer,PhysicalStartAddress);
+   a_buffer = host2nw(a_buffer,Length);
+   // fixme explicit cast necessary here?
+-  EC_USINT thirdbyte = BufferType | (Direction << 2) | ((EC_USINT) ALEventEnable << 5) | ((EC_USINT) WatchdogEnable << 6);
++  EC_USINT thirdbyte = BufferType | (Direction << 2) | ((EC_USINT) ECATEventEnable << 4) | ((EC_USINT) ALEventEnable << 5) | ((EC_USINT) WatchdogEnable << 6);
+   a_buffer = host2nw(a_buffer,thirdbyte);
+   EC_USINT fourthbyte = (EC_USINT) WriteEvent | ((EC_USINT) ReadEvent << 1) | ((EC_USINT) WatchdogTrigger << 2) | ((EC_USINT) QueuedState << 3) | (BufferedState << 4);
+   a_buffer = host2nw(a_buffer,fourthbyte);
 Index: src/dll/ethercat_frame.cxx
 ===================================================================
 --- src/dll/ethercat_frame.cxx	(revision 36)
