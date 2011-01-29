@@ -4,7 +4,7 @@
     that connect to it: motor control boards, fingertip sensors, texture
     projector, hand accelerometer.
   </description>
-  <author>Maintained by Rob Wheeler</author>
+  <author>Maintained by Derek King</author>
   <license>BSD,binary only,GPL</license>  
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/pr2_ethercat_drivers</url>
