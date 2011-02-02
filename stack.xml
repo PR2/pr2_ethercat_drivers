@@ -4,16 +4,17 @@
     that connect to it: motor control boards, fingertip sensors, texture
     projector, hand accelerometer.
   </description>
-  <author>Maintained by Rob Wheeler</author>
+  <author>Maintained by Derek King</author>
   <license>BSD,binary only,GPL</license>  
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/pr2_ethercat_drivers</url>
   <depend stack="common" /> <!-- tinyxml, pluginlib -->
-  <depend stack="common_msgs" /> <!-- geometry_msgs, diagnostic_msgs -->
+  <depend stack="common_msgs" /> <!-- geometry_msgs, diagnostic_msgs, visualization_msgs -->
   <depend stack="diagnostics" /> <!-- diagnostic_updater -->
   <depend stack="pr2_common" /> <!-- pr2_msgs -->
   <depend stack="pr2_mechanism" /> <!-- pr2_hardware_interface, realtime_tools -->
-  <depend stack="ros" /> <!-- wxswig, rostest, rospy, roscpp -->
-  <depend stack="visualization_common" /> <!-- visualization_msgs -->
+  <depend stack="ros" />
+  <depend stack="ros_comm" /> <!-- rostest, rospy, roscpp -->
+  <depend stack="rx" /> <!-- wxswig -->
 
 </stack>

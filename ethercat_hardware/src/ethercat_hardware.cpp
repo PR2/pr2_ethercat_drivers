@@ -112,7 +112,6 @@ void EthercatHardware::changeState(EtherCAT_SlaveHandler *sh, EC_State new_state
               new_state, slave, product_code, product_code, serial, serial, revision, revision);
     if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
       ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
-    sleep(1); // wait for ros to flush rosconsole output
     exit(EXIT_FAILURE);
   }
 }
@@ -124,8 +123,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (sock < 0) {
     int error = errno;
     ROS_FATAL("Couldn't open temp socket : %s", strerror(error));
-    sleep(1); // wait for ros to flush rosconsole output
-    exit(EXIT_FAILURE);
+    sleep(1);
+    exit(EXIT_FAILURE);    
   }
   
   struct ifreq ifr;
@@ -133,7 +132,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
     int error = errno;
     ROS_FATAL("Cannot get interface flags for %s: %s", interface, strerror(error));
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -142,12 +141,12 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   if (!(ifr.ifr_flags & IFF_UP)) {
     ROS_FATAL("Interface %s is not UP. Try : ifup %s", interface, interface);
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
   if (!(ifr.ifr_flags & IFF_RUNNING)) {
     ROS_FATAL("Interface %s is not RUNNING. Is cable plugged in and device powered?", interface);
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -157,7 +156,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((ni_ = init_ec(interface)) == NULL)
   {
     ROS_FATAL("Unable to initialize interface: %s", interface);
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -168,7 +167,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((al_ = EtherCAT_AL::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize Application Layer (AL): %p", al_);
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -176,7 +175,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (num_slaves_ == 0)
   {
     ROS_FATAL("Unable to locate any slaves");
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -184,7 +183,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if ((em_ = EtherCAT_Master::instance()) == NULL)
   {
     ROS_FATAL("Unable to initialize EtherCAT_Master: %p", em_);
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
 
@@ -199,7 +198,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (sh == NULL)
     {
       ROS_FATAL("Unable to get slave handler #%d", slave);
-      sleep(1); // wait for ros to flush rosconsole output
+      sleep(1);
       exit(EXIT_FAILURE);
     }
     slave_handles.push_back(sh);
@@ -212,7 +211,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if ((slaves_[slave] = configSlave(sh)) == NULL)
     {      
       ROS_FATAL("Unable to configure slave #%d", slave);
-      sleep(1); // wait for ros to flush rosconsole output
+      sleep(1);
       exit(EXIT_FAILURE);
     }
     buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
@@ -247,7 +246,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   if (!txandrx_PD(buffer_size_, this_buffer_, 20))
   {
     ROS_FATAL("No communication with devices");
-    sleep(1); // wait for ros to flush rosconsole output
+    sleep(1);
     exit(EXIT_FAILURE);
   }
   
@@ -269,18 +268,17 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
       ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
                 slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
-      sleep(1); // wait for ros to flush rosconsole output
+      sleep(1);
       exit(EXIT_FAILURE);
     }
   }
 
-  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_);
 
   { // Initialization is now complete. Reduce timeout of EtherCAT txandrx for better realtime performance
     // Allow timeout to be configured at program load time with rosparam.  
     // This will allow tweaks for systems with different realtime performace
     static const int MAX_TIMEOUT = 100000;   // 100ms = 100,000us
-    static const int DEFAULT_TIMEOUT = 1000; // default to timeout to 1000us = 1ms
+    static const int DEFAULT_TIMEOUT = 20000; // default to timeout to 20000us = 20ms
     int timeout;
     if (!node_.getParam("realtime_socket_timeout", timeout))
     {
@@ -295,9 +293,10 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (set_socket_timeout(ni_, timeout))
     {
       ROS_FATAL("Error setting socket timeout to %d", timeout);      
-      sleep(1); // wait for ros to flush rosconsole output
+      sleep(1);
       exit(EXIT_FAILURE);
     }
+    timeout_ = timeout;
 
     // When packet constaining process data is does not return after a given timeout, it is 
     // assumed to be dropped and the process data will automatically get re-sent.
@@ -307,8 +306,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     // This is needed because lowering the txandrx timeout makes it more likely that a 
     // performance hickup in network or OS causes will cause the motors to halt.
     //
-    // If number of retries is not specified, use a formula that allows 20ms of dropped packets
-    int max_pd_retries = 20000 / timeout;  // timeout is in nanoseconds : 20msec = 20000nsec 
+    // If number of retries is not specified, use a formula that allows 100ms of dropped packets
+    int max_pd_retries = MAX_TIMEOUT / timeout;  // timeout is in nanoseconds : 20msec = 20000usec 
     static const int MAX_RETRIES=50, MIN_RETRIES=1;
     node_.getParam("max_pd_retries", max_pd_retries);
     // Make sure motor halt due to dropped packet takes less than 1/10 of a second
@@ -325,13 +324,15 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     max_pd_retries = std::max(MIN_RETRIES,std::min(MAX_RETRIES,max_pd_retries));
     max_pd_retries_ = max_pd_retries;
   }
+
+  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_, timeout_, max_pd_retries_);
 }
 
 
 EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::NodeHandle &node) :
   node_(node),
   diagnostics_ready_(false),
-  publisher_(node_, "/diagnostics", 1),
+  publisher_(node_.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1)),
   diagnostics_buffer_(NULL),
   slaves_(NULL),
   num_slaves_(0),
@@ -345,18 +346,19 @@ EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
   delete[] diagnostics_buffer_;
 }
 
-void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves)
+void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves, unsigned timeout, unsigned max_pd_retries)
 {
   interface_ = interface;
   buffer_size_ = buffer_size;
   slaves_ = slaves;
   num_slaves_ = num_slaves;
+  timeout_ = timeout;
+  max_pd_retries_ = max_pd_retries;
 
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Initialize diagnostic data structures
-  publisher_.msg_.status.reserve(num_slaves_ + 1);
-  statuses_.reserve(num_slaves_ + 1);
+  diagnostic_array_.status.reserve(num_slaves_ + 1);
   values_.reserve(10);
 
   ethernet_interface_info_.initialize(interface);
@@ -385,7 +387,7 @@ void EthercatHardwareDiagnosticsPublisher::stop()
 {
   diagnostics_thread_.interrupt();
   diagnostics_thread_.join();
-  publisher_.stop();
+  publisher_.shutdown();
 }
 
 void EthercatHardwareDiagnosticsPublisher::diagnosticsThreadFunc()
@@ -449,6 +451,9 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
 
+  status_.addf("Timeout (us)", "%d", timeout_);
+  status_.addf("Max PD Retries", "%d", max_pd_retries_);
+
   // Produce warning if number of devices changed after device initalization
   if (num_slaves_ != diagnostics_.device_count_) {
     status_.mergeSummary(status_.WARN, "Number of EtherCAT devices changed");
@@ -511,24 +516,20 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
     status_.mergeSummaryf(status_.WARN, "Dropped packets in last %d seconds", dropped_packet_warning_hold_time_);
   }
 
-  statuses_.clear();
-  statuses_.push_back(status_);
+  diagnostic_array_.status.clear();
+  diagnostic_array_.status.push_back(status_);
 
   // Also, collect diagnostic statuses of all EtherCAT device
   unsigned char *current = diagnostics_buffer_;
   for (unsigned int s = 0; s < num_slaves_; ++s)
   {
-    slaves_[s]->multiDiagnostics(statuses_, current);
+    slaves_[s]->multiDiagnostics(diagnostic_array_.status, current);
     current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
   }
 
   // Publish status of each EtherCAT device
-  if (publisher_.trylock())
-  {
-    publisher_.msg_.set_status_vec(statuses_);
-    publisher_.msg_.header.stamp = ros::Time::now();
-    publisher_.unlockAndPublish();
-  }
+  diagnostic_array_.header.stamp = ros::Time::now();
+  publisher_.publish(diagnostic_array_);
 }
 
 void EthercatHardware::update(bool reset, bool halt)

@@ -9,7 +9,8 @@ This is an implementation of the EtherCAT master protocol for the PR2 robot base
 <review status="3rdparty" notes=""/>
 <url>http://ethercatmaster.berlios.de/</url>
 <export>
-  <cpp lflags="-Wl,-rpath,${prefix}/lib -L${prefix}/eml/lib -leml" cflags="-I${prefix}/eml/include"/>
+  <cpp lflags="-Wl,-rpath,${prefix}/eml/lib -L${prefix}/eml/lib -leml" 
+       cflags="-I${prefix}/eml/include"/>
   <doxymaker external="http://ethercatmaster.berlios.de/doxygen/html/index.html"/>
 </export>
   <platform os="ubuntu" version="9.04"/>

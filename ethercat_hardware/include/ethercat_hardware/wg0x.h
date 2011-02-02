@@ -486,6 +486,7 @@ protected:
 
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
+  double max_current_;         //!< min(board current limit, actuator current limit)
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
@@ -501,15 +502,19 @@ protected:
     MODE_RESET = (1 << 7)
   };
 
-  string reason_;
-  int level_;
-  string safetyDisableString(uint8_t status);
+  static string modeString(uint8_t mode);
+  static string safetyDisableString(uint8_t status);
   bool in_lockout_;
   bool resetting_;
   bool has_error_;
   uint16_t max_bridge_temperature_, max_board_temperature_;
+  bool too_many_dropped_packets_;
+  bool status_checksum_error_;
   bool timestamp_jump_detected_;
   bool fpga_internal_reset_detected_;
+
+  void clearErrorFlags(void);
+
   double cached_zero_offset_;
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
@@ -609,6 +614,7 @@ private:
 
   // Not all devices will need this (WG021) 
   MotorModel *motor_model_; 
+  bool disable_motor_model_checking_;
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
 
@@ -664,6 +670,8 @@ public:
 private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
+
+  bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
 
   unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
   unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed

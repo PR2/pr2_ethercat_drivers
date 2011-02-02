@@ -197,13 +197,17 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
 }
 
 WG0X::WG0X() :
+  max_current_(0.0),
+  too_many_dropped_packets_(false),
+  status_checksum_error_(false),
   timestamp_jump_detected_(false),
   fpga_internal_reset_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
   last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
-  motor_model_(NULL)
+  motor_model_(NULL),
+  disable_motor_model_checking_(false)
 {
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
@@ -224,6 +228,7 @@ WG0X::~WG0X()
 }
 
 WG06::WG06() :
+  pressure_checksum_error_(false),
   accelerometer_samples_(0), 
   accelerometer_missed_samples_(0),
   first_publish_(true),
@@ -243,9 +248,6 @@ WG06::~WG06()
 void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
   EthercatDevice::construct(sh, start_address);
-
-  reason_ = "OK";
-  level_ = 0;
 
   last_timestamp_ = 0;
   last_last_timestamp_ = 0;
@@ -375,6 +377,7 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
       {
         ROS_FATAL("Initializing motor trace failed");
+        sleep(1); // wait for ros to flush rosconsole output
         return -1;
       }
     }
@@ -400,6 +403,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
     {
       ROS_FATAL("Initializing motor trace failed");
+      sleep(1); // wait for ros to flush rosconsole output
       return -1;
     }
 
@@ -545,6 +549,13 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
     return false;
   }
 
+  // When working with experimental setups we don't want motor model to halt motors when it detects a problem.
+  // Allow rosparam to disable motor model halting for a specific motor.
+  if (!ros::NodeHandle().getParam(ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
+  {
+    disable_motor_model_checking_ = false;
+  }
+
   return true;
 }
 
@@ -582,6 +593,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     return -1;
   }
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
+  double board_max_current = double(config_info_.absolute_current_limit_) * config_info_.nominal_current_scale_;
 
   if (readEeprom(&com) < 0)
   {
@@ -620,6 +632,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           ROS_FATAL("An actuator of the name '%s' already exists.  Device #%02d has a duplicate name", actuator_.name_.c_str(), sh_->get_ring_position());
           return -1;
       }
+
     }
 
     // Register digital out with pr2_hardware_interface::HardwareInterface
@@ -655,6 +668,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       // don't produce warning
     }
 
+    // Make sure motor current limit is less than board current limit
+    if (actuator_info_.max_current_ > board_max_current)
+    {
+      ROS_WARN("WARNING: Device #%02d : motor current limit (%f) greater than board current limit (%f)", 
+               sh_->get_ring_position(), actuator_info_.max_current_, board_max_current);
+    }
+    max_current_ = std::min(board_max_current, actuator_info_.max_current_);
   }
   else if (allow_unprogrammed)
   {
@@ -662,6 +682,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
     actuator_info_.crc32_264_ = 0;
     actuator_info_.crc32_256_ = 0;
+
+    max_current_ = board_max_current;
   }
   else
   {
@@ -671,6 +693,28 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   }
 
   return 0;
+}
+
+#define GET_ATTR(a) \
+{ \
+  TiXmlElement *c; \
+  attr = elt->Attribute((a)); \
+  if (!attr) { \
+    c = elt->FirstChildElement((a)); \
+    if (!c || !(attr = c->GetText())) { \
+      ROS_FATAL("Actuator is missing the attribute "#a); \
+      exit(EXIT_FAILURE); \
+    } \
+  } \
+}
+
+void WG0X::clearErrorFlags(void)
+{
+  has_error_ = false;
+  too_many_dropped_packets_ = false;
+  status_checksum_error_ = false;
+  timestamp_jump_detected_ = false;
+  if (motor_model_) motor_model_->reset();
 }
 
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
@@ -684,11 +728,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
 
   if (reset) 
   {
-    level_ = 0;
-    reason_ = "OK";
-    has_error_ = false;
-    if (motor_model_) motor_model_->reset();
-    timestamp_jump_detected_ = false;
+    clearErrorFlags();
   }
   resetting_ = reset;
 
@@ -716,7 +756,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   actuator_.state_.last_commanded_current_ = current;
 
   // Truncate the current to limit
-  current = max(min(current, actuator_info_.max_current_), -actuator_info_.max_current_);
+  current = max(min(current, max_current_), -max_current_);
 
   // Pack command structures into EtherCAT buffer
   WG0XCommand *c = (WG0XCommand *)buffer;
@@ -740,6 +780,11 @@ void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
 
 void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
+  if (reset) 
+  {
+    pressure_checksum_error_ = false;
+  }
+
   WG0X::packCommand(buffer, halt, reset);
 
   if (reset)
@@ -768,17 +813,15 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   pr2_hardware_interface::ProjectorCommand &cmd = projector_.command_;
 
   // Override enable if motors are halted  
-  if (reset) {
-    level_ = 0;
-    reason_ = "OK";
-    has_error_ = false;
-    timestamp_jump_detected_ = false;
+  if (reset) 
+  {
+    clearErrorFlags();
   }
   resetting_ = reset;
 
-  // Truncate the current to limit
+  // Truncate the current to limit (do not allow negative current)
   projector_.state_.last_commanded_current_ = cmd.current_;
-  cmd.current_ = max(min(cmd.current_, actuator_info_.max_current_), -actuator_info_.max_current_);
+  cmd.current_ = max(min(cmd.current_, max_current_), 0.0);
 
   // Pack command structures into EtherCAT buffer
   WG021Command *c = (WG021Command *)buffer;
@@ -797,8 +840,6 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
 bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
-  int level = 0;
-  string reason = "OK";
 
   int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
   WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
@@ -806,17 +847,15 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   unsigned char* this_status = this_buffer + command_size_;
   if (!verifyChecksum(this_status, status_bytes))
   {
+    status_checksum_error_ = true;
     rv = false;
-    reason = "Checksum error on status data";
-    level = 2;
     goto end;
   }
 
   if (!verifyChecksum(p, sizeof(*p)))
   {
+    pressure_checksum_error_ = true;
     rv = false;
-    reason = "Checksum error on pressure data";
-    level = 2;
     goto end;
   }
 
@@ -890,11 +929,6 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   }
 
  end:
-  if (level > level_)
-  {
-    level_ = level;
-    reason_ = reason;
-  }
   return rv;
 }
 
@@ -932,6 +966,8 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   state.motor_voltage_ = this_status->motor_voltage_ * config_info_.nominal_voltage_scale_;
 
+  state.max_effort_ = max_current_ * actuator_info_.encoder_reduction_ * actuator_info_.motor_torque_constant_; 
+
   return verifyState(this_status, prev_status);
 }
 
@@ -952,15 +988,12 @@ bool WG0X::verifyChecksum(const void* buffer, unsigned size)
 bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
-  int level = 0;
-  string reason = "OK";
 
   unsigned char* this_status = this_buffer + command_size_;
   if (!verifyChecksum(this_status, status_size_))
   {
+    status_checksum_error_  = true;
     rv = false;
-    reason = "Checksum error on status data";
-    level = 2;
     goto end;
   }
 
@@ -970,11 +1003,6 @@ bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   }
 
  end:
-  if (level > level_)
-  {
-    level_ = level;
-    reason_ = reason;
-  }
   return rv;
 }
 
@@ -989,8 +1017,6 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 {
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   bool rv = true;
-  int level = 0;
-  string reason = "OK";
 
   if (motor_model_ != NULL) {
     // Collect data for motor model
@@ -1033,9 +1059,8 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
 
   if (consecutive_drops_ > 10)
   {
+    too_many_dropped_packets_ = true;
     rv = false;
-    reason = "Too many dropped packets";
-    level = 2;
     goto end;
   }
 
@@ -1043,45 +1068,45 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   if (in_lockout_ && !resetting_)
   {
     rv = false;
-    reason = "Safety Lockout";
-    level = 2;
     goto end;
   }
 
   if (fpga_internal_reset_detected_)
   {
-    // Error message is generated in diagnostic function
     rv = false;
     goto end;
   }
 
-  if (!(state.is_enabled_)) {
-    goto end;
-  }
-
-  if (motor_model_ && !motor_model_->verify(reason, level))
+  if (state.is_enabled_ && motor_model_)
   {
-    rv = false;
-    goto end;
+    if (!disable_motor_model_checking_)
+    {
+      if(!motor_model_->verify())
+      {
+        // Motor model will automatically publish a motor trace when there is an error
+        rv = false;
+        goto end;
+      }
+    }
   }
 
 end:
-  // Report the most severe error, until motor is reset.
-  if (level > level_)
+  if (motor_model_) 
   {
-    level_ = level;
-    reason_ = reason;
-  }
-  bool is_error = !rv;
-  bool new_error = is_error && !has_error_;
-  has_error_ = is_error || has_error_;
-  if (motor_model_) {
-    if ( new_error || publish_motor_trace_.command_.data_)
+    // Publish trace when:
+    //  * device goes into safety lockout
+    //  * controller request motor trace to be published
+    bool new_error = in_lockout_ && !resetting_ && !has_error_;
+    if (new_error || publish_motor_trace_.command_.data_)
     {
-      motor_model_->flagPublish(new_error ? reason : "Publishing manually triggered", new_error ? level : 0, 100); 
+      const char* reason = (new_error) ? "Safety Lockout" : "Publishing manually triggered";
+      int level          = (new_error) ? 2 : 0;
+      motor_model_->flagPublish(reason, level , 100);
       publish_motor_trace_.command_.data_ = 0;
     }
   }
+  bool is_error = !rv;
+  has_error_ = is_error || has_error_;
   actuator_.state_.halted_ = has_error_ || this_status->mode_ == MODE_OFF;
   return rv;
 }
@@ -1099,8 +1124,6 @@ bool WG0X::publishTrace(const string &reason, unsigned level, unsigned delay)
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
-  int level = 0;
-  string reason = "OK";
 
   pr2_hardware_interface::ProjectorState &state = projector_.state_;
   WG021Status *this_status, *prev_status;
@@ -1109,9 +1132,8 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   
   if (!verifyChecksum(this_status, status_size_))
   {
+    status_checksum_error_ = true;
     rv = false;
-    reason = "Checksum error on status data";
-    level = 2;
     goto end;
   }
 
@@ -1136,6 +1158,8 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
   state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
 
+  state.max_current_ = max_current_;
+
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
   max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
 
@@ -1145,11 +1169,6 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   }
 
 end:
-  if (level > level_)
-  {
-    level_ = level;
-    reason_ = reason;
-  }
   return rv;
 }
 
@@ -2287,6 +2306,40 @@ string WG0X::safetyDisableString(uint8_t status)
   return str;
 }
 
+string WG0X::modeString(uint8_t mode)
+{
+  string str, prefix;
+  if (mode) {
+    if (mode & MODE_ENABLE) {
+      str += prefix + "ENABLE";
+      prefix = ", ";
+    }
+    if (mode & MODE_CURRENT) {
+      str += prefix + "CURRENT";
+      prefix = ", ";
+    }
+    if (mode & MODE_UNDERVOLTAGE) {
+      str += prefix + "UNDERVOLTAGE";
+      prefix = ", ";
+    }
+    if (mode & MODE_SAFETY_RESET) {
+      str += prefix + "SAFETY_RESET";
+      prefix = ", ";
+    }
+    if (mode & MODE_SAFETY_LOCKOUT) {
+      str += prefix + "SAFETY_LOCKOUT";
+      prefix = ", ";
+    }
+    if (mode & MODE_RESET) {
+      str += prefix + "RESET";
+      prefix = ", ";
+    }
+  } else {
+    str = "OFF";
+  }
+  return str;
+}
+
 void WG0X::publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
 {
   if (lockMailbox()) { 
@@ -2308,14 +2361,22 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     wg0x_publish_diagnostics_ = wg0x_collect_diagnostics_;
     unlockWG0XDiagnostics(); 
   }
+
+  if (too_many_dropped_packets_)
+    d.mergeSummary(d.ERROR, "Too many dropped packets");
+
+  if (status_checksum_error_)
+  {
+    d.mergeSummary(d.ERROR, "Checksum error on status data");
+  }
   
   if (wg0x_publish_diagnostics_.first_)
   {
-    d.mergeSummaryf(d.WARN, "Have not yet collected WG0X diagnostics");
+    d.mergeSummary(d.WARN, "Have not yet collected WG0X diagnostics");
   }
   else if (!wg0x_publish_diagnostics_.valid_) 
   {
-    d.mergeSummaryf(d.WARN, "Could not collect WG0X diagnostics");
+    d.mergeSummary(d.WARN, "Could not collect WG0X diagnostics");
   }
 
   WG0XDiagnostics const &p(wg0x_publish_diagnostics_);
@@ -2331,6 +2392,20 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   d.addf("Operate Disable Count", "%d", p.operate_disable_total_);
   d.addf("Watchdog Disable Count", "%d", p.watchdog_disable_total_);
 
+  if (in_lockout_)
+  {
+    uint8_t status = s.safety_disable_status_hold_;
+    string prefix(": "); 
+    string str("Safety Lockout");
+    CHECK_SAFETY_BIT(UNDERVOLTAGE);
+    CHECK_SAFETY_BIT(OVER_CURRENT);
+    CHECK_SAFETY_BIT(BOARD_OVER_TEMP);
+    CHECK_SAFETY_BIT(HBRIDGE_OVER_TEMP);
+    CHECK_SAFETY_BIT(OPERATIONAL);
+    CHECK_SAFETY_BIT(WATCHDOG);
+    d.mergeSummary(d.ERROR, str);
+  }
+
   if (timestamp_jump_detected_ && (s.safety_disable_status_hold_ & SAFETY_OPERATIONAL))
   {
     fpga_internal_reset_detected_ = true;
@@ -2345,7 +2420,6 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   {
     d.mergeSummaryf(d.WARN, "Timestamp jumped");
   }
-
 
   {
 
@@ -2375,9 +2449,9 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     d.addf("Configured Offset A", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_A_);
     d.addf("Configured Offset B", "%f", config_info_.nominal_current_scale_ * di.config_offset_current_B_);
   }
-
-
 }
+
+
 
 void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
@@ -2390,8 +2464,8 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-
-  d.summary(level_, reason_);
+  if (!has_error_)
+    d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -2427,37 +2501,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
          (calibration_status_ == SAVED_CALIBRATION) ? "Using saved calibration" : "UNKNOWN");
 
   d.addf("Watchdog Limit", "%dms", config_info_.watchdog_limit_);
-
-  string mode, prefix;
-  if (status->mode_) {
-    if (status->mode_ & MODE_ENABLE) {
-      mode += prefix + "ENABLE";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_CURRENT) {
-      mode += prefix + "CURRENT";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_UNDERVOLTAGE) {
-      mode += prefix + "UNDERVOLTAGE";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_SAFETY_RESET) {
-      mode += prefix + "SAFETY_RESET";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_SAFETY_LOCKOUT) {
-      mode += prefix + "SAFETY_LOCKOUT";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_RESET) {
-      mode += prefix + "RESET";
-      prefix = ", ";
-    }
-  } else {
-    mode = "OFF";
-  }
-  d.add("Mode", mode);
+  d.add("Mode", modeString(status->mode_));
   d.addf("Digital out", "%d", status->digital_out_);
   d.addf("Programmed pwm value", "%d", status->programmed_pwm_value_);
   d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
@@ -2482,6 +2526,10 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   if (motor_model_) 
   {
     motor_model_->diagnostics(d);
+    if (disable_motor_model_checking_)
+    {
+      d.mergeSummaryf(d.WARN, "Motor model disabled");      
+    }
   }
 
   if (last_num_encoder_errors_ != status->num_encoder_errors_)
@@ -2521,6 +2569,11 @@ void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     (acmd.bandwidth_ == 0)   ? "25Hz" :
     "INVALID";
 
+  if (pressure_checksum_error_) 
+  {
+    d.mergeSummary(d.ERROR, "Checksum error on pressure data");
+  }
+
   // Board revB=1 and revA=0 does not have accelerometer
   bool has_accelerometer = (board_major_ >= 2);
   double sample_frequency = 0.0;
@@ -2558,7 +2611,8 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-  d.summary(level_, reason_);
+  if (!has_error_)
+    d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -2579,36 +2633,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   publishGeneralDiagnostics(d);
   publishMailboxDiagnostics(d);
 
-  string mode, prefix;
-  if (status->mode_) {
-    if (status->mode_ & MODE_ENABLE) {
-      mode += prefix + "ENABLE";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_CURRENT) {
-      mode += prefix + "CURRENT";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_UNDERVOLTAGE) {
-      mode += prefix + "UNDERVOLTAGE";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_SAFETY_RESET) {
-      mode += prefix + "SAFETY_RESET";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_SAFETY_LOCKOUT) {
-      mode += prefix + "SAFETY_LOCKOUT";
-      prefix = ", ";
-    }
-    if (status->mode_ & MODE_RESET) {
-      mode += prefix + "RESET";
-      prefix = ", ";
-    }
-  } else {
-    mode = "OFF";
-  }
-  d.add("Mode", mode);
+  d.add("Mode", modeString(status->mode_));
   d.addf("Digital out", "%d", status->digital_out_);
   d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
   d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);

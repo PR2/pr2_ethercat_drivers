@@ -114,7 +114,8 @@ public:
    * \param buffer_size size of proccess data buffer
    * \param number of EtherCAT slave devices
    */
-  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves);
+  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves,
+                  unsigned timeout, unsigned max_pd_retries);
 
   /*!
    * \brief Triggers publishing of new diagnostics data
@@ -165,8 +166,7 @@ private:
   bool diagnostics_ready_;
   boost::thread diagnostics_thread_;
 
-  // TOOD : Don't need realtime publisher for diagnostics data, normal ROS publisher should do
-  realtime_tools::RealtimePublisher<diagnostic_msgs::DiagnosticArray> publisher_;
+  ros::Publisher publisher_;
 
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
   unsigned char *diagnostics_buffer_;
@@ -175,6 +175,11 @@ private:
   unsigned int num_slaves_;
   string interface_;
 
+  //! Timeout controls how long EtherCAT driver waits for packet before declaring it as dropped.
+  unsigned timeout_;
+  //! Number of times (in a row) to retry sending process data (realtime data) before halting motors 
+  unsigned max_pd_retries_;
+
   //! Count of dropped packets last diagnostics cycle
   uint64_t last_dropped_packet_count_;
   //! Time last packet was dropped 0 otherwise.  Used for warning about dropped packets. 
@@ -182,10 +187,9 @@ private:
   //! Number of seconds since late dropped packet to keep warning 
   static const unsigned dropped_packet_warning_hold_time_ = 10;  //keep warning up for 10 seconds
 
+  diagnostic_msgs::DiagnosticArray diagnostic_array_;
   //! Information about Ethernet interface used for EtherCAT communication
   EthernetInterfaceInfo ethernet_interface_info_;
-
-  vector<diagnostic_msgs::DiagnosticStatus> statuses_;
   vector<diagnostic_msgs::KeyValue> values_;
   diagnostic_updater::DiagnosticStatusWrapper status_;
 };
@@ -266,6 +270,7 @@ private:
   bool halt_motors_;
   unsigned int reset_state_;
 
+  unsigned timeout_;        //!< Timeout (in microseconds) to used for sending/recieving packets once in realtime mode.
   unsigned max_pd_retries_; //!< Max number of times to retry sending process data before halting motors
 
   void publishDiagnostics();  //!< Collects raw diagnostics data and passes it to diagnostics_publisher
