@@ -537,7 +537,6 @@ void EthercatHardware::update(bool reset, bool halt)
 {
   // Update current time
   ros::Time update_start_time(ros::Time::now());
-  hw_->current_time_ = update_start_time;
 
   unsigned char *this_buffer, *prev_buffer;
   bool old_halt_motors = halt_motors_;
@@ -588,6 +587,8 @@ void EthercatHardware::update(bool reset, bool halt)
 
   ros::Time txandrx_end_time(ros::Time::now());  // Also begining of unpack_state 
   diagnostics_.txandrx_acc_((txandrx_end_time - txandrx_start_time).toSec());
+
+  hw_->current_time_ = txandrx_end_time;
 
   if (!success)
   {
