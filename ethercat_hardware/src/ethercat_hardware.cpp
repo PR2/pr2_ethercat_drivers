@@ -77,16 +77,12 @@ EthercatHardware::EthercatHardware(const std::string& name) :
 EthercatHardware::~EthercatHardware()
 {
   diagnostics_publisher_.stop();
-  if (slaves_)
+  for (uint32_t i = 0; i < slaves_.size(); ++i)
   {
-    for (uint32_t i = 0; i < num_slaves_; ++i)
-    {
-      EC_FixedStationAddress fsa(i + 1);
-      EtherCAT_SlaveHandler *sh = em_->get_slave_handler(fsa);
-      if (sh) sh->to_state(EC_PREOP_STATE);
-      delete slaves_[i];
-    }
-    delete[] slaves_;
+    EC_FixedStationAddress fsa(i + 1);
+    EtherCAT_SlaveHandler *sh = em_->get_slave_handler(fsa);
+    if (sh) sh->to_state(EC_PREOP_STATE);
+    delete slaves_[i];
   }
   if (ni_)
   {
@@ -171,8 +167,8 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     exit(EXIT_FAILURE);
   }
 
-  num_slaves_ = al_->get_num_slaves();
-  if (num_slaves_ == 0)
+  int num_ethercat_devices_ = al_->get_num_slaves();
+  if (num_ethercat_devices_ == 0)
   {
     ROS_FATAL("Unable to locate any slaves");
     sleep(1);
@@ -187,11 +183,12 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     exit(EXIT_FAILURE);
   }
 
-  slaves_ = new EthercatDevice*[num_slaves_];
+  // Size slaves vector to hold appropriate number of device pointers
+  slaves_.resize(num_ethercat_devices_, NULL);
 
   // Make temporary list of slave handles
   std::vector<EtherCAT_SlaveHandler*> slave_handles;
-  for (unsigned int slave = 0; slave < num_slaves_; ++slave)
+  for (unsigned int slave = 0; slave < slaves_.size(); ++slave)
   {
     EC_FixedStationAddress fsa(slave + 1);
     EtherCAT_SlaveHandler *sh = em_->get_slave_handler(fsa);
@@ -204,7 +201,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     slave_handles.push_back(sh);
   }
 
-  // Configure slaves
+  // Configure EtherCAT slaves
   BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
   {    
     unsigned slave = sh->get_station_address()-1;
@@ -216,6 +213,9 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     }
     buffer_size_ += slaves_[slave]->command_size_ + slaves_[slave]->status_size_;
   }
+
+  // Configure any non-ethercat slaves (appends devices to slaves_ vector)
+  loadNonEthercatDevices();
 
   // Move slave from INIT to PREOP
   BOOST_FOREACH(EtherCAT_SlaveHandler *sh, slave_handles)
@@ -261,7 +261,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
 
   // Initialize slaves
   //set<string> actuator_names;
-  for (unsigned int slave = 0; slave < num_slaves_; ++slave)
+  for (unsigned int slave = 0; slave < slaves_.size(); ++slave)
   {
     if (slaves_[slave]->initialize(hw_, allow_unprogrammed) < 0)
     {
@@ -325,7 +325,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     max_pd_retries_ = max_pd_retries;
   }
 
-  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_slaves_, timeout_, max_pd_retries_);
+  diagnostics_publisher_.initialize(interface_, buffer_size_, slaves_, num_ethercat_devices_, timeout_, max_pd_retries_);
 }
 
 
@@ -334,8 +334,6 @@ EthercatHardwareDiagnosticsPublisher::EthercatHardwareDiagnosticsPublisher(ros::
   diagnostics_ready_(false),
   publisher_(node_.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1)),
   diagnostics_buffer_(NULL),
-  slaves_(NULL),
-  num_slaves_(0),
   last_dropped_packet_count_(0),
   last_dropped_packet_time_(0)
 {
@@ -346,19 +344,22 @@ EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
   delete[] diagnostics_buffer_;
 }
 
-void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves, unsigned timeout, unsigned max_pd_retries)
+void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, 
+                                                      const std::vector<EthercatDevice*> &slaves, 
+                                                      unsigned int num_ethercat_devices, 
+                                                      unsigned timeout, unsigned max_pd_retries)
 {
   interface_ = interface;
   buffer_size_ = buffer_size;
   slaves_ = slaves;
-  num_slaves_ = num_slaves;
+  num_ethercat_devices_ = num_ethercat_devices;
   timeout_ = timeout;
   max_pd_retries_ = max_pd_retries;
 
   diagnostics_buffer_ = new unsigned char[buffer_size_];
 
   // Initialize diagnostic data structures
-  diagnostic_array_.status.reserve(num_slaves_ + 1);
+  diagnostic_array_.status.reserve(slaves_.size() + 1);
   values_.reserve(10);
 
   ethernet_interface_info_.initialize(interface);
@@ -446,7 +447,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   }
 
   status_.add("Motors halted", diagnostics_.motors_halted_ ? "true" : "false");
-  status_.addf("EtherCAT devices (expected)", "%d", num_slaves_); 
+  status_.addf("EtherCAT devices (expected)", "%d", num_ethercat_devices_); 
   status_.addf("EtherCAT devices (current)",  "%d", diagnostics_.device_count_); 
   ethernet_interface_info_.publishDiagnostics(status_);
   //status_.addf("Reset state", "%d", reset_state_);
@@ -455,7 +456,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.addf("Max PD Retries", "%d", max_pd_retries_);
 
   // Produce warning if number of devices changed after device initalization
-  if (num_slaves_ != diagnostics_.device_count_) {
+  if (num_ethercat_devices_ != diagnostics_.device_count_) {
     status_.mergeSummary(status_.WARN, "Number of EtherCAT devices changed");
   }
 
@@ -521,7 +522,7 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
 
   // Also, collect diagnostic statuses of all EtherCAT device
   unsigned char *current = diagnostics_buffer_;
-  for (unsigned int s = 0; s < num_slaves_; ++s)
+  for (unsigned int s = 0; s < slaves_.size(); ++s)
   {
     slaves_[s]->multiDiagnostics(diagnostic_array_.status, current);
     current += slaves_[s]->command_size_ + slaves_[s]->status_size_;
@@ -557,11 +558,11 @@ void EthercatHardware::update(bool reset, bool halt)
   if (reset)
   {
     ++diagnostics_.reset_motors_service_count_;
-    reset_state_ = CYCLES_PER_HALT_RELEASE * num_slaves_ + 5;
+    reset_state_ = CYCLES_PER_HALT_RELEASE * slaves_.size() + 5;
     last_reset_ = update_start_time;
     diagnostics_.halt_after_reset_ = false;
   }
-  bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * num_slaves_ + 3;
+  bool reset_devices = reset_state_ == CYCLES_PER_HALT_RELEASE * slaves_.size() + 3;
   if (reset_devices)
   {
     halt_motors_ = false;
@@ -569,7 +570,7 @@ void EthercatHardware::update(bool reset, bool halt)
     diagnostics_.pd_error_ = false;
   }
 
-  for (unsigned int s = 0; s < num_slaves_; ++s)
+  for (unsigned int s = 0; s < slaves_.size(); ++s)
   {
     // Pack the command structures into the EtherCAT buffer
     // Disable the motor if they are halted or coming out of reset
@@ -600,7 +601,7 @@ void EthercatHardware::update(bool reset, bool halt)
     // Convert status back to HW Interface
     this_buffer = this_buffer_;
     prev_buffer = prev_buffer_;
-    for (unsigned int s = 0; s < num_slaves_; ++s)
+    for (unsigned int s = 0; s < slaves_.size(); ++s)
     {
       if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
       {
@@ -725,6 +726,82 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 }
 
 
+EthercatDevice *
+EthercatHardware::configNonEthercatDevice(const std::string &product_id, const std::string &data)
+{
+  EthercatDevice *p = NULL;
+  try {
+    p = device_loader_.createClassInstance(product_id);
+  }
+  catch (pluginlib::LibraryLoadException &e)
+  {
+    p = NULL;
+    ROS_FATAL("Unable to load plugin for non-EtherCAT device with product ID: %s", product_id.c_str());
+    ROS_FATAL("%s", e.what());
+  }
+  if (p) {
+    p->construct(data);
+  }
+  return p;
+}
+
+
+void EthercatHardware::loadNonEthercatDevices()
+{
+  // non-EtherCAT device drivers are descibed via list named "extra_plugins"
+  // Each list element contains two pieces of information:
+  //   The name of the plugin to load for device.
+  //   A string that is pass construct function for device class.
+  //   NOTE: construct function is not the same as C++ construtor
+  if (!node_.hasParam("non_ethercat_device_list"))
+  {
+    // It is perfectly fine if there is no list of non-ethercat devices
+    return;
+  }
+
+  XmlRpc::XmlRpcValue device_list;
+  node_.getParam("non_ethercat_device_list", device_list);
+  if (device_list.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  {
+    ROS_ERROR("Rosparam 'non_ethercat_device_list' is not a list type");
+    return;
+  }
+
+  for (int i = 0; i< device_list.size(); ++i)
+  {
+    XmlRpc::XmlRpcValue &device_info(device_list[i]);
+    if (device_info.getType() != XmlRpc::XmlRpcValue::TypeStruct)
+    {
+      ROS_ERROR("Element %d of non_ethercat_device_list is not struct", i);
+      continue;
+    }
+
+    if (!device_info.hasMember("product_id"))
+    {
+      ROS_ERROR("Element %d of non_ethercat_device_list has no 'product_id' value", i);
+      continue;
+    }
+
+    if (!device_info.hasMember("data"))
+    {
+      ROS_ERROR("Element %d of non_ethercat_device_list has no 'data' value", i);
+      continue;
+    }
+    
+    std::string product_id(static_cast<std::string>(device_info["product_id"])); 
+    std::string data(static_cast<std::string>(device_info["data"])); 
+    
+    ROS_WARN("Non-EtherCAT device '%s' with data '%s'", product_id.c_str(), data.c_str());
+    
+    EthercatDevice *new_device = configNonEthercatDevice(product_id, data);
+    if (new_device != NULL)
+    {
+      slaves_.push_back(new_device);
+    }
+  }
+}
+
+
 void EthercatHardware::collectDiagnostics()
 {
   if (NULL == oob_com_)
@@ -751,7 +828,7 @@ void EthercatHardware::collectDiagnostics()
     diagnostics_.device_count_ = status.get_adp();
   }
 
-  for (unsigned i = 0; i < num_slaves_; ++i)
+  for (unsigned i = 0; i < slaves_.size(); ++i)
   {    
     EthercatDevice * d(slaves_[i]);
     d->collectDiagnostics(oob_com_);
@@ -804,9 +881,9 @@ bool EthercatHardware::txandrx_PD(unsigned buffer_size, unsigned char* buffer, u
 
 bool EthercatHardware::publishTrace(int position, const string &reason, unsigned level, unsigned delay)
 {
-  if (position >= (int)num_slaves_)
+  if (position >= (int)slaves_.size())
   {
-    ROS_WARN("Invalid device position %d.  Use 0-%d, or -1.", position, num_slaves_-1);    
+    ROS_WARN("Invalid device position %d.  Use 0-%d, or -1.", position, int(slaves_.size())-1);
     return false;
   }
 
@@ -821,7 +898,7 @@ bool EthercatHardware::publishTrace(int position, const string &reason, unsigned
   bool retval = false;
   if (position < 0) 
   {
-    for (unsigned i=0; i<num_slaves_; ++i)
+    for (unsigned i=0; i<slaves_.size(); ++i)
     {
       if (slaves_[i]->publishTrace(new_reason,level,delay))
       {

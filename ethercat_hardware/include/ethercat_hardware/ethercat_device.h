@@ -134,7 +134,11 @@ protected:
 class EthercatDevice
 {
 public:
+  //!< Construct EtherCAT device
   virtual void construct(EtherCAT_SlaveHandler *sh, int &start_address);
+
+  //!< Construct non-EtherCAT device
+  virtual void construct(const std::string &data);
 
   EthercatDevice();
   virtual ~EthercatDevice();
