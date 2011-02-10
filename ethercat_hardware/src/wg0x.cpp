@@ -944,10 +944,10 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   // Do not report timestamp directly to controllers because 32bit integer 
   // value in microseconds will overflow every 72 minutes.   
-  // Instead a accumulate small time differences into a ros::Time variable
+  // Instead a accumulate small time differences into a ros::Duration variable
   int32_t timediff = WG0X::timestampDiff(this_status->timestamp_, prev_status->timestamp_);
   sample_timestamp_ += WG0X::timediffToDuration(timediff);
-  //state.sample_timestamp_ = sample_timestamp_;   //ros::Time is preferred source of time for controllers
+  state.sample_timestamp_ = sample_timestamp_;   //ros::Duration is preferred source of time for controllers
   state.timestamp_ = sample_timestamp_.toSec();  //double value is for backwards compatibility
   
   state.device_id_ = sh_->get_ring_position();
