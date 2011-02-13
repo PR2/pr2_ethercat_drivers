@@ -15,3 +15,4 @@ target_link_libraries(motorconf rt)
 rosbuild_link_boost (motorconf system)
 rosbuild_remove_compile_flags(motorconf -W)
 
+rosbuild_add_gtest(test/wg0x_test test/wg0x_test.cpp src/wg0x.cpp src/ethercat_com.cpp src/ethercat_device.cpp src/motor_model.cpp)

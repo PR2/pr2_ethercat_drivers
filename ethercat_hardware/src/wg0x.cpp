@@ -942,13 +942,24 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
   digital_out_.state_.data_ = this_status->digital_out_;
 
-  state.timestamp_ = this_status->timestamp_ / 1e+6;
+  // Do not report timestamp directly to controllers because 32bit integer 
+  // value in microseconds will overflow every 72 minutes.   
+  // Instead a accumulate small time differences into a ros::Duration variable
+  int32_t timediff = WG0X::timestampDiff(this_status->timestamp_, prev_status->timestamp_);
+  sample_timestamp_ += WG0X::timediffToDuration(timediff);
+  state.sample_timestamp_ = sample_timestamp_;   //ros::Duration is preferred source of time for controllers
+  state.timestamp_ = sample_timestamp_.toSec();  //double value is for backwards compatibility
+  
   state.device_id_ = sh_->get_ring_position();
+  
   state.encoder_count_ = this_status->encoder_count_;
   state.position_ = double(this_status->encoder_count_) / actuator_info_.pulses_per_revolution_ * 2 * M_PI - state.zero_offset_;
-  state.encoder_velocity_ = double(int(this_status->encoder_count_ - prev_status->encoder_count_))
-      / (this_status->timestamp_ - prev_status->timestamp_) * 1e+6;
+  
+  state.encoder_velocity_ = 
+    calcEncoderVelocity(this_status->encoder_count_, this_status->timestamp_,
+                        prev_status->encoder_count_, prev_status->timestamp_);
   state.velocity_ = state.encoder_velocity_ / actuator_info_.pulses_per_revolution_ * 2 * M_PI;
+
   state.calibration_reading_ = this_status->calibration_reading_ & LIMIT_SENSOR_0_STATE;
   state.calibration_rising_edge_valid_ = this_status->calibration_reading_ &  LIMIT_OFF_TO_ON;
   state.calibration_falling_edge_valid_ = this_status->calibration_reading_ &  LIMIT_ON_TO_OFF;
@@ -1005,6 +1016,58 @@ bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
  end:
   return rv;
 }
+
+
+/**
+ * Returns (new_timestamp - old_timestamp).  Accounts for wrapping of timestamp values.
+ *
+ * It is assumed that each timestamps is exactly 32bit and can wrap around from 0xFFFFFFFF back to 0. 
+ * In this case  1 - 4294967295 should equal 2 not -4294967294.  (Note : 0xFFFFFFFF = 4294967295)
+ */
+int32_t WG0X::timestampDiff(uint32_t new_timestamp, uint32_t old_timestamp)
+{
+  return int32_t(new_timestamp - old_timestamp);
+}
+
+/**
+ * Convert timestamp difference to ros::Duration.  Timestamp is assumed to be in microseconds
+ *
+ * It is assumed that each timestamps is exactly 32bit and can wrap around from 0xFFFFFFFF back to 0. 
+ * In this case  1 - 4294967295 should equal 2 not -4294967294.  (Note : 0xFFFFFFFF = 4294967295)
+ */
+ros::Duration WG0X::timediffToDuration(int32_t timediff_usec)
+{
+  static const int USEC_PER_SEC = 1000000;
+  int sec  = timediff_usec / USEC_PER_SEC;
+  int nsec = (timediff_usec % USEC_PER_SEC)*1000;
+  return ros::Duration(sec,nsec);
+}
+
+
+/**
+ * Returns (new_position - old_position).  Accounts for wrap-around of 32-bit position values.
+ *
+ * It is assumed that each position value is exactly 32bit and can wrap from -2147483648 to +2147483647.
+ */
+int32_t WG0X::positionDiff(int32_t new_position, int32_t old_position)
+{
+  return int32_t(new_position - old_position);
+}
+
+/**
+ * Returns velocity in encoder ticks per second.
+ *
+ * Timestamp assumed to be in microseconds
+ * Accounts for wrapping of timestamp values and position values.
+ */
+double WG0X::calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp, 
+                                 int32_t old_position, uint32_t old_timestamp)
+{
+  double timestamp_diff = double(timestampDiff(new_timestamp, old_timestamp)) * 1e-6;
+  double position_diff = double(positionDiff(new_position, old_position));
+  return (position_diff / timestamp_diff);
+}
+
 
 // Returns true if timestamp changed by more than (amount) or time goes in reverse.
 bool WG0X::timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount)
