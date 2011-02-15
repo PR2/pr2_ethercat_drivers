@@ -331,7 +331,7 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   sh_ = sh;
 }
 
-void EthercatDevice::construct(const std::string &data)
+void EthercatDevice::construct(ros::NodeHandle &nh)
 {
   // empty
 }

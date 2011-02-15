@@ -138,7 +138,7 @@ public:
   virtual void construct(EtherCAT_SlaveHandler *sh, int &start_address);
 
   //!< Construct non-EtherCAT device
-  virtual void construct(const std::string &data);
+  virtual void construct(ros::NodeHandle &nh);
 
   EthercatDevice();
   virtual ~EthercatDevice();

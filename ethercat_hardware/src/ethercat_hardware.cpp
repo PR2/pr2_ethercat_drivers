@@ -266,9 +266,16 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
     if (slaves_[slave]->initialize(hw_, allow_unprogrammed) < 0)
     {
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
-      ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
-                slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
-      sleep(1);
+      if (sh != NULL)
+      {
+        ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
+                  slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
+        sleep(1);
+      } 
+      else 
+      {
+        ROS_FATAL("Unable to initialize slave #%d", slave);
+      }
       exit(EXIT_FAILURE);
     }
   }
@@ -728,73 +735,94 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 
 
 EthercatDevice *
-EthercatHardware::configNonEthercatDevice(const std::string &product_id, const std::string &data)
+EthercatHardware::configNonEthercatDevice(const std::string &name, const std::string &type)
 {
   EthercatDevice *p = NULL;
   try {
-    p = device_loader_.createClassInstance(product_id);
+    p = device_loader_.createClassInstance(type);
   }
   catch (pluginlib::LibraryLoadException &e)
   {
     p = NULL;
-    ROS_FATAL("Unable to load plugin for non-EtherCAT device with product ID: %s", product_id.c_str());
-    ROS_FATAL("%s", e.what());
+    ROS_FATAL("Unable to load plugin for non-EtherCAT device '%s' with type: %s : %s"
+              , name.c_str(), type.c_str(), e.what());
   }
   if (p) {
-    p->construct(data);
+    ROS_INFO("Creating non-EtherCAT device '%s' of type '%s'", name.c_str(), type.c_str());
+    ros::NodeHandle nh(node_, "non_ethercat_devices/"+name);
+    p->construct(nh);
   }
   return p;
 }
 
 
+// Do this to get access to Struct (std::map) element of XmlRpcValue
+class MyXmlRpcValue : public XmlRpc::XmlRpcValue
+{
+public:
+  MyXmlRpcValue(XmlRpc::XmlRpcValue &value) : XmlRpc::XmlRpcValue(value) { }
+  XmlRpcValue::ValueStruct &getMap() {return *_value.asStruct;}
+};
+
 void EthercatHardware::loadNonEthercatDevices()
 {
-  // non-EtherCAT device drivers are descibed via list named "extra_plugins"
-  // Each list element contains two pieces of information:
-  //   The name of the plugin to load for device.
-  //   A string that is pass construct function for device class.
+  // non-EtherCAT device drivers are descibed via struct named "non_ethercat_devices"
+  // Each element of "non_ethercat_devices" must be a struct that contains a "type" field.
+  // The element struct can also contain other elements that are used as configuration parameters
+  // for the device plugin.
+  // Example:
+  //   non_ethercat_devices:
+  //     netft1:
+  //       type: NetFT
+  //       address: 192.168.1.1
+  //       publish_period: 0.01
+  //     netft2:
+  //       type: NetFT
+  //       address: 192.168.1.2
+  //       publish_period: 0.01
+  //     dummy_device:
+  //       type: Dummy
+  //       msg: "This a dummy device"
+  //
+  //   The name of the device is used to create a ros::NodeHandle that is
+  //    that is passed to construct function of device class.
   //   NOTE: construct function is not the same as C++ construtor
-  if (!node_.hasParam("non_ethercat_device_list"))
+  if (!node_.hasParam("non_ethercat_devices"))
   {
     // It is perfectly fine if there is no list of non-ethercat devices
     return;
   }
 
-  XmlRpc::XmlRpcValue device_list;
-  node_.getParam("non_ethercat_device_list", device_list);
-  if (device_list.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  XmlRpc::XmlRpcValue devices;
+  node_.getParam("non_ethercat_devices", devices);
+  if (devices.getType() != XmlRpc::XmlRpcValue::TypeStruct)
   {
-    ROS_ERROR("Rosparam 'non_ethercat_device_list' is not a list type");
+    ROS_ERROR("Rosparam 'non_ethercat_devices' is not a struct type");
     return;
   }
 
-  for (int i = 0; i< device_list.size(); ++i)
-  {
-    XmlRpc::XmlRpcValue &device_info(device_list[i]);
+  MyXmlRpcValue my_devices(devices);
+  typedef XmlRpc::XmlRpcValue::ValueStruct::value_type map_item_t ;
+  BOOST_FOREACH(map_item_t &item, my_devices.getMap())
+  {    
+    const std::string &name(item.first);
+    XmlRpc::XmlRpcValue &device_info(item.second);
+
     if (device_info.getType() != XmlRpc::XmlRpcValue::TypeStruct)
     {
-      ROS_ERROR("Element %d of non_ethercat_device_list is not struct", i);
+      ROS_ERROR("non_ethercat_devices/%s is not a struct type", name.c_str());
       continue;
     }
 
-    if (!device_info.hasMember("product_id"))
+    if (!device_info.hasMember("type"))
     {
-      ROS_ERROR("Element %d of non_ethercat_device_list has no 'product_id' value", i);
+      ROS_ERROR("non_ethercat_devices/%s 'type' element", name.c_str());
       continue;
     }
+    
+    std::string type(static_cast<std::string>(device_info["type"])); 
 
-    if (!device_info.hasMember("data"))
-    {
-      ROS_ERROR("Element %d of non_ethercat_device_list has no 'data' value", i);
-      continue;
-    }
-    
-    std::string product_id(static_cast<std::string>(device_info["product_id"])); 
-    std::string data(static_cast<std::string>(device_info["data"])); 
-    
-    ROS_WARN("Non-EtherCAT device '%s' with data '%s'", product_id.c_str(), data.c_str());
-    
-    EthercatDevice *new_device = configNonEthercatDevice(product_id, data);
+    EthercatDevice *new_device = configNonEthercatDevice(name,type);
     if (new_device != NULL)
     {
       slaves_.push_back(new_device);
