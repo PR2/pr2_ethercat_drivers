@@ -329,6 +329,17 @@ void EthercatDeviceDiagnostics::publish(diagnostic_updater::DiagnosticStatusWrap
 void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
   sh_ = sh;
+}
+
+void EthercatDevice::construct(ros::NodeHandle &nh)
+{
+  // empty
+}
+
+
+EthercatDevice::EthercatDevice() : use_ros_(true)
+{
+  sh_ = NULL;
   command_size_ = 0;
   status_size_ = 0;
   newDiagnosticsIndex_ = 0;
@@ -346,11 +357,6 @@ void EthercatDevice::construct(EtherCAT_SlaveHandler *sh, int &start_address)
     sleep(1); // wait for ros to flush rosconsole output
     exit(EXIT_FAILURE);
   }    
-}
-
-EthercatDevice::EthercatDevice() : use_ros_(true)
-{
-  //nothing
 }
 
 EthercatDevice::~EthercatDevice()

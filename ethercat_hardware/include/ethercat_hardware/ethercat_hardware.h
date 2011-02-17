@@ -114,7 +114,9 @@ public:
    * \param buffer_size size of proccess data buffer
    * \param number of EtherCAT slave devices
    */
-  void initialize(const string &interface, unsigned int buffer_size, EthercatDevice **slaves, unsigned int num_slaves,
+  void initialize(const string &interface, unsigned int buffer_size, 
+                  const std::vector<EthercatDevice*> &slaves, 
+                  unsigned int num_ethercat_devices_,
                   unsigned timeout, unsigned max_pd_retries);
 
   /*!
@@ -171,8 +173,8 @@ private:
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
   unsigned char *diagnostics_buffer_;
   unsigned int buffer_size_;
-  EthercatDevice **slaves_;
-  unsigned int num_slaves_;
+  std::vector<EthercatDevice*> slaves_;
+  unsigned int num_ethercat_devices_;
   string interface_;
 
   //! Timeout controls how long EtherCAT driver waits for packet before declaring it as dropped.
@@ -250,6 +252,9 @@ public:
 private:
   static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
+  void loadNonEthercatDevices();
+  EthercatDevice *configNonEthercatDevice(const std::string &product_id, const std::string &data);
+
   ros::NodeHandle node_;
 
   struct netif *ni_;
@@ -259,8 +264,8 @@ private:
   EtherCAT_Master *em_;
 
   EthercatDevice *configSlave(EtherCAT_SlaveHandler *sh);
-  EthercatDevice **slaves_;
-  unsigned int num_slaves_;
+  std::vector<EthercatDevice*> slaves_;
+  unsigned int num_ethercat_devices_;
 
   unsigned char *this_buffer_;
   unsigned char *prev_buffer_;

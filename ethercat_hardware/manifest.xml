@@ -2,7 +2,7 @@
 <description brief="EtherCAT Hardware">
 Package for creating a hardware interface to the robot using the EtherCAT motor controller/driver
 </description>
-<author>Maintained by Derek King (email: dking@willowgarage.com)</author>
+<author>Rob Wheeler (email: wheeler@willowgarage.com)</author>
 <license>BSD</license>
 <review status="unreviewed" notes=""/>
 <url>http://ros.org/wiki/ethercat_hardware</url>
