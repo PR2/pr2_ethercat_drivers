@@ -233,8 +233,10 @@ WG06::WG06() :
   accelerometer_missed_samples_(0),
   first_publish_(true),
   last_pressure_time_(0),
-  pressure_publisher_(0),
-  accel_publisher_(0)
+  pressure_publisher_(NULL),
+  accel_publisher_(NULL),
+  ft_sample_count_(0),
+  diag_last_ft_sample_count_(0)
 {
 
 }
@@ -260,6 +262,8 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   resetting_ = false;
   has_error_ = false;
 
+  has_accel_and_ft_ = false;
+
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
   fw_minor_ = sh->get_revision() & 0xff;
   board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
@@ -269,12 +273,34 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
   unsigned int base_status = sizeof(WG0XStatus);
 
+  // As good a place as any for making sure that compiler actually packed these structures correctly
+  BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
+  BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccel) == WG06StatusWithAccel::SIZE);
+  BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccelAndFT) == WG06StatusWithAccelAndFT::SIZE);  
+
   command_size_ = sizeof(WG0XCommand);
   status_size_ = sizeof(WG0XStatus);
   if (isWG06)
   {
-    if (fw_major_ >= 1)
+    if (fw_major_ == 0)
+    {
+      // Do nothing - status memory map is same size as WG05
+    }
+    if (fw_major_ == 1)
+    {
+      // Include Accelerometer data
       status_size_ = base_status = sizeof(WG06StatusWithAccel);
+    }
+    else if (fw_major_ == 2)
+    {
+      // Include Accelerometer and Force/Torque sensor data
+      status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
+      has_accel_and_ft_ = true;
+    }
+    else 
+    {
+      ROS_ERROR("Unsupported WG06 FW major version %d", fw_major_);
+    }
     status_size_ += sizeof(WG06Pressure);
   }
   else if (isWG021)
@@ -442,8 +468,24 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
             return -1;
         }
       }
-
     }
+
+    // FW version 2 supports Force/Torque sensor.
+    // Provide Force/Torque data to controllers as an AnalogIn vector 
+    if (fw_major_ >= 2)
+    {
+      ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
+      if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
+      {
+        ROS_FATAL("An analog in of the name '%s' already exists.  Device #%02d has a duplicate name",
+                  ft_raw_analog_in_.name_.c_str(), sh_->get_ring_position());
+        return -1;
+      }
+      // FT provides 6 values : 3 Forces + 3 Torques
+      ft_raw_analog_in_.state_.state_.resize(6); 
+    }
+
+
   }
 
   return retval;
@@ -841,7 +883,11 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
 
-  int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
+  int status_bytes = 
+    has_accel_and_ft_  ? sizeof(WG06StatusWithAccelAndFT) :  // Has FT sensor and accelerometer
+    accel_publisher_   ? sizeof(WG06StatusWithAccel) : 
+                         sizeof(WG0XStatus);  
+
   WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
 
   unsigned char* this_status = this_buffer + command_size_;
@@ -856,9 +902,9 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   {
     pressure_checksum_error_ = true;
     rv = false;
-    goto end;
+    //goto end;
   }
-
+  else {
   for (int i = 0; i < 22; ++i ) {
     pressure_sensors_[0].state_.data_[i] =
       ((p->l_finger_tip_[i] >> 8) & 0xff) |
@@ -883,6 +929,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     }
   }
   last_pressure_time_ = p->timestamp_;
+  }
 
 
   if (accel_publisher_)
@@ -922,6 +969,23 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
       accel_publisher_->unlockAndPublish();
     }
   }
+
+  if (has_accel_and_ft_)
+  {
+    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(this_buffer + command_size_);
+    WG06StatusWithAccelAndFT *last_status = (WG06StatusWithAccelAndFT *)(prev_buffer + command_size_);
+
+    assert(ft_raw_analog_in_.state_.state_.size() == 6);
+    
+    // Fill in analog output with this data
+    for (int i=0; i<6; ++i)
+    {
+      ft_raw_analog_in_.state_.state_[i] = double(status->ft_data_[i]);
+    }
+
+    ft_sample_count_ += (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
+  }
+
 
   if (!WG0X::unpackState(this_buffer, prev_buffer))
   {
@@ -2660,6 +2724,18 @@ void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
   d.addf("Accelerometer sample frequency", "%f", sample_frequency);
   d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
+
+  if (has_accel_and_ft_)
+  {
+    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
+    d.addf("F/T sample count", "%llu", ft_sample_count_);
+    std::stringstream ss;
+    for (int i=0;i<6;++i)
+    {
+      ss.str(""); ss << "FT In"<< i;
+      d.addf(ss.str(), "%d", int(status->ft_data_[i]));
+    }
+  }
                                    
 }
 

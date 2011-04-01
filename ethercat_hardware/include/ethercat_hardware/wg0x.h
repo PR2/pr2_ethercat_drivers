@@ -340,6 +340,8 @@ struct WG0XStatus
   uint16_t packet_count_;
   uint8_t pad_;
   uint8_t checksum_;
+
+  static const unsigned SIZE=44;
 }__attribute__ ((__packed__));
 
 struct WG06StatusWithAccel
@@ -366,7 +368,43 @@ struct WG06StatusWithAccel
   uint8_t accel_count_;
   uint32_t accel_[4];
   uint8_t checksum_;
+
+  static const unsigned SIZE=61;
 }__attribute__ ((__packed__));
+
+
+struct WG06StatusWithAccelAndFT
+{
+  uint8_t mode_;
+  uint8_t digital_out_;
+  int16_t programmed_pwm_value_;
+  int16_t programmed_current_;
+  int16_t measured_current_;
+  uint32_t timestamp_;
+  int32_t encoder_count_;
+  int32_t encoder_index_pos_;
+  uint16_t num_encoder_errors_;
+  uint8_t encoder_status_;
+  uint8_t unused1;
+  int32_t unused2;
+  int32_t unused3;
+  uint16_t board_temperature_;
+  uint16_t bridge_temperature_;
+  uint16_t supply_voltage_;
+  int16_t motor_voltage_;
+  uint16_t packet_count_;
+  uint8_t pad_;
+  uint8_t accel_count_;
+  uint32_t accel_[4];
+  uint32_t unused4;
+  int16_t ft_data_[6];
+  uint8_t ft_sample_count_;
+  uint8_t checksum_;
+
+  static const unsigned SIZE=78;
+}__attribute__ ((__packed__));
+
+
 
 struct WG021Status
 {
@@ -526,6 +564,9 @@ protected:
    * ros::Duration (int32_t secs, int32_t nsecs) should overflow will overflow after 68 years
    */
   ros::Duration sample_timestamp_;
+  
+  //! True if device has accelerometer and force/torque sensor
+  bool has_accel_and_ft_;  
 
   //! Different possible states for application ram on device. 
   //  Application ram is non-volitile memory that application can use to store temporary
@@ -697,6 +738,12 @@ private:
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
+
+  uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
+  uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
+  pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
+  //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides 
+
 };
 
 class WG021 : public WG0X
