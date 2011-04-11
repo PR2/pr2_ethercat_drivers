@@ -42,6 +42,9 @@
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
 
+#include <ethercat_hardware/RawFTData.h>
+
+
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
 
 struct WG0XMbxHdr
@@ -742,8 +745,9 @@ private:
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
   pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
-  //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides 
-
+  //! Realtime Publisher of RAW F/T data 
+  realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
+  //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
 };
 
 class WG021 : public WG0X

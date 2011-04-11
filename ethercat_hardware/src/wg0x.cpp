@@ -236,7 +236,8 @@ WG06::WG06() :
   pressure_publisher_(NULL),
   accel_publisher_(NULL),
   ft_sample_count_(0),
-  diag_last_ft_sample_count_(0)
+  diag_last_ft_sample_count_(0),
+  raw_ft_publisher_(NULL)
 {
 
 }
@@ -483,6 +484,19 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       }
       // FT provides 6 values : 3 Forces + 3 Torques
       ft_raw_analog_in_.state_.state_.resize(6); 
+
+      // For now publish RAW F/T values for engineering purposes.  In future this publisher may be disabled by default.
+      topic = "raw_ft";
+      if (!actuator_.name_.empty())
+        topic = topic + "/" + string(actuator_.name_);
+      raw_ft_publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData>(ros::NodeHandle(), topic, 1);
+      if (raw_ft_publisher_ == NULL)
+      {
+        ROS_FATAL("Could not allocate raw_ft publisher");
+        return -1;
+      }
+      // Allocate space for raw f/t data values
+      raw_ft_publisher_->msg_.data.resize(6);
     }
 
 
@@ -984,6 +998,17 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     }
 
     ft_sample_count_ += (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
+    
+    if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
+    {
+      assert(raw_ft_publisher_.msg.data.size() == 6);
+      for (int i=0; i<6; ++i)
+      {
+        raw_ft_publisher_->msg_.data[i] = status->ft_data_[i];
+      }
+      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
+      raw_ft_publisher_->unlockAndPublish();
+    }
   }
 
 
