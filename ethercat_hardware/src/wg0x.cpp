@@ -1012,10 +1012,14 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     {
       unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
       raw_ft_publisher_->msg_.samples.resize(usable_samples);
+      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
+      raw_ft_publisher_->msg_.missed_samples = ft_missed_samples_;
       for (unsigned sample_num=0; sample_num<usable_samples; ++sample_num)
       {
+        //put data into messag so oldest data is first element
         const FTDataSample &sample(status->ft_samples_[sample_num]);
-        ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[sample_num]);
+        ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[usable_samples-sample_num-1]);
+        msg_sample.sample_count = ft_sample_count_ - sample_num;
         msg_sample.data.resize(NUM_FT_CHANNELS);
         for (unsigned ch_num=0; ch_num<NUM_FT_CHANNELS; ++ch_num)
         {
