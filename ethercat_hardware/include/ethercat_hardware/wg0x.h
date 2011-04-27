@@ -376,6 +376,16 @@ struct WG06StatusWithAccel
 }__attribute__ ((__packed__));
 
 
+struct FTDataSample
+{
+  int16_t data_[6];
+  uint16_t vhalf_;
+  uint8_t sample_count_;
+  uint8_t timestamp_;
+  static const unsigned SIZE=16;  
+}__attribute__ ((__packed__));
+
+
 struct WG06StatusWithAccelAndFT
 {
   uint8_t mode_;
@@ -399,12 +409,12 @@ struct WG06StatusWithAccelAndFT
   uint8_t pad_;
   uint8_t accel_count_;
   uint32_t accel_[4];
-  uint32_t unused4;
-  int16_t ft_data_[6];
+  uint8_t unused4[3];
   uint8_t ft_sample_count_;
+  FTDataSample ft_samples_[4];
   uint8_t checksum_;
 
-  static const unsigned SIZE=78;
+  static const unsigned SIZE=129;
 }__attribute__ ((__packed__));
 
 
@@ -742,7 +752,10 @@ private:
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
 
+  static const unsigned MAX_FT_SAMPLES = 4;  
+  static const unsigned NUM_FT_CHANNELS = 6;
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
+  uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
   pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
   //! Realtime Publisher of RAW F/T data 

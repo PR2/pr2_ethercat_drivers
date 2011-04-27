@@ -236,6 +236,7 @@ WG06::WG06() :
   pressure_publisher_(NULL),
   accel_publisher_(NULL),
   ft_sample_count_(0),
+  ft_missed_samples_(0),
   diag_last_ft_sample_count_(0),
   raw_ft_publisher_(NULL)
 {
@@ -277,6 +278,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   // As good a place as any for making sure that compiler actually packed these structures correctly
   BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
   BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccel) == WG06StatusWithAccel::SIZE);
+  BOOST_STATIC_ASSERT(sizeof(FTDataSample) == FTDataSample::SIZE);
   BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccelAndFT) == WG06StatusWithAccelAndFT::SIZE);  
 
   command_size_ = sizeof(WG0XCommand);
@@ -496,7 +498,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         return -1;
       }
       // Allocate space for raw f/t data values
-      raw_ft_publisher_->msg_.data.resize(6);
+      raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
     }
 
 
@@ -989,22 +991,37 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(this_buffer + command_size_);
     WG06StatusWithAccelAndFT *last_status = (WG06StatusWithAccelAndFT *)(prev_buffer + command_size_);
 
-    assert(ft_raw_analog_in_.state_.state_.size() == 6);
+    assert(ft_raw_analog_in_.state_.state_.size() == NUM_FT_CHANNELS);
     
-    // Fill in analog output with this data
-    for (int i=0; i<6; ++i)
+    // Fill in analog output with most recent data sample
     {
-      ft_raw_analog_in_.state_.state_[i] = double(status->ft_data_[i]);
+      const FTDataSample &sample(status->ft_samples_[0]);
+      for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
+      {
+        ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
+      }
     }
 
-    ft_sample_count_ += (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
+    unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
+    ft_sample_count_ += new_samples;
+    int missed_samples = std::max(int(0), int(new_samples) - 4);
+    ft_missed_samples_ += missed_samples;
     
+    // Put all new samples in buffer and publish it
     if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
     {
-      assert(raw_ft_publisher_.msg.data.size() == 6);
-      for (int i=0; i<6; ++i)
+      unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
+      raw_ft_publisher_->msg_.samples.resize(usable_samples);
+      for (unsigned sample_num=0; sample_num<usable_samples; ++sample_num)
       {
-        raw_ft_publisher_->msg_.data[i] = status->ft_data_[i];
+        const FTDataSample &sample(status->ft_samples_[sample_num]);
+        ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[sample_num]);
+        msg_sample.data.resize(NUM_FT_CHANNELS);
+        for (unsigned ch_num=0; ch_num<NUM_FT_CHANNELS; ++ch_num)
+        {
+          msg_sample.data[ch_num] = sample.data_[ch_num];
+        }
+        msg_sample.vhalf = sample.vhalf_;
       }
       raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
       raw_ft_publisher_->unlockAndPublish();
@@ -2754,12 +2771,15 @@ void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   {
     WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
     d.addf("F/T sample count", "%llu", ft_sample_count_);
+    d.addf("F/T missed samples", "%llu", ft_missed_samples_);
     std::stringstream ss;
-    for (int i=0;i<6;++i)
+    const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
+    for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
     {
-      ss.str(""); ss << "FT In"<< i;
-      d.addf(ss.str(), "%d", int(status->ft_data_[i]));
+      ss.str(""); ss << "FT In"<< (i+1);
+      d.addf(ss.str(), "%d", int(sample.data_[i]));
     }
+    d.addf("FT Vhalf", "%d", int(sample.vhalf_));
   }
                                    
 }
