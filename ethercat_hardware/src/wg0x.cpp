@@ -48,7 +48,6 @@
 #include <boost/static_assert.hpp>
 
 PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
-PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
 PLUGINLIB_REGISTER_CLASS(6805021, WG021, EthercatDevice);
 
 
@@ -63,7 +62,7 @@ PLUGINLIB_REGISTER_CLASS(6805021, WG021, EthercatDevice);
 #define WARN_HDR "\033[43mERROR\033[0m"
 
 
-static unsigned int rotateRight8(unsigned in)
+unsigned int WG0X::rotateRight8(unsigned in)
 {
   in &= 0xff;
   in = (in >> 1) | (in << 7);
@@ -71,7 +70,7 @@ static unsigned int rotateRight8(unsigned in)
   return in;
 }
 
-static unsigned computeChecksum(void const *data, unsigned length)
+unsigned WG0X::computeChecksum(void const *data, unsigned length)
 {
   const unsigned char *d = (const unsigned char *)data;
   unsigned int checksum = 0x42;
@@ -112,13 +111,13 @@ bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsig
   length_ = length - 1;
   seqnum_ = seqnum;
   write_nread_ = (type==LOCAL_BUS_WRITE) ? 1 : 0;
-  checksum_ = rotateRight8(computeChecksum(this, sizeof(*this) - 1));
+  checksum_ = WG0X::rotateRight8(WG0X::computeChecksum(this, sizeof(*this) - 1));
   return true;
 }
 
 bool WG0XMbxHdr::verifyChecksum(void) const
 {
-  return computeChecksum(this, sizeof(*this)) != 0;
+  return WG0X::computeChecksum(this, sizeof(*this)) != 0;
 }
 
 bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data)
@@ -136,7 +135,7 @@ bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsig
   {
     memset(data_, 0, length);
   }
-  unsigned int checksum = rotateRight8(computeChecksum(data_, length));
+  unsigned int checksum = WG0X::rotateRight8(WG0X::computeChecksum(data_, length));
   data_[length] = checksum;
   return true;
 }
@@ -209,6 +208,18 @@ WG0X::WG0X() :
   motor_model_(NULL),
   disable_motor_model_checking_(false)
 {
+
+  last_timestamp_ = 0;
+  last_last_timestamp_ = 0;
+  drops_ = 0;
+  consecutive_drops_ = 0;
+  max_consecutive_drops_ = 0;
+  max_board_temperature_ = 0;
+  max_bridge_temperature_ = 0;
+  in_lockout_ = false;
+  resetting_ = false;
+  has_error_ = false;
+
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
   {
@@ -227,93 +238,19 @@ WG0X::~WG0X()
   delete motor_model_;
 }
 
-WG06::WG06() :
-  pressure_checksum_error_(false),
-  accelerometer_samples_(0), 
-  accelerometer_missed_samples_(0),
-  first_publish_(true),
-  last_pressure_time_(0),
-  pressure_publisher_(NULL),
-  accel_publisher_(NULL),
-  ft_sample_count_(0),
-  ft_missed_samples_(0),
-  diag_last_ft_sample_count_(0),
-  raw_ft_publisher_(NULL)
+void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
+  WG0X::construct(sh, start_address);
 
-}
-  
-WG06::~WG06()
-{
-  if (pressure_publisher_) delete pressure_publisher_;
-  if (accel_publisher_) delete accel_publisher_;
-}
-
-void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
-{
-  EthercatDevice::construct(sh, start_address);
-
-  last_timestamp_ = 0;
-  last_last_timestamp_ = 0;
-  drops_ = 0;
-  consecutive_drops_ = 0;
-  max_consecutive_drops_ = 0;
-  max_board_temperature_ = 0;
-  max_bridge_temperature_ = 0;
-  in_lockout_ = false;
-  resetting_ = false;
-  has_error_ = false;
-
-  has_accel_and_ft_ = false;
-
-  fw_major_ = (sh->get_revision() >> 8) & 0xff;
-  fw_minor_ = sh->get_revision() & 0xff;
-  board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
-  board_minor_ = (sh->get_revision() >> 16) & 0xff;
-
-  bool isWG06 = sh_->get_product_code() == WG06::PRODUCT_CODE;
-  bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
   unsigned int base_status = sizeof(WG0XStatus);
 
   // As good a place as any for making sure that compiler actually packed these structures correctly
   BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
-  BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccel) == WG06StatusWithAccel::SIZE);
-  BOOST_STATIC_ASSERT(sizeof(FTDataSample) == FTDataSample::SIZE);
-  BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccelAndFT) == WG06StatusWithAccelAndFT::SIZE);  
 
-  command_size_ = sizeof(WG0XCommand);
-  status_size_ = sizeof(WG0XStatus);
-  if (isWG06)
-  {
-    if (fw_major_ == 0)
-    {
-      // Do nothing - status memory map is same size as WG05
-    }
-    if (fw_major_ == 1)
-    {
-      // Include Accelerometer data
-      status_size_ = base_status = sizeof(WG06StatusWithAccel);
-    }
-    else if (fw_major_ == 2)
-    {
-      // Include Accelerometer and Force/Torque sensor data
-      status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
-      has_accel_and_ft_ = true;
-    }
-    else 
-    {
-      ROS_ERROR("Unsupported WG06 FW major version %d", fw_major_);
-    }
-    status_size_ += sizeof(WG06Pressure);
-  }
-  else if (isWG021)
-  {
-    status_size_ = base_status = sizeof(WG021Status);
-    command_size_ = sizeof(WG021Command);
-  }
+  status_size_ = base_status = sizeof(WG021Status);
+  command_size_ = sizeof(WG021Command);
 
-
-  EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
+  EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(2);
   //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
                        command_size_,// Logical length
@@ -340,24 +277,9 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   start_address += base_status;
 
-  if (isWG06)
-  {
-    //ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-    (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
-                         sizeof(WG06Pressure), // Logical length
-                         0x00, // Logical StartBit
-                         0x07, // Logical EndBit
-                         PRESSURE_PHY_ADDR, // Physical Start address
-                         0x00, // Physical StartBit
-                         true, // Read Enable
-                         false, // Write Enable
-                         true); // Enable
-
-    start_address += sizeof(WG06Pressure);
-  }
   sh->set_fmmu_config(fmmu);
 
-  EtherCAT_PD_Config *pd = new EtherCAT_PD_Config(isWG06 ? 5 : 4);
+  EtherCAT_PD_Config *pd = new EtherCAT_PD_Config(4);
 
   // Sync managers
   (*pd)[0] = EC_SyncMan(COMMAND_PHY_ADDR, command_size_, EC_BUFFERED, EC_WRITTEN_FROM_MASTER);
@@ -374,13 +296,85 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
   (*pd)[3].ChannelEnable = true;
 
-  if (isWG06)
-  {
-    (*pd)[4] = EC_SyncMan(PRESSURE_PHY_ADDR, sizeof(WG06Pressure));
-    (*pd)[4].ChannelEnable = true;
-  }
+  sh->set_pd_config(pd);
+}
+
+void WG05::construct(EtherCAT_SlaveHandler *sh, int &start_address)
+{
+  WG0X::construct(sh, start_address);
+
+  unsigned int base_status = sizeof(WG0XStatus);
+
+  // As good a place as any for making sure that compiler actually packed these structures correctly
+  BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
+
+  command_size_ = sizeof(WG0XCommand);
+  status_size_ = sizeof(WG0XStatus);
+
+
+  EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(2);
+  //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
+                       command_size_,// Logical length
+                       0x00, // Logical StartBit
+                       0x07, // Logical EndBit
+                       COMMAND_PHY_ADDR, // Physical Start address
+                       0x00, // Physical StartBit
+                       false, // Read Enable
+                       true, // Write Enable
+                       true); // Enable
+
+  start_address += command_size_;
+
+  //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
+  (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
+                       base_status, // Logical length
+                       0x00, // Logical StartBit
+                       0x07, // Logical EndBit
+                       STATUS_PHY_ADDR, // Physical Start address
+                       0x00, // Physical StartBit
+                       true, // Read Enable
+                       false, // Write Enable
+                       true); // Enable
+
+  start_address += base_status;
+
+  sh->set_fmmu_config(fmmu);
+
+  EtherCAT_PD_Config *pd = new EtherCAT_PD_Config(4);
+
+  // Sync managers
+  (*pd)[0] = EC_SyncMan(COMMAND_PHY_ADDR, command_size_, EC_BUFFERED, EC_WRITTEN_FROM_MASTER);
+  (*pd)[0].ChannelEnable = true;
+  (*pd)[0].ALEventEnable = true;
+
+  (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
+  (*pd)[1].ChannelEnable = true;
+
+  (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
+  (*pd)[2].ChannelEnable = true;
+  (*pd)[2].ALEventEnable = true;
+
+  (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
+  (*pd)[3].ChannelEnable = true;
 
   sh->set_pd_config(pd);
+}
+
+
+void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
+{
+  EthercatDevice::construct(sh, start_address);
+
+  // WG EtherCAT devices (WG05,WG06,WG21) revisioning scheme
+  fw_major_ = (sh->get_revision() >> 8) & 0xff;
+  fw_minor_ = sh->get_revision() & 0xff;
+  board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
+  board_minor_ = (sh->get_revision() >> 16) & 0xff;
+
+  // Would normally configure EtherCAT intialize EtherCAT communication settings here.
+  // However, since all WG devices are slightly different doesn't make sense to do it here.
+  // Instead make sub-classes handle this.
 }
 
 int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
@@ -412,98 +406,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     }
 
   }// end if !retval
-  return retval;
-}
-
-int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
-{
-  if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
-  {
-    app_ram_status_ = APP_RAM_PRESENT;
-  }
-
-  int retval = WG0X::initialize(hw, allow_unprogrammed);
-  
-  if (!retval && use_ros_)
-  {
-    bool poor_measured_motor_voltage = false;
-    double max_pwm_ratio = double(0x2700) / double(PWM_MAX);
-    double board_resistance = 5.0;
-    if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
-    {
-      ROS_FATAL("Initializing motor trace failed");
-      sleep(1); // wait for ros to flush rosconsole output
-      return -1;
-    }
-
-    // Publish pressure sensor data as a ROS topic
-    string topic = "pressure";
-    if (!actuator_.name_.empty())
-      topic = topic + "/" + string(actuator_.name_);
-    pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
-
-    // Register accelerometer with pr2_hardware_interface::HardwareInterface
-    for (int i = 0; i < 2; ++i) 
-    {
-      pressure_sensors_[i].state_.data_.resize(22);
-      pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
-      if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
-      {
-          ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
-          return -1;
-      }
-    }
-
-    // Publish accelerometer data as a ROS topic, if firmware is recent enough
-    if (fw_major_ >= 1)
-    {
-      topic = "accelerometer";
-      if (!actuator_.name_.empty())
-        topic = topic + "/" + string(actuator_.name_);
-      accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
-
-      // Register accelerometer with pr2_hardware_interface::HardwareInterface
-      {
-        accelerometer_.name_ = actuator_info_.name_;
-        if (hw && !hw->addAccelerometer(&accelerometer_))
-        {
-            ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
-            return -1;
-        }
-      }
-    }
-
-    // FW version 2 supports Force/Torque sensor.
-    // Provide Force/Torque data to controllers as an AnalogIn vector 
-    if (fw_major_ >= 2)
-    {
-      ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
-      if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
-      {
-        ROS_FATAL("An analog in of the name '%s' already exists.  Device #%02d has a duplicate name",
-                  ft_raw_analog_in_.name_.c_str(), sh_->get_ring_position());
-        return -1;
-      }
-      // FT provides 6 values : 3 Forces + 3 Torques
-      ft_raw_analog_in_.state_.state_.resize(6); 
-
-      // For now publish RAW F/T values for engineering purposes.  In future this publisher may be disabled by default.
-      topic = "raw_ft";
-      if (!actuator_.name_.empty())
-        topic = topic + "/" + string(actuator_.name_);
-      raw_ft_publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData>(ros::NodeHandle(), topic, 1);
-      if (raw_ft_publisher_ == NULL)
-      {
-        ROS_FATAL("Could not allocate raw_ft publisher");
-        return -1;
-      }
-      // Allocate space for raw f/t data values
-      raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
-    }
-
-
-  }
-
   return retval;
 }
 
@@ -628,7 +530,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
 
-  if (sh_->get_product_code() == WG05::PRODUCT_CODE)
+  if (sh_->get_product_code() == WG05_PRODUCT_CODE)
   {
     if (fw_major_ != 1 || fw_minor_ < 7)
     {
@@ -681,7 +583,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     actuator_.name_ = actuator_info_.name_;
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
 
-    bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
+    bool isWG021 = sh_->get_product_code() == WG021_PRODUCT_CODE;
     if (!isWG021)
     {
       // Register actuator with pr2_hardware_interface::HardwareInterface
@@ -836,36 +738,6 @@ void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
   }
 }
 
-void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
-{
-  if (reset) 
-  {
-    pressure_checksum_error_ = false;
-  }
-
-  WG0X::packCommand(buffer, halt, reset);
-
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
-
-  WG0XCommand *c = (WG0XCommand *)buffer;
-
-  if (accelerometer_.command_.range_ > 2 || 
-      accelerometer_.command_.range_ < 0)
-    accelerometer_.command_.range_ = 0;
-
-  if (accelerometer_.command_.bandwidth_ > 6 || 
-      accelerometer_.command_.bandwidth_ < 0)
-    accelerometer_.command_.bandwidth_ = 0;
-  
-  c->digital_out_ = (digital_out_.command_.data_ != 0) |
-    ((accelerometer_.command_.bandwidth_ & 0x7) << 1) | 
-    ((accelerometer_.command_.range_ & 0x3) << 4); 
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-}
-
 void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   pr2_hardware_interface::ProjectorCommand &cmd = projector_.command_;
@@ -893,153 +765,6 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
   c->general_config_ = cmd.pulse_replicator_ == true;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-}
-
-bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
-{
-  bool rv = true;
-
-  int status_bytes = 
-    has_accel_and_ft_  ? sizeof(WG06StatusWithAccelAndFT) :  // Has FT sensor and accelerometer
-    accel_publisher_   ? sizeof(WG06StatusWithAccel) : 
-                         sizeof(WG0XStatus);  
-
-  WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
-
-  unsigned char* this_status = this_buffer + command_size_;
-  if (!verifyChecksum(this_status, status_bytes))
-  {
-    status_checksum_error_ = true;
-    rv = false;
-    goto end;
-  }
-
-  if (!verifyChecksum(p, sizeof(*p)))
-  {
-    pressure_checksum_error_ = true;
-    rv = false;
-    //goto end;
-  }
-  else {
-  for (int i = 0; i < 22; ++i ) {
-    pressure_sensors_[0].state_.data_[i] =
-      ((p->l_finger_tip_[i] >> 8) & 0xff) |
-      ((p->l_finger_tip_[i] << 8) & 0xff00);
-    pressure_sensors_[1].state_.data_[i] =
-      ((p->r_finger_tip_[i] >> 8) & 0xff) |
-      ((p->r_finger_tip_[i] << 8) & 0xff00);
-  }
-
-  if (p->timestamp_ != last_pressure_time_)
-  {
-    if (pressure_publisher_ && pressure_publisher_->trylock())
-    {
-      pressure_publisher_->msg_.header.stamp = ros::Time::now();
-      pressure_publisher_->msg_.set_l_finger_tip_size(22);
-      pressure_publisher_->msg_.set_r_finger_tip_size(22);
-      for (int i = 0; i < 22; ++i ) {
-        pressure_publisher_->msg_.l_finger_tip[i] = pressure_sensors_[0].state_.data_[i];
-        pressure_publisher_->msg_.r_finger_tip[i] = pressure_sensors_[1].state_.data_[i];
-      }
-      pressure_publisher_->unlockAndPublish();
-    }
-  }
-  last_pressure_time_ = p->timestamp_;
-  }
-
-
-  if (accel_publisher_)
-  {
-    WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
-    WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
-    int count = uint8_t(status->accel_count_ - last_status->accel_count_);
-    accelerometer_samples_ += count;
-    // Only most recent 4 samples of accelerometer data is available in status data
-    // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
-    // If count is greater than 4, then some data has been "missed".
-    accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
-    count = min(4, count);
-    accelerometer_.state_.samples_.resize(count);
-    accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
-    for (int i = 0; i < count; ++i)
-    {
-      int32_t acc = status->accel_[count - i - 1];
-      int range = (acc >> 30) & 3;
-      float d = 1 << (8 - range);
-      accelerometer_.state_.samples_[i].x = 9.81 * ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].y = 9.81 * ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].z = 9.81 * ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
-    }
-
-    if (accel_publisher_->trylock())
-    {
-      accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
-      accel_publisher_->msg_.header.stamp = ros::Time::now();
-      accel_publisher_->msg_.set_samples_size(count);
-      for (int i = 0; i < count; ++i)
-      {
-        accel_publisher_->msg_.samples[i].x = accelerometer_.state_.samples_[i].x;
-        accel_publisher_->msg_.samples[i].y = accelerometer_.state_.samples_[i].y;
-        accel_publisher_->msg_.samples[i].z = accelerometer_.state_.samples_[i].z;
-      }
-      accel_publisher_->unlockAndPublish();
-    }
-  }
-
-  if (has_accel_and_ft_)
-  {
-    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(this_buffer + command_size_);
-    WG06StatusWithAccelAndFT *last_status = (WG06StatusWithAccelAndFT *)(prev_buffer + command_size_);
-
-    assert(ft_raw_analog_in_.state_.state_.size() == NUM_FT_CHANNELS);
-    
-    // Fill in analog output with most recent data sample
-    {
-      const FTDataSample &sample(status->ft_samples_[0]);
-      for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
-      {
-        ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
-      }
-    }
-
-    unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
-    ft_sample_count_ += new_samples;
-    int missed_samples = std::max(int(0), int(new_samples) - 4);
-    ft_missed_samples_ += missed_samples;
-    
-    // Put all new samples in buffer and publish it
-    if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
-    {
-      unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
-      raw_ft_publisher_->msg_.samples.resize(usable_samples);
-      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
-      raw_ft_publisher_->msg_.missed_samples = ft_missed_samples_;
-      for (unsigned sample_num=0; sample_num<usable_samples; ++sample_num)
-      {
-        //put data into messag so oldest data is first element
-        const FTDataSample &sample(status->ft_samples_[sample_num]);
-        ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[usable_samples-sample_num-1]);
-        msg_sample.sample_count = ft_sample_count_ - sample_num;
-        msg_sample.data.resize(NUM_FT_CHANNELS);
-        for (unsigned ch_num=0; ch_num<NUM_FT_CHANNELS; ++ch_num)
-        {
-          msg_sample.data[ch_num] = sample.data_[ch_num];
-        }
-        msg_sample.vhalf = sample.vhalf_;
-      }
-      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
-      raw_ft_publisher_->unlockAndPublish();
-    }
-  }
-
-
-  if (!WG0X::unpackState(this_buffer, prev_buffer))
-  {
-    rv = false;
-  }
-
- end:
-  return rv;
 }
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -2604,14 +2329,14 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     unsigned product = sh_->get_product_code();
 
     // Current scale 
-    if ((product == WG05::PRODUCT_CODE) && (board_major_ == 1))
+    if ((product == WG05_PRODUCT_CODE) && (board_major_ == 1))
     {
       // WG005B measure current going into and out-of H-bridge (not entire board)
       static const double WG005B_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
       double bridge_supply_current = double(di.supply_current_in_) * WG005B_SUPPLY_CURRENT_SCALE;
       d.addf("Bridge Supply Current", "%f", bridge_supply_current);
     }
-    else if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) 
+    else if ((product == WG05_PRODUCT_CODE) || (product == WG021_PRODUCT_CODE)) 
     {
       // WG005[CDEF] measures curret going into entire board.  It cannot measure negative (regenerative) current values.
       // WG021A == WG005E,  WG021B == WG005F
@@ -2646,7 +2371,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Position", "%02d", sh_->get_ring_position());
   d.addf("Product code",
         "WG0%d (%d) Firmware Revision %d.%02d, PCB Revision %c.%02d",
-        sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
+        sh_->get_product_code() == WG05_PRODUCT_CODE ? 5 : 6,
         sh_->get_product_code(), fw_major_, fw_minor_,
         'A' + board_major_, board_minor_);
 
@@ -2716,77 +2441,10 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Consecutive Drops", "%d", consecutive_drops_);
   d.addf("Max Consecutive Drops", "%d", max_consecutive_drops_);
 
-  unsigned numPorts = (sh_->get_product_code()==WG06::PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
+  unsigned numPorts = (sh_->get_product_code()==WG06_PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
   EthercatDevice::ethercatDiagnostics(d, numPorts); 
 }
 
-void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
-{
-  WG0X::diagnostics(d, buffer);
-  
-  pr2_hardware_interface::AccelerometerCommand acmd(accelerometer_.command_);
-
-  const char * range_str = 
-    (acmd.range_ == 0) ? "+/-2G" :
-    (acmd.range_ == 1) ? "+/-4G" :
-    (acmd.range_ == 2) ? "+/-8G" :
-    "INVALID";
-
-  const char * bandwidth_str = 
-    (acmd.bandwidth_ == 6) ? "1500Hz" :
-    (acmd.bandwidth_ == 5)  ? "750Hz" :
-    (acmd.bandwidth_ == 4)  ? "375Hz" :
-    (acmd.bandwidth_ == 3)  ? "190Hz" :
-    (acmd.bandwidth_ == 2)  ? "100Hz" :
-    (acmd.bandwidth_ == 1)   ? "50Hz" :
-    (acmd.bandwidth_ == 0)   ? "25Hz" :
-    "INVALID";
-
-  if (pressure_checksum_error_) 
-  {
-    d.mergeSummary(d.ERROR, "Checksum error on pressure data");
-  }
-
-  // Board revB=1 and revA=0 does not have accelerometer
-  bool has_accelerometer = (board_major_ >= 2);
-  double sample_frequency = 0.0;
-  ros::Time current_time(ros::Time::now());
-  if (!first_publish_)
-  {
-    sample_frequency = double(accelerometer_samples_) / (current_time - last_publish_time_).toSec();
-    {
-      if (((sample_frequency < 2000) || (sample_frequency > 4000)) && has_accelerometer)
-      {
-        d.mergeSummary(d.WARN, "Bad accelerometer sampling frequency");
-      }
-    }
-  }
-  accelerometer_samples_ = 0;
-  last_publish_time_ = current_time;
-  first_publish_ = false;
-
-  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
-  d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
-  d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
-  d.addf("Accelerometer sample frequency", "%f", sample_frequency);
-  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
-
-  if (has_accel_and_ft_)
-  {
-    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
-    d.addf("F/T sample count", "%llu", ft_sample_count_);
-    d.addf("F/T missed samples", "%llu", ft_missed_samples_);
-    std::stringstream ss;
-    const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
-    for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
-    {
-      ss.str(""); ss << "FT In"<< (i+1);
-      d.addf(ss.str(), "%d", int(sample.data_[i]));
-    }
-    d.addf("FT Vhalf", "%d", int(sample.vhalf_));
-  }
-                                   
-}
 
 void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {

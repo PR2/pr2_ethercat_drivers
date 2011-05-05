@@ -39,10 +39,6 @@
 #include <ethercat_hardware/motor_model.h>
 
 #include <realtime_tools/realtime_publisher.h>
-#include <pr2_msgs/PressureState.h>
-#include <pr2_msgs/AccelerometerState.h>
-
-#include <ethercat_hardware/RawFTData.h>
 
 
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
@@ -347,76 +343,6 @@ struct WG0XStatus
   static const unsigned SIZE=44;
 }__attribute__ ((__packed__));
 
-struct WG06StatusWithAccel
-{
-  uint8_t mode_;
-  uint8_t digital_out_;
-  int16_t programmed_pwm_value_;
-  int16_t programmed_current_;
-  int16_t measured_current_;
-  uint32_t timestamp_;
-  int32_t encoder_count_;
-  int32_t encoder_index_pos_;
-  uint16_t num_encoder_errors_;
-  uint8_t encoder_status_;
-  uint8_t unused1;
-  int32_t unused2;
-  int32_t unused3;
-  uint16_t board_temperature_;
-  uint16_t bridge_temperature_;
-  uint16_t supply_voltage_;
-  int16_t motor_voltage_;
-  uint16_t packet_count_;
-  uint8_t pad_;
-  uint8_t accel_count_;
-  uint32_t accel_[4];
-  uint8_t checksum_;
-
-  static const unsigned SIZE=61;
-}__attribute__ ((__packed__));
-
-
-struct FTDataSample
-{
-  int16_t data_[6];
-  uint16_t vhalf_;
-  uint8_t sample_count_;
-  uint8_t timestamp_;
-  static const unsigned SIZE=16;  
-}__attribute__ ((__packed__));
-
-
-struct WG06StatusWithAccelAndFT
-{
-  uint8_t mode_;
-  uint8_t digital_out_;
-  int16_t programmed_pwm_value_;
-  int16_t programmed_current_;
-  int16_t measured_current_;
-  uint32_t timestamp_;
-  int32_t encoder_count_;
-  int32_t encoder_index_pos_;
-  uint16_t num_encoder_errors_;
-  uint8_t encoder_status_;
-  uint8_t unused1;
-  int32_t unused2;
-  int32_t unused3;
-  uint16_t board_temperature_;
-  uint16_t bridge_temperature_;
-  uint16_t supply_voltage_;
-  int16_t motor_voltage_;
-  uint16_t packet_count_;
-  uint8_t pad_;
-  uint8_t accel_count_;
-  uint32_t accel_[4];
-  uint8_t unused4[3];
-  uint8_t ft_sample_count_;
-  FTDataSample ft_samples_[4];
-  uint8_t checksum_;
-
-  static const unsigned SIZE=129;
-}__attribute__ ((__packed__));
-
 
 
 struct WG021Status
@@ -553,6 +479,13 @@ protected:
     MODE_RESET = (1 << 7)
   };
 
+  enum 
+  {
+    WG05_PRODUCT_CODE = 6805005,
+    WG06_PRODUCT_CODE = 6805006,
+    WG021_PRODUCT_CODE = 6805021
+  };
+
   static string modeString(uint8_t mode);
   static string safetyDisableString(uint8_t status);
   bool in_lockout_;
@@ -578,9 +511,6 @@ protected:
    */
   ros::Duration sample_timestamp_;
   
-  //! True if device has accelerometer and force/torque sensor
-  bool has_accel_and_ft_;  
-
   //! Different possible states for application ram on device. 
   //  Application ram is non-volitile memory that application can use to store temporary
   //  data between runs.
@@ -615,7 +545,7 @@ protected:
   
   static const int PWM_MAX = 0x4000;
   
-private:
+protected:
   // Each WG0X device can only support one mailbox operation at a time
   bool lockMailbox();
   void unlockMailbox();
@@ -636,9 +566,9 @@ private:
   bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
   void diagnoseMailboxError(EthercatCom *com);
 
+
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
-  static const unsigned PRESSURE_PHY_ADDR = 0x2200;
   static const unsigned MBX_COMMAND_PHY_ADDR = 0x1400;
   static const unsigned MBX_COMMAND_SIZE = 512;
   static const unsigned MBX_STATUS_PHY_ADDR = 0x2400;
@@ -701,11 +631,15 @@ public:
 
   static double calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp, 
                                     int32_t old_position, uint32_t old_timestamp);
+
+  static unsigned computeChecksum(void const *data, unsigned length);
+  static unsigned int rotateRight8(unsigned in);
 };
 
 class WG05 : public WG0X
 {
 public:
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
   void packCommand(unsigned char *buffer, bool halt, bool reset);  
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
@@ -715,59 +649,12 @@ public:
   };
 };
 
-struct WG06Pressure
-{
-  uint32_t timestamp_;
-  uint16_t l_finger_tip_[22];
-  uint16_t r_finger_tip_[22];
-  uint8_t pad_;
-  uint8_t checksum_;
-} __attribute__((__packed__));
-
-class WG06 : public WG0X
-{
-public:
-  WG06();
-  ~WG06();
-  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
-  void packCommand(unsigned char *buffer, bool halt, bool reset);
-  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
-  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
-  enum
-  {
-    PRODUCT_CODE = 6805006
-  };
-private:
-  pr2_hardware_interface::PressureSensor pressure_sensors_[2];
-  pr2_hardware_interface::Accelerometer accelerometer_;
-
-  bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
-
-  unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
-  unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed
-  ros::Time last_publish_time_; //!< Time diagnostics was last published
-  bool first_publish_; 
-
-  uint32_t last_pressure_time_;
-  realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
-  realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
-
-  static const unsigned MAX_FT_SAMPLES = 4;  
-  static const unsigned NUM_FT_CHANNELS = 6;
-  uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
-  uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
-  uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
-  pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
-  //! Realtime Publisher of RAW F/T data 
-  realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
-  //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
-};
 
 class WG021 : public WG0X
 {
 public:
   WG021() : projector_(digital_out_A_, digital_out_B_, digital_out_I_, digital_out_M_, digital_out_L0_, digital_out_L1_) {}
-  void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
