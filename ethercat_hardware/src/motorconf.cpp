@@ -45,6 +45,7 @@
 
 #include <ethercat_hardware/wg0x.h>
 #include <ethercat_hardware/wg06.h>
+#include <ethercat_hardware/wg021.h>
 #include <ethercat_hardware/wg014.h>
 
 #include <boost/crc.hpp>
