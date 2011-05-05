@@ -47,8 +47,6 @@
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 
-PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
-
 
 // Temporary,, need 'log' fuction that can switch between fprintf and ROS_LOG.
 #define ERR_MODE "\033[41m"
@@ -238,68 +236,6 @@ WG0X::~WG0X()
 }
 
 
-void WG05::construct(EtherCAT_SlaveHandler *sh, int &start_address)
-{
-  WG0X::construct(sh, start_address);
-
-  unsigned int base_status = sizeof(WG0XStatus);
-
-  // As good a place as any for making sure that compiler actually packed these structures correctly
-  BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
-
-  command_size_ = sizeof(WG0XCommand);
-  status_size_ = sizeof(WG0XStatus);
-
-
-  EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(2);
-  //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-  (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
-                       command_size_,// Logical length
-                       0x00, // Logical StartBit
-                       0x07, // Logical EndBit
-                       COMMAND_PHY_ADDR, // Physical Start address
-                       0x00, // Physical StartBit
-                       false, // Read Enable
-                       true, // Write Enable
-                       true); // Enable
-
-  start_address += command_size_;
-
-  //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-  (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
-                       base_status, // Logical length
-                       0x00, // Logical StartBit
-                       0x07, // Logical EndBit
-                       STATUS_PHY_ADDR, // Physical Start address
-                       0x00, // Physical StartBit
-                       true, // Read Enable
-                       false, // Write Enable
-                       true); // Enable
-
-  start_address += base_status;
-
-  sh->set_fmmu_config(fmmu);
-
-  EtherCAT_PD_Config *pd = new EtherCAT_PD_Config(4);
-
-  // Sync managers
-  (*pd)[0] = EC_SyncMan(COMMAND_PHY_ADDR, command_size_, EC_BUFFERED, EC_WRITTEN_FROM_MASTER);
-  (*pd)[0].ChannelEnable = true;
-  (*pd)[0].ALEventEnable = true;
-
-  (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
-  (*pd)[1].ChannelEnable = true;
-
-  (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
-  (*pd)[2].ChannelEnable = true;
-  (*pd)[2].ALEventEnable = true;
-
-  (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
-  (*pd)[3].ChannelEnable = true;
-
-  sh->set_pd_config(pd);
-}
-
 
 void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
@@ -314,38 +250,6 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   // Would normally configure EtherCAT intialize EtherCAT communication settings here.
   // However, since all WG devices are slightly different doesn't make sense to do it here.
   // Instead make sub-classes handle this.
-}
-
-int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
-{
-  if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
-  {
-    app_ram_status_ = APP_RAM_PRESENT;
-  }
-
-  int retval = WG0X::initialize(hw, allow_unprogrammed);
-
-  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
-
-  // Determine if device supports application RAM
-  if (!retval)
-  {
-    if (use_ros_)
-    {
-      // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
-      bool poor_measured_motor_voltage = (board_major_ <= 2);
-      double max_pwm_ratio = double(0x3C00) / double(PWM_MAX);
-      double board_resistance = 0.8;
-      if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
-      {
-        ROS_FATAL("Initializing motor trace failed");
-        sleep(1); // wait for ros to flush rosconsole output
-        return -1;
-      }
-    }
-
-  }// end if !retval
-  return retval;
 }
 
 /**  \brief Allocates and initialized motor trace for WG0X devices than use it (WG006, WG005)
@@ -622,16 +526,6 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 }
 
-void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
-{
-  WG0X::packCommand(buffer, halt, reset);
-
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
-}
-
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
@@ -695,27 +589,6 @@ bool WG0X::verifyChecksum(const void* buffer, unsigned size)
   return success;
 }
 
-
-bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
-{
-  bool rv = true;
-
-  unsigned char* this_status = this_buffer + command_size_;
-  if (!verifyChecksum(this_status, status_size_))
-  {
-    status_checksum_error_  = true;
-    rv = false;
-    goto end;
-  }
-
-  if (!WG0X::unpackState(this_buffer, prev_buffer))
-  {
-    rv = false;
-  }
-
- end:
-  return rv;
-}
 
 
 /**
