@@ -176,7 +176,7 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
 int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
-  if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
+  if ( ((fw_major_ == 1) && (fw_minor_ >= 1))  ||  (fw_major_ >= 2) )
   {
     app_ram_status_ = APP_RAM_PRESENT;
   }
