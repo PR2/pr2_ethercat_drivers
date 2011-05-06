@@ -64,6 +64,7 @@ struct WG021Status
   uint16_t packet_count_;
   uint8_t pad_;
   uint8_t checksum_;
+  static const unsigned SIZE=44;
 }__attribute__ ((__packed__));
 
 struct WG021Command

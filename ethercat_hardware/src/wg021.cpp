@@ -56,7 +56,7 @@ void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   unsigned int base_status = sizeof(WG0XStatus);
 
   // As good a place as any for making sure that compiler actually packed these structures correctly
-  BOOST_STATIC_ASSERT(sizeof(WG0XStatus) == WG0XStatus::SIZE);
+  BOOST_STATIC_ASSERT(sizeof(WG021Status) == WG021Status::SIZE);
 
   status_size_ = base_status = sizeof(WG021Status);
   command_size_ = sizeof(WG021Command);
