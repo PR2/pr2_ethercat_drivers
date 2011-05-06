@@ -46,7 +46,7 @@
 
 #include <boost/static_assert.hpp>
 
-PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
+PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805006, WG06, EthercatDevice);
 
 
 WG06::WG06() :
