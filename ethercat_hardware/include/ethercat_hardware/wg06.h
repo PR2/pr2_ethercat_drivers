@@ -144,6 +144,11 @@ private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
 
+  //! Unpack pressure sensor status from realtime data
+  bool unpackPressure(WG06Pressure *p);
+  bool unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status);
+  bool unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status);
+
   //! True if device has accelerometer and force/torque sensor
   bool has_accel_and_ft_;  
 

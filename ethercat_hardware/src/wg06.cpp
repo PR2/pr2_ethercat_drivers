@@ -305,7 +305,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     accel_publisher_   ? sizeof(WG06StatusWithAccel) : 
                          sizeof(WG0XStatus);  
 
-  WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
+  WG06Pressure *pressure = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
 
   unsigned char* this_status = this_buffer + command_size_;
   if (!verifyChecksum(this_status, status_bytes))
@@ -315,75 +315,19 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     goto end;
   }
 
-  if (!verifyChecksum(p, sizeof(*p)))
+  if (!unpackPressure(pressure))
   {
-    pressure_checksum_error_ = true;
-    rv = false; // for now, don't halt motors when there is an error with pressure sensor data
-    //goto end;
+    rv = false;
+    //goto end;  // all other tasks should not be effected by bad pressure sensor data
   }
-  else {
-  for (int i = 0; i < 22; ++i ) {
-    pressure_sensors_[0].state_.data_[i] =
-      ((p->l_finger_tip_[i] >> 8) & 0xff) |
-      ((p->l_finger_tip_[i] << 8) & 0xff00);
-    pressure_sensors_[1].state_.data_[i] =
-      ((p->r_finger_tip_[i] >> 8) & 0xff) |
-      ((p->r_finger_tip_[i] << 8) & 0xff00);
-  }
-
-  if (p->timestamp_ != last_pressure_time_)
-  {
-    if (pressure_publisher_ && pressure_publisher_->trylock())
-    {
-      pressure_publisher_->msg_.header.stamp = ros::Time::now();
-      pressure_publisher_->msg_.set_l_finger_tip_size(22);
-      pressure_publisher_->msg_.set_r_finger_tip_size(22);
-      for (int i = 0; i < 22; ++i ) {
-        pressure_publisher_->msg_.l_finger_tip[i] = pressure_sensors_[0].state_.data_[i];
-        pressure_publisher_->msg_.r_finger_tip[i] = pressure_sensors_[1].state_.data_[i];
-      }
-      pressure_publisher_->unlockAndPublish();
-    }
-  }
-  last_pressure_time_ = p->timestamp_;
-  }
-
 
   if (accel_publisher_)
   {
     WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
     WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
-    int count = uint8_t(status->accel_count_ - last_status->accel_count_);
-    accelerometer_samples_ += count;
-    // Only most recent 4 samples of accelerometer data is available in status data
-    // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
-    // If count is greater than 4, then some data has been "missed".
-    accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
-    count = min(4, count);
-    accelerometer_.state_.samples_.resize(count);
-    accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
-    for (int i = 0; i < count; ++i)
+    if (!unpackAccel(status, last_status))
     {
-      int32_t acc = status->accel_[count - i - 1];
-      int range = (acc >> 30) & 3;
-      float d = 1 << (8 - range);
-      accelerometer_.state_.samples_[i].x = 9.81 * ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].y = 9.81 * ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].z = 9.81 * ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
-    }
-
-    if (accel_publisher_->trylock())
-    {
-      accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
-      accel_publisher_->msg_.header.stamp = ros::Time::now();
-      accel_publisher_->msg_.set_samples_size(count);
-      for (int i = 0; i < count; ++i)
-      {
-        accel_publisher_->msg_.samples[i].x = accelerometer_.state_.samples_[i].x;
-        accel_publisher_->msg_.samples[i].y = accelerometer_.state_.samples_[i].y;
-        accel_publisher_->msg_.samples[i].z = accelerometer_.state_.samples_[i].z;
-      }
-      accel_publisher_->unlockAndPublish();
+      rv=false;
     }
   }
 
@@ -391,45 +335,9 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   {
     WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(this_buffer + command_size_);
     WG06StatusWithAccelAndFT *last_status = (WG06StatusWithAccelAndFT *)(prev_buffer + command_size_);
-
-    assert(ft_raw_analog_in_.state_.state_.size() == NUM_FT_CHANNELS);
-    
-    // Fill in analog output with most recent data sample
+    if (!unpackFT(status, last_status))
     {
-      const FTDataSample &sample(status->ft_samples_[0]);
-      for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
-      {
-        ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
-      }
-    }
-
-    unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
-    ft_sample_count_ += new_samples;
-    int missed_samples = std::max(int(0), int(new_samples) - 4);
-    ft_missed_samples_ += missed_samples;
-    
-    // Put all new samples in buffer and publish it
-    if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
-    {
-      unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
-      raw_ft_publisher_->msg_.samples.resize(usable_samples);
-      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
-      raw_ft_publisher_->msg_.missed_samples = ft_missed_samples_;
-      for (unsigned sample_num=0; sample_num<usable_samples; ++sample_num)
-      {
-        //put data into messag so oldest data is first element
-        const FTDataSample &sample(status->ft_samples_[sample_num]);
-        ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[usable_samples-sample_num-1]);
-        msg_sample.sample_count = ft_sample_count_ - sample_num;
-        msg_sample.data.resize(NUM_FT_CHANNELS);
-        for (unsigned ch_num=0; ch_num<NUM_FT_CHANNELS; ++ch_num)
-        {
-          msg_sample.data[ch_num] = sample.data_[ch_num];
-        }
-        msg_sample.vhalf = sample.vhalf_;
-      }
-      raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
-      raw_ft_publisher_->unlockAndPublish();
+      rv = false;
     }
   }
 
@@ -443,6 +351,143 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   return rv;
 }
 
+
+/*!
+ * \brief Unpack pressure sensor samples from realtime data.
+ *
+ * \return True, if there are no problems, false if there is something wrong with the data. 
+ */
+bool WG06::unpackPressure(WG06Pressure *p)
+{
+
+  if (!verifyChecksum(p, sizeof(*p)))
+  {
+    pressure_checksum_error_ = true;
+    return false;
+  }
+  else {
+    for (int i = 0; i < 22; ++i ) {
+      pressure_sensors_[0].state_.data_[i] =
+        ((p->l_finger_tip_[i] >> 8) & 0xff) |
+        ((p->l_finger_tip_[i] << 8) & 0xff00);
+      pressure_sensors_[1].state_.data_[i] =
+        ((p->r_finger_tip_[i] >> 8) & 0xff) |
+        ((p->r_finger_tip_[i] << 8) & 0xff00);
+    }
+
+    if (p->timestamp_ != last_pressure_time_)
+    {
+      if (pressure_publisher_ && pressure_publisher_->trylock())
+      {
+        pressure_publisher_->msg_.header.stamp = ros::Time::now();
+        pressure_publisher_->msg_.l_finger_tip.resize(22);
+        pressure_publisher_->msg_.r_finger_tip.resize(22);
+        for (int i = 0; i < 22; ++i ) {
+          pressure_publisher_->msg_.l_finger_tip[i] = pressure_sensors_[0].state_.data_[i];
+          pressure_publisher_->msg_.r_finger_tip[i] = pressure_sensors_[1].state_.data_[i];
+        }
+        pressure_publisher_->unlockAndPublish();
+      }
+    }
+    last_pressure_time_ = p->timestamp_;
+  }
+
+  return true;
+}
+
+
+/*!
+ * \brief Unpack 3-axis accelerometer samples from realtime data.
+ *
+ * \return True, if there are no problems.
+ */
+bool WG06::unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status)
+{
+  int count = uint8_t(status->accel_count_ - last_status->accel_count_);
+  accelerometer_samples_ += count;
+  // Only most recent 4 samples of accelerometer data is available in status data
+  // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
+  // If count is greater than 4, then some data has been "missed".
+  accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
+  count = min(4, count);
+  accelerometer_.state_.samples_.resize(count);
+  accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
+  for (int i = 0; i < count; ++i)
+  {
+    int32_t acc = status->accel_[count - i - 1];
+    int range = (acc >> 30) & 3;
+    float d = 1 << (8 - range);
+    accelerometer_.state_.samples_[i].x = 9.81 * ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
+    accelerometer_.state_.samples_[i].y = 9.81 * ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
+    accelerometer_.state_.samples_[i].z = 9.81 * ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
+  }
+
+  if (accel_publisher_->trylock())
+  {
+    accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
+    accel_publisher_->msg_.header.stamp = ros::Time::now();
+    accel_publisher_->msg_.samples.resize(count);
+    for (int i = 0; i < count; ++i)
+    {
+      accel_publisher_->msg_.samples[i].x = accelerometer_.state_.samples_[i].x;
+      accel_publisher_->msg_.samples[i].y = accelerometer_.state_.samples_[i].y;
+      accel_publisher_->msg_.samples[i].z = accelerometer_.state_.samples_[i].z;
+    }
+    accel_publisher_->unlockAndPublish();
+  }
+  return true;
+}
+
+
+/*!
+ * \brief Unpack force/torque ADC samples from realtime data.
+ *
+ * \return True, if there are no problems, false if there is something wrong with the data. 
+ */
+bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
+{
+  ft_raw_analog_in_.state_.state_.resize(NUM_FT_CHANNELS);
+    
+  // Fill in analog output with most recent data sample
+  {
+    const FTDataSample &sample(status->ft_samples_[0]);
+    for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
+    {
+      ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
+    }
+  }
+
+  unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
+  ft_sample_count_ += new_samples;
+  int missed_samples = std::max(int(0), int(new_samples) - 4);
+  ft_missed_samples_ += missed_samples;
+    
+  // Put all new samples in buffer and publish it
+  if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
+  {
+    unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
+    raw_ft_publisher_->msg_.samples.resize(usable_samples);
+    raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
+    raw_ft_publisher_->msg_.missed_samples = ft_missed_samples_;
+    for (unsigned sample_num=0; sample_num<usable_samples; ++sample_num)
+    {
+      // put data into message so oldest data is first element
+      const FTDataSample &sample(status->ft_samples_[sample_num]);
+      ethercat_hardware::RawFTDataSample &msg_sample(raw_ft_publisher_->msg_.samples[usable_samples-sample_num-1]);
+      msg_sample.sample_count = ft_sample_count_ - sample_num;
+      msg_sample.data.resize(NUM_FT_CHANNELS);
+      for (unsigned ch_num=0; ch_num<NUM_FT_CHANNELS; ++ch_num)
+      {
+        msg_sample.data[ch_num] = sample.data_[ch_num];
+      }
+      msg_sample.vhalf = sample.vhalf_;
+    }
+    raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
+    raw_ft_publisher_->unlockAndPublish();
+  }
+
+  return true;
+}
 
 
 
