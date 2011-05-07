@@ -41,6 +41,7 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <boost/foreach.hpp>
+#include <boost/regex.hpp>
 
 EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
 
@@ -702,21 +703,66 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 {
   static int start_address = 0x00010000;
   EthercatDevice *p = NULL;
-  stringstream str;
   unsigned product_code = sh->get_product_code();
   unsigned serial = sh->get_serial();
   uint32_t revision = sh->get_revision();
   unsigned slave = sh->get_station_address()-1;
 
-  str << product_code;
-  try {
-    p = device_loader_.createClassInstance(str.str());
-  }
-  catch (pluginlib::LibraryLoadException &e)
+  // The point of this code to find a class whose name matches the EtherCAT product ID 
+  // for a given device.  
+  // Thus device plugins would register themselves with PLUGIN_REGISTER_CLASS
+  //
+  //    PLUGINLIB_REGISTER_CLASS(class_name, class_type, base_class_type)
+  // 
+  // For the WG05 driver (productID = 6805005), this statement would look something like:
+  //
+  //   PLUGINLIB_DECLARE_CLASS(6805005, WG05, EthercatDevice);
+  //
+  // PLUGINLIB_DECLARE_CLASS macro is now depricated, PLUGINLIB_REGISTER_CLASS should be used instead : 
+  // 
+  //   PLUGINLIB_DECLARE_CLASS(package, class_name, class_type, base_class_type)
+  //
+  // Unfortunately, we don't know which ROS package that a particular driver is defined in.
+  // To account for this, we search through the list of class names, one-by-one and find string where
+  // last part of string matches product ID of device.  
+  stringstream class_name_regex_str;
+  class_name_regex_str << "(.*/)?" << product_code;
+  boost::regex class_name_regex(class_name_regex_str.str(), boost::regex::extended);
+
+  std::vector<std::string> classes = device_loader_.getDeclaredClasses();
+  std::string matching_class_name;
+
+  BOOST_FOREACH(const std::string &class_name, classes)
   {
-    p = NULL;
-    ROS_FATAL("Unable to load plugin for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
-              slave, product_code, product_code, serial, serial, revision, revision);
+    if (regex_match(class_name, class_name_regex))
+    {
+      if (matching_class_name.size() != 0)
+      {
+        ROS_ERROR("Found more than 1 EtherCAT driver for device with product code : %d", product_code);
+        ROS_ERROR("First class name = '%s'.  Second class name = '%s'",
+                  class_name.c_str(), matching_class_name.c_str());
+      }
+      matching_class_name = class_name;
+    }
+  }
+
+  if (matching_class_name.size() != 0)
+  {
+    //ROS_WARN("Using driver class '%s' for device with product code %d", 
+    //         matching_class_name.c_str(), product_code);
+    try {      
+      p = device_loader_.createClassInstance(matching_class_name);
+    }
+    catch (pluginlib::LibraryLoadException &e)
+    {
+      p = NULL;
+      ROS_FATAL("Unable to load plugin for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+                slave, product_code, product_code, serial, serial, revision, revision);
+      ROS_FATAL("%s", e.what());
+    }    
+  }
+  else
+  {
     if ((product_code==0xbaddbadd) || (serial==0xbaddbadd) || (revision==0xbaddbadd))
     {
       ROS_FATAL("Note: 0xBADDBADD indicates that the value was not read correctly from device.");
@@ -724,12 +770,24 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
     }
     else 
     {
-      ROS_FATAL("%s", e.what());
-    }
+      ROS_ERROR("Unable to load plugin for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
+                slave, product_code, product_code, serial, serial, revision, revision);
+      ROS_ERROR("Possible classes:");
+      BOOST_FOREACH(const std::string &class_name, classes)
+      {
+        ROS_ERROR("  %s", class_name.c_str());
+      }
+      
+      // TODO, use default plugin for ethercat devices that have no driver. 
+      // This way, the EtherCAT chain still works. 
+    }                
   }
-  if (p) {
+
+  if (p != NULL)
+  {
     p->construct(sh, start_address);
   }
+
   return p;
 }
 
