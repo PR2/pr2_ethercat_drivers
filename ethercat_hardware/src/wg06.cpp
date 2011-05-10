@@ -261,6 +261,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
       if (!actuator_.name_.empty())
       {
+        ft_analog_in_.state_.state_.resize(6);
         ros::NodeHandle nh("~" + string(actuator_.name_));
         FTParamsInternal ft_params;
         if (getForceTorqueParams(ft_params, nh))
@@ -274,13 +275,12 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::Wrench>(ros::NodeHandle(), topic, 1);
           if (ft_publisher_ == NULL)
           {
-            ROS_FATAL("Could not allocate raw_ft publisher");
+            ROS_FATAL("Could not allocate ft publisher");
             return -1;
           }
-          // Allocate space for raw f/t data values
-          raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
         }
       }
+
     }
 
 
@@ -470,8 +470,9 @@ bool WG06::unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_st
 bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
 {
   ft_raw_analog_in_.state_.state_.resize(NUM_FT_CHANNELS);
-    
-  // Fill in analog output with most recent data sample
+  ft_analog_in_.state_.state_.resize(6);
+  
+  // Fill in raw analog output with most recent data sample
   {
     const FTDataSample &sample(status->ft_samples_[0]);
     for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
@@ -479,6 +480,26 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
       ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
     }
   }
+
+  // perform offset and gains multiplication on raw data
+  {
+    const FTDataSample &sample(status->ft_samples_[0]);
+    double in[6];
+    for (unsigned i=0; i<6; ++i)
+    {
+      in[i] = double(sample.data_[i]) - ft_params_.offset(i);
+    }
+    for (unsigned i=0; i<6; ++i)
+    {
+      double sum=0.0;
+      for (unsigned j=0; j<6; ++j)
+      {
+        sum += in[i] * ft_params_.gain(i,j);
+      }
+      ft_analog_in_.state_.state_[i] = sum;
+    }
+  }
+
 
   unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
   ft_sample_count_ += new_samples;
@@ -507,6 +528,12 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
     }
     raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
     raw_ft_publisher_->unlockAndPublish();
+  }
+
+  if ((ft_publisher_ != NULL))
+  {
+    
+
   }
 
   return true;
@@ -591,6 +618,7 @@ void WG06::diagnosticsWG06(diagnostic_updater::DiagnosticStatusWrapper &d, unsig
 {
   WG0X::diagnostics(d, buffer);
   
+  // TODO, maybe do more error checking on pressure sensor, and put diagnostics in its own topic 
   if (pressure_checksum_error_) 
   {
     d.mergeSummary(d.ERROR, "Checksum error on pressure data");
@@ -620,6 +648,17 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
     d.addf(ss.str(), "%d", int(sample.data_[i]));
   }
   d.addf("FT Vhalf", "%d", int(sample.vhalf_));
+
+  const std::vector<double> &ft_data( ft_analog_in_.state_.state_ );
+  if (ft_data.size() == 6)
+  {
+    d.addf("Force X",  "%f", ft_data[0]);
+    d.addf("Force Y",  "%f", ft_data[1]);
+    d.addf("Force Z",  "%f", ft_data[2]);
+    d.addf("Torque X", "%f", ft_data[3]);
+    d.addf("Torque Y", "%f", ft_data[4]);
+    d.addf("Torque Z", "%f", ft_data[5]);
+  }
 }
 
 
