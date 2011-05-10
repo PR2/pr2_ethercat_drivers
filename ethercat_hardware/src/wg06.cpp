@@ -258,6 +258,29 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       }
       // Allocate space for raw f/t data values
       raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
+
+      if (!actuator_.name_.empty())
+      {
+        ros::NodeHandle nh("~" + string(actuator_.name_));
+        FTParamsInternal ft_params;
+        if (getForceTorqueParams(ft_params, nh))
+        {
+          ft_params_ = ft_params;
+          ft_params_.print();
+          // If we have ft_params, publish F/T values.  
+          topic = "ft";
+          if (!actuator_.name_.empty())
+            topic = topic + "/" + string(actuator_.name_);
+          ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::Wrench>(ros::NodeHandle(), topic, 1);
+          if (ft_publisher_ == NULL)
+          {
+            ROS_FATAL("Could not allocate raw_ft publisher");
+            return -1;
+          }
+          // Allocate space for raw f/t data values
+          raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
+        }
+      }
     }
 
 
@@ -490,10 +513,35 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
 }
 
 
-
-void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+void WG06::multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer)
 {
-  WG0X::diagnostics(d, buffer);
+  diagnostic_updater::DiagnosticStatusWrapper &d(diagnostic_status_);
+  diagnosticsWG06(d, buffer);  
+  vec.push_back(d);
+  diagnosticsAccel(d, buffer);
+  vec.push_back(d);
+  
+  if (has_accel_and_ft_)
+  {
+    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
+    // perform f/t sample
+    diagnosticsFT(d, status);
+    vec.push_back(d);
+  }
+}
+
+
+void WG06::diagnosticsAccel(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  stringstream str;
+  str << "Accelerometer (" << actuator_info_.name_ << ")";
+  d.name = str.str();
+  char serial[32];
+  snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
+  d.hardware_id = serial;
+
+  d.summary(d.OK, "OK");
+  d.clear();
   
   pr2_hardware_interface::AccelerometerCommand acmd(accelerometer_.command_);
 
@@ -512,11 +560,6 @@ void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     (acmd.bandwidth_ == 1)   ? "50Hz" :
     (acmd.bandwidth_ == 0)   ? "25Hz" :
     "INVALID";
-
-  if (pressure_checksum_error_) 
-  {
-    d.mergeSummary(d.ERROR, "Checksum error on pressure data");
-  }
 
   // Board revB=1 and revA=0 does not have accelerometer
   bool has_accelerometer = (board_major_ >= 2);
@@ -540,21 +583,175 @@ void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
   d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
   d.addf("Accelerometer sample frequency", "%f", sample_frequency);
-  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
+  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);                                   
+}
 
-  if (has_accel_and_ft_)
+
+void WG06::diagnosticsWG06(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  WG0X::diagnostics(d, buffer);
+  
+  if (pressure_checksum_error_) 
   {
-    WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
-    d.addf("F/T sample count", "%llu", ft_sample_count_);
-    d.addf("F/T missed samples", "%llu", ft_missed_samples_);
-    std::stringstream ss;
-    const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
-    for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
-    {
-      ss.str(""); ss << "FT In"<< (i+1);
-      d.addf(ss.str(), "%d", int(sample.data_[i]));
-    }
-    d.addf("FT Vhalf", "%d", int(sample.vhalf_));
+    d.mergeSummary(d.ERROR, "Checksum error on pressure data");
   }
-                                   
+}
+
+
+void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06StatusWithAccelAndFT *status)
+{
+  stringstream str;
+  str << "Force/Torque sensor (" << actuator_info_.name_ << ")";
+  d.name = str.str();
+  char serial[32];
+  snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
+  d.hardware_id = serial;
+
+  d.summary(d.OK, "OK");
+  d.clear();
+
+  d.addf("F/T sample count", "%llu", ft_sample_count_);
+  d.addf("F/T missed samples", "%llu", ft_missed_samples_);
+  std::stringstream ss;
+  const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
+  for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
+  {
+    ss.str(""); ss << "FT In"<< (i+1);
+    d.addf(ss.str(), "%d", int(sample.data_[i]));
+  }
+  d.addf("FT Vhalf", "%d", int(sample.vhalf_));
+}
+
+
+
+FTParamsInternal::FTParamsInternal()
+{
+  // Initial offset = 0.0
+  // Gains = identity matrix
+  for (int i=0; i<6; ++i)
+  {
+    offset(i) = 0.0;
+    for (int j=0; j<6; ++j)
+    {
+      gain(i,j) = (i==j) ? 1.0 : 0.0;
+    }
+  }
+}
+
+
+void FTParamsInternal::print() const
+{
+  for (int i=0; i<6; ++i)
+  {
+    ROS_INFO("offset[%d] = %f", i, offset(i));
+  }
+  for (int i=0; i<6; ++i)
+  {
+    ROS_INFO("gain[%d] = [%f,%f,%f,%f,%f,%f]", i, 
+             gain(i,0), gain(i,1), gain(i,2),
+             gain(i,3), gain(i,4), gain(i,5)
+             );
+  }
+}
+
+
+/*!
+ * \brief Grabs ft rosparams from a given node hande namespace
+ *
+ * The force/torque parameters consist of 
+ *  6x ADC offset values
+ *  6x6 gain matrix as 6-elment array of 6-element arrays of doubles
+ *
+ * \return True, if there are no problems.
+ */
+bool WG06::getForceTorqueParams(FTParamsInternal &ft_params, ros::NodeHandle nh)
+{
+  if (!nh.hasParam("ft_params"))
+  {
+    ROS_WARN("'ft_params' not available for force/torque sensor in namespace '%s'",
+             nh.getNamespace().c_str());
+    return false;
+  }
+
+  XmlRpc::XmlRpcValue params;
+  nh.getParam("ft_params", params);
+  if (params.getType() != XmlRpc::XmlRpcValue::TypeStruct)
+  {
+    ROS_ERROR("expected ft_params to be struct type");
+    return false;
+  }
+
+  if(!params.hasMember("offsets"))
+  {
+    ROS_ERROR("Expected ft_param to have 'offsets' element");
+    return false;
+  }
+
+  XmlRpc::XmlRpcValue offsets = params["offsets"];
+  if (offsets.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  {
+    ROS_ERROR("Expected FT param 'offsets' to be list type");
+    return false;
+  }
+  if (offsets.size() != 6)
+  {
+    ROS_ERROR("Expected FT param 'offsets' to have 6 elements");
+    return false;
+  }
+  for (int i=0; i<6; ++i)
+  {
+    if (offsets[i].getType() != XmlRpc::XmlRpcValue::TypeDouble)
+    {
+      ROS_ERROR("Expected FT param offsets[%d] to be floating point type", i);
+      return false;
+    } else {
+      ft_params.offset(i) = static_cast<double>(offsets[i]);
+    }
+  }
+
+  if(!params.hasMember("gains"))
+  {
+    ROS_ERROR("Expected ft_param to have 'gains' element");
+    return false;
+  }
+
+  XmlRpc::XmlRpcValue gain_matrix = params["gains"];
+  if (gain_matrix.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  {
+    ROS_ERROR("Expected FT param 'gains' to be list type");
+    return false;
+  }
+  if (gain_matrix.size() != 6)
+  {
+    ROS_ERROR("Expected FT param 'gains' to have 6 elements");
+    return false;
+  }
+
+  for (int i=0; i<6; ++i)
+  {
+    XmlRpc::XmlRpcValue gain_row = gain_matrix[i];
+    if (gain_row.getType() != XmlRpc::XmlRpcValue::TypeArray)
+    {
+      ROS_ERROR("Expected FT param gains[%d] to be list type", i);
+      return false;
+    }
+    if (gain_row.size() != 6)
+    {
+      ROS_ERROR("Expected FT param gains[%d] to have 6 elements", i);
+      return false;
+    }
+    
+    for (int j=0; j<6; ++j)
+    {
+      if (gain_row[j].getType() != XmlRpc::XmlRpcValue::TypeDouble)
+      {
+        ROS_ERROR("Expected FT param gains[%d,%d] to be floating point type", i,j);
+        return false;
+      } else {
+        ft_params.gain(i,j) = static_cast<double>(gain_row[j]);
+      }
+    }
+  }
+
+  return true;
 }

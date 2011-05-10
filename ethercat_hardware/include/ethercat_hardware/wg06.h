@@ -40,7 +40,7 @@
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
 #include <ethercat_hardware/RawFTData.h>
-
+#include <geometry_msgs/Wrench.h>
 
 struct WG06StatusWithAccel
 {
@@ -77,8 +77,25 @@ struct FTDataSample
   uint16_t vhalf_;
   uint8_t sample_count_;
   uint8_t timestamp_;
-  static const unsigned SIZE=16;  
+  static const unsigned SIZE=16;
 }__attribute__ ((__packed__));
+
+
+class FTParamsInternal
+{
+public:
+  FTParamsInternal();
+  const double &gain(unsigned row, unsigned col) const {return gains_[row*6 + col];}
+  double &gain(unsigned row, unsigned col) {return gains_[row*6 + col];}
+  const double &offset(unsigned ch_num) const {return offsets_[ch_num];}
+  double &offset(unsigned ch_num) {return offsets_[ch_num];}
+  
+  void print() const;
+
+protected:
+  double gains_[36];
+  double offsets_[6];
+};
 
 
 struct WG06StatusWithAccelAndFT
@@ -132,7 +149,8 @@ public:
   void construct(EtherCAT_SlaveHandler *sh, int &start_address);
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
-  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
+
+  virtual void multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsigned char *buffer);
   enum
   {
     PRODUCT_CODE = 6805006
@@ -144,10 +162,13 @@ private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
 
-  //! Unpack pressure sensor status from realtime data
   bool unpackPressure(WG06Pressure *p);
   bool unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status);
   bool unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status);
+
+  void diagnosticsWG06(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
+  void diagnosticsAccel(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer);
+  void diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06StatusWithAccelAndFT *status);
 
   //! True if device has accelerometer and force/torque sensor
   bool has_accel_and_ft_;  
@@ -169,9 +190,13 @@ private:
   uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
   pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
+  pr2_hardware_interface::AnalogIn ft_analog_in_;  //!< Provides F/T data to controllers
   //! Realtime Publisher of RAW F/T data 
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
+  realtime_tools::RealtimePublisher<geometry_msgs::Wrench> *ft_publisher_;
   //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
+  static bool getForceTorqueParams(FTParamsInternal &ft_params, ros::NodeHandle nh);
+  FTParamsInternal ft_params_;
 };
 
 #endif /* ETHERCAT_HARDWARE_WG06_H */
