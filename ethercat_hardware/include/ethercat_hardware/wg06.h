@@ -85,16 +85,24 @@ class FTParamsInternal
 {
 public:
   FTParamsInternal();
-  const double &gain(unsigned row, unsigned col) const {return gains_[row*6 + col];}
-  double &gain(unsigned row, unsigned col) {return gains_[row*6 + col];}
+
+  const double &calibration_coeff(unsigned row, unsigned col) const {return calibration_coeff_[row*6 + col];}
+  double &calibration_coeff(unsigned row, unsigned col) {return calibration_coeff_[row*6 + col];}
+
   const double &offset(unsigned ch_num) const {return offsets_[ch_num];}
   double &offset(unsigned ch_num) {return offsets_[ch_num];}
+
+  const double &gain(unsigned ch_num) const {return gains_[ch_num];}
+  double &gain(unsigned ch_num) {return gains_[ch_num];}
   
   void print() const;
 
+  bool getRosParams(ros::NodeHandle nh);
+  bool getDoubleArray(XmlRpc::XmlRpcValue params, const char* name, double *results, unsigned len);
 protected:
-  double gains_[36];
+  double calibration_coeff_[36];
   double offsets_[6];
+  double gains_[6];
 };
 
 
@@ -195,7 +203,6 @@ private:
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
   realtime_tools::RealtimePublisher<geometry_msgs::Wrench> *ft_publisher_;
   //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
-  static bool getForceTorqueParams(FTParamsInternal &ft_params, ros::NodeHandle nh);
   FTParamsInternal ft_params_;
 };
 

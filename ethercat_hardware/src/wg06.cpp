@@ -264,7 +264,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
         ft_analog_in_.state_.state_.resize(6);
         ros::NodeHandle nh("~" + string(actuator_.name_));
         FTParamsInternal ft_params;
-        if (getForceTorqueParams(ft_params, nh))
+        if ( ft_params.getRosParams(nh) )
         {
           ft_params_ = ft_params;
           ft_params_.print();
@@ -482,19 +482,34 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   }
 
   // perform offset and gains multiplication on raw data
+  // and then multiple by calibration matrix to get force and torque values.
+  // The calibration matrix is based on "raw"  deltaR/R values from strain gauges
+  //
+  // Force/Torque = Coeff * ADCVoltage
+  //
+  // Coeff = RawCoeff / ( ExcitationVoltage * AmplifierGain )
+  //       = RawCoeff / ( 2.5V * AmplifierGain )
+  //
+  // ADCVoltage = Vref / 2^16 
+  //            = 2.5 / 2^16
+  // 
+  // Force/Torque =  RawCalibrationCoeff / ( ExcitationVoltage * AmplifierGain ) * (ADCValues * 2.5V/2^16)
+  //              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
   {
     const FTDataSample &sample(status->ft_samples_[0]);
     double in[6];
     for (unsigned i=0; i<6; ++i)
     {
-      in[i] = double(sample.data_[i]) - ft_params_.offset(i);
+      // in = (adc_value - offset) / (gain * 2^16)
+      double tmp = double(sample.data_[i]) - ft_params_.offset(i);
+      in[i] = tmp / ( ft_params_.gain(i) * double(1<<16) );
     }
     for (unsigned i=0; i<6; ++i)
     {
       double sum=0.0;
       for (unsigned j=0; j<6; ++j)
       {
-        sum += in[i] * ft_params_.gain(i,j);
+        sum += in[i] * ft_params_.calibration_coeff(i,j);
       }
       ft_analog_in_.state_.state_[i] = sum;
     }
@@ -666,13 +681,15 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
 FTParamsInternal::FTParamsInternal()
 {
   // Initial offset = 0.0
-  // Gains = identity matrix
+  // Gains = 1.0 
+  // Calibration coeff = identity matrix
   for (int i=0; i<6; ++i)
   {
     offset(i) = 0.0;
+    gain(i) = 1.0;
     for (int j=0; j<6; ++j)
     {
-      gain(i,j) = (i==j) ? 1.0 : 0.0;
+      calibration_coeff(i,j) = (i==j) ? 1.0 : 0.0;
     }
   }
 }
@@ -686,11 +703,50 @@ void FTParamsInternal::print() const
   }
   for (int i=0; i<6; ++i)
   {
+    ROS_INFO("gain[%d] = %f", i, gain(i));
+  }
+  for (int i=0; i<6; ++i)
+  {
     ROS_INFO("gain[%d] = [%f,%f,%f,%f,%f,%f]", i, 
-             gain(i,0), gain(i,1), gain(i,2),
-             gain(i,3), gain(i,4), gain(i,5)
+             calibration_coeff(i,0), calibration_coeff(i,1), 
+             calibration_coeff(i,2), calibration_coeff(i,3), 
+             calibration_coeff(i,4), calibration_coeff(i,5)
              );
   }
+}
+
+
+bool FTParamsInternal::getDoubleArray(XmlRpc::XmlRpcValue params, const char* name, double *results, unsigned len)
+{
+  if(!params.hasMember(name))
+  {
+    ROS_ERROR("Expected ft_param to have '%s' element", name);
+    return false;
+  }
+
+  XmlRpc::XmlRpcValue values = params[name];
+  if (values.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  {
+    ROS_ERROR("Expected FT param '%s' to be list type", name);
+    return false;
+  }
+  if (values.size() != int(len))
+  {
+    ROS_ERROR("Expected FT param '%s' to have %d elements", name, len);
+    return false;
+  }
+  for (unsigned i=0; i<len; ++i)
+  {
+    if (values[i].getType() != XmlRpc::XmlRpcValue::TypeDouble)
+    {
+      ROS_ERROR("Expected FT param %s[%d] to be floating point type", name, i);
+      return false;
+    } else {
+      results[i] = static_cast<double>(values[i]);
+    }
+  }
+
+  return true;
 }
 
 
@@ -703,7 +759,7 @@ void FTParamsInternal::print() const
  *
  * \return True, if there are no problems.
  */
-bool WG06::getForceTorqueParams(FTParamsInternal &ft_params, ros::NodeHandle nh)
+bool FTParamsInternal::getRosParams(ros::NodeHandle nh)
 {
   if (!nh.hasParam("ft_params"))
   {
@@ -720,74 +776,50 @@ bool WG06::getForceTorqueParams(FTParamsInternal &ft_params, ros::NodeHandle nh)
     return false;
   }
 
-  if(!params.hasMember("offsets"))
+  if (!getDoubleArray(params, "offsets", offsets_, 6))
   {
-    ROS_ERROR("Expected ft_param to have 'offsets' element");
     return false;
   }
 
-  XmlRpc::XmlRpcValue offsets = params["offsets"];
-  if (offsets.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  if (!getDoubleArray(params, "gains", gains_, 6))
   {
-    ROS_ERROR("Expected FT param 'offsets' to be list type");
-    return false;
-  }
-  if (offsets.size() != 6)
-  {
-    ROS_ERROR("Expected FT param 'offsets' to have 6 elements");
-    return false;
-  }
-  for (int i=0; i<6; ++i)
-  {
-    if (offsets[i].getType() != XmlRpc::XmlRpcValue::TypeDouble)
-    {
-      ROS_ERROR("Expected FT param offsets[%d] to be floating point type", i);
-      return false;
-    } else {
-      ft_params.offset(i) = static_cast<double>(offsets[i]);
-    }
-  }
-
-  if(!params.hasMember("gains"))
-  {
-    ROS_ERROR("Expected ft_param to have 'gains' element");
     return false;
   }
 
-  XmlRpc::XmlRpcValue gain_matrix = params["gains"];
-  if (gain_matrix.getType() != XmlRpc::XmlRpcValue::TypeArray)
+  XmlRpc::XmlRpcValue coeff_matrix = params["calibration_coeff"];
+  if (coeff_matrix.getType() != XmlRpc::XmlRpcValue::TypeArray)
   {
-    ROS_ERROR("Expected FT param 'gains' to be list type");
+    ROS_ERROR("Expected FT param 'calibration_coeff' to be list type");
     return false;
   }
-  if (gain_matrix.size() != 6)
+  if (coeff_matrix.size() != 6)
   {
-    ROS_ERROR("Expected FT param 'gains' to have 6 elements");
+    ROS_ERROR("Expected FT param 'calibration_coeff' to have 6 elements");
     return false;
   }
 
   for (int i=0; i<6; ++i)
   {
-    XmlRpc::XmlRpcValue gain_row = gain_matrix[i];
-    if (gain_row.getType() != XmlRpc::XmlRpcValue::TypeArray)
+    XmlRpc::XmlRpcValue coeff_row = coeff_matrix[i];
+    if (coeff_row.getType() != XmlRpc::XmlRpcValue::TypeArray)
     {
-      ROS_ERROR("Expected FT param gains[%d] to be list type", i);
+      ROS_ERROR("Expected FT param calibration_coeff[%d] to be list type", i);
       return false;
     }
-    if (gain_row.size() != 6)
+    if (coeff_row.size() != 6)
     {
-      ROS_ERROR("Expected FT param gains[%d] to have 6 elements", i);
+      ROS_ERROR("Expected FT param calibration_coeff[%d] to have 6 elements", i);
       return false;
     }
     
     for (int j=0; j<6; ++j)
     {
-      if (gain_row[j].getType() != XmlRpc::XmlRpcValue::TypeDouble)
+      if (coeff_row[j].getType() != XmlRpc::XmlRpcValue::TypeDouble)
       {
-        ROS_ERROR("Expected FT param gains[%d,%d] to be floating point type", i,j);
+        ROS_ERROR("Expected FT param calibration_coeff[%d,%d] to be floating point type", i,j);
         return false;
       } else {
-        ft_params.gain(i,j) = static_cast<double>(gain_row[j]);
+        calibration_coeff(i,j) = static_cast<double>(coeff_row[j]);
       }
     }
   }
