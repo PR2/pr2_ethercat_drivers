@@ -192,6 +192,54 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
+
+/*!
+ * \brief  Verify CRC stored in actuator info structure 
+ *
+ * ActuatorInfo now constains two CRCs.
+ * Originally all devices had EEPROMS with 264 byte pages, and only crc264 was used.  
+ * However, support was need for EEPROM with 246 byte pages.
+ * To have backwards compatible support, there is also a CRC of first 252 (256-4) bytes.
+ *
+ * Devices configure in past will only have 264 byte EEPROM pages, and 264byte CRC.  
+ * Newer devices might have 256 or 264 byte pages.  
+ * The 264 byte EEPROMs will store both CRCs.  
+ * The 256 byte EEPROMs will only store the 256 byte CRC.
+ * 
+ * Thus:
+ *  - Old software will be able to use 264 byte EEPROM with new dual CRC.
+ *  - New software will be able to use 264 byte EEPROM with single 264 byte CRC
+ *  - Only new sofware will be able to use 256 byte EEPROM
+ *
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if CRC is good, false if CRC is invalid
+ */
+bool WG0XActuatorInfo::verifyCRC() const
+{
+  // Actuator info contains two 
+  BOOST_STATIC_ASSERT(sizeof(WG0XActuatorInfo) == 264);
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
+  boost::crc_32_type crc32_256, crc32_264;  
+  crc32_256.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_256_));
+  crc32_264.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_264_));
+  return ((this->crc32_264_ == crc32_264.checksum()) || (this->crc32_256_ == crc32_256.checksum()));
+}
+
+/*!
+ * \brief  Calculate CRC of structure and update crc32_256_ and crc32_264_ elements
+ */
+void WG0XActuatorInfo::generateCRC(void)
+{
+  boost::crc_32_type crc32;
+  crc32.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_256_));
+  this->crc32_256_ = crc32.checksum();
+  crc32.reset();
+  crc32.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_264_));
+  this->crc32_264_ = crc32.checksum();
+}
+
+
 WG0X::WG0X() :
   max_current_(0.0),
   too_many_dropped_packets_(false),
@@ -203,7 +251,8 @@ WG0X::WG0X() :
   last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL),
-  disable_motor_model_checking_(false)
+  disable_motor_model_checking_(false),
+  motor_heating_model_(NULL)
 {
 
   last_timestamp_ = 0;
@@ -236,7 +285,6 @@ WG0X::~WG0X()
 }
 
 
-
 void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
   EthercatDevice::construct(sh, start_address);
@@ -252,6 +300,29 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   // Instead make sub-classes handle this.
 }
 
+
+/**  \brief Fills in ethercat_hardware::ActuatorInfo from WG0XActuatorInfo
+ *
+ * WG0XAcuatorInfo is a packed structure that comes directly from the device EEPROM.
+ * ethercat_hardware::ActuatorInfo is a ROS message type that is used by both
+ * motor model and motor heating model. 
+ */
+void WG0X::copyActuatorInfo(ethercat_hardware::ActuatorInfo &out,  const WG0XActuatorInfo &in)
+{
+  out.id   = in.id_;
+  out.name = std::string(in.name_);
+  out.robot_name = in.robot_name_;
+  out.motor_make = in.motor_make_;
+  out.motor_model = in.motor_model_;
+  out.max_current = in.max_current_;
+  out.speed_constant = in.speed_constant_; 
+  out.motor_resistance  = in.resistance_;
+  out.motor_torque_constant = in.motor_torque_constant_;
+  out.encoder_reduction = in.encoder_reduction_;
+  out.pulses_per_revolution = in.pulses_per_revolution_;  
+}
+
+
 /**  \brief Allocates and initialized motor trace for WG0X devices than use it (WG006, WG005)
  */
 bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw, 
@@ -266,20 +337,8 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   motor_model_ = new MotorModel(1000);
   if (motor_model_ == NULL) 
     return false;
-  
-  WG0XActuatorInfo &ai_(actuator_info_);
-  ethercat_hardware::ActuatorInfo ai;
-  ai.id   = ai_.id_;
-  ai.name = std::string(ai_.name_);
-  ai.robot_name = ai_.robot_name_;
-  ai.motor_make = ai_.motor_make_;
-  ai.motor_model = ai_.motor_model_;
-  ai.max_current = ai_.max_current_;
-  ai.speed_constant = ai_.speed_constant_; 
-  ai.motor_resistance  = ai_.resistance_;
-  ai.motor_torque_constant = ai_.motor_torque_constant_;
-  ai.encoder_reduction = ai_.encoder_reduction_;
-  ai.pulses_per_revolution = ai_.pulses_per_revolution_;
+
+  const ethercat_hardware::ActuatorInfo &ai(actuator_info_msg_);
   
   unsigned product_code = sh_->get_product_code();
   ethercat_hardware::BoardInfo bi;
@@ -317,6 +376,68 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   return true;
 }
 
+
+
+
+bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
+{
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  ethercat_hardware::MotorHeatingModelParametersEepromConfig config;
+  if (!readMotorHeatingModelParametersFromEeprom(&com, config))
+  {
+    ROS_FATAL("Unable to read motor heating model config parameters from EEPROM");
+    return false;
+  }
+
+  // All devices need to have motor model heating model parameters stored in them...
+  // Even if device doesn't use paramers, they should be there.
+  if (!config.verifyCRC())
+  {
+    if (allow_unprogrammed)
+    {
+      ROS_WARN("EEPROM does not contain motor model parameters");
+      return true;
+    }
+    else 
+    {
+      ROS_FATAL("EEPROM does not contain motor model parameters");
+      // TODO: once there is ability to update motorconfig, this is will be a fatal error
+      return true;
+      //return false;
+    }
+  }
+
+  // Even though all devices should contain motor heating model parameters,
+  // The heating model does not need to be used.
+  if (config.enforce_ == 0)
+  {
+    return true;
+  }
+
+  // Don't need motor model if we are not using ROS (motorconf)
+  if (!use_ros_)
+  {
+    return true;
+  }
+
+  // 
+  motor_heating_model_ = new ethercat_hardware::MotorHeatingModel(config.params_, actuator_info_.name_);
+  if (motor_heating_model_ == NULL)
+  {
+    ROS_FATAL("Error allocating motor heating model");
+    return false;
+  }
+
+  // have motor heating model load last saved temperaures from filesystem
+  if (!motor_heating_model_->loadTemperatureState("/tmp"))
+  {
+    ROS_WARN("Could not load motor temperature state for %s", actuator_info_.name_);
+  }
+
+  return true;
+}
+
+
 int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
@@ -353,19 +474,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
   double board_max_current = double(config_info_.absolute_current_limit_) * config_info_.nominal_current_scale_;
 
-  if (readEeprom(&com) < 0)
+  if (!readActuatorInfoFromEeprom(&com, actuator_info_))
   {
     ROS_FATAL("Unable to read actuator info from EEPROM");
     return -1;
   }
-
-  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
-  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
-  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
-  boost::crc_32_type crc32_256, crc32_264;  
-  crc32_256.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_256_));
-  crc32_264.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_264_));
-  if ((actuator_info_.crc32_264_ == crc32_264.checksum()) || (actuator_info_.crc32_256_ == crc32_256.checksum()))
+  
+  if (actuator_info_.verifyCRC())
   {
     if (actuator_info_.major_ != 0 || actuator_info_.minor_ != 2)
     {
@@ -380,6 +495,15 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
     actuator_.name_ = actuator_info_.name_;
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
+
+    // Copy actuator info read from eeprom, into msg type
+    copyActuatorInfo(actuator_info_msg_, actuator_info_);
+
+    if (!initializeMotorHeatingModel(allow_unprogrammed))
+    {
+      return -1;
+    }
+
 
     bool isWG021 = sh_->get_product_code() == WG021_PRODUCT_CODE;
     if (!isWG021)
@@ -438,8 +562,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     ROS_WARN("WARNING: Device #%02d (%d%05d) is not programmed", 
              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
-    actuator_info_.crc32_264_ = 0;
-    actuator_info_.crc32_256_ = 0;
+    //actuator_info_.crc32_264_ = 0;
+    //actuator_info_.crc32_256_ = 0;
 
     max_current_ = board_max_current;
   }
@@ -642,6 +766,18 @@ double WG0X::calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp,
 }
 
 
+/**
+ * \brief  Converts raw 16bit temperature value returned by device into value in degress Celcius
+ * 
+ * \param raw_temp  Raw 16bit temperature value return by device
+ * \return          Temperature in degrees Celcius
+ */
+double WG0X::convertRawTemperature(int16_t raw_temp)
+{
+  return 0.0078125 * double(raw_temp);
+}
+
+
 // Returns true if timestamp changed by more than (amount) or time goes in reverse.
 bool WG0X::timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount)
 {
@@ -654,8 +790,9 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   bool rv = true;
 
-  if (motor_model_ != NULL) {
-    // Collect data for motor model
+  if ((motor_model_ != NULL) || (motor_heating_model_ != NULL))
+  {
+    // Both motor model and motor heating model use MotorTraceSample
     ethercat_hardware::MotorTraceSample &s(motor_trace_sample_);
     double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
     double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
@@ -670,8 +807,19 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     s.velocity         = state.velocity_;
     s.encoder_position = state.position_;
     s.encoder_error_count = state.num_encoder_errors_;
-    motor_model_->sample(s);
-    motor_model_->checkPublish();
+
+    if (motor_model_ != NULL)
+    {
+      // Collect data for motor model
+      motor_model_->sample(s);
+      motor_model_->checkPublish();
+    }
+    if (motor_heating_model_ != NULL)
+    {
+      double ambient_temperature = convertRawTemperature(this_status->board_temperature_);
+      double duration = double(timestampDiff(this_status->timestamp_, prev_status->timestamp_)) * 1e-6;
+      motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration);
+    }
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
@@ -864,107 +1012,449 @@ bool WG0X::readAppRam(EthercatCom *com, double &zero_offset)
   return true;
 }
 
-int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
+
+/*!
+ * \brief  Waits for SPI eeprom state machine to be idle.
+ *
+ * Polls busy SPI bit of SPI state machine. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if state machine is free, false if there is an error, or we timed out waiting
+ */
+bool WG0X::waitForSpiEepromReady(EthercatCom *com)
 {
-  // Send command
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, cmd, sizeof(*cmd)))
+  WG0XSpiEepromCmd cmd;
+  // TODO : poll for a given number of millseconds instead of a given number of cycles
+  //start_time = 0;
+  unsigned tries = 0;
+  do {
+    //read_time = time;
+    ++tries;
+    if (!readSpiEepromCmd(com, cmd))
+    {
+      ROS_ERROR("Error reading SPI Eeprom Cmd busy bit");
+      return false;
+    }
+
+    if (!cmd.busy_) 
+    {
+      return true;
+    }       
+    
+    usleep(100);
+  } while (tries <= 10);
+
+  ROS_ERROR("Timed out waiting for SPI state machine to be idle (%d)", tries);
+  return false;
+}
+
+
+/*!
+ * \brief  Sends command to SPI EEPROM state machine.   
+ *
+ * This function makes sure SPI EEPROM state machine is idle before sending new command.
+ * It also waits for state machine to be idle before returning.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if command was send, false if there is an error
+ */
+bool WG0X::sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd)
+{
+  if (!waitForSpiEepromReady(com))
   {
-    fprintf(stderr, "ERROR WRITING EEPROM COMMAND\n");
-    return -1;
+    return false;
   }
 
-  for (int tries = 0; tries < 10; ++tries)
+  // Send command
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
   {
-    WG0XSpiEepromCmd stat;
-    if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &stat, sizeof(stat)))
+    ROS_ERROR("Error writing SPI EEPROM command");
+    return false;
+  }
+
+  // Now read back SPI EEPROM state machine register, and check : 
+  //  1. for state machine to become ready
+  //  2. that command data was properly write and not corrupted
+  WG0XSpiEepromCmd stat;
+  unsigned tries = 0;
+  do
+  {
+    if (!readSpiEepromCmd(com, stat))
     {
-      fprintf(stderr, "ERROR READING EEPROM BUSY STATUS\n");
-      return -1;
+      return false;
     }
 
-    if (stat.operation_ != cmd->operation_)
+    if (stat.operation_ != cmd.operation_)
     {
-      fprintf(stderr, "READBACK OF OPERATION INVALID : got 0x%X, expected 0x%X\n", stat.operation_, cmd->operation_);
-      return -1;
+      ROS_ERROR("Invalid readback of SPI EEPROM operation : got 0x%X, expected 0x%X\n", stat.operation_, cmd.operation_);
+      return false;
     }
 
-    // Keep looping while SPI command is running
+    // return true if command has completed
     if (!stat.busy_)
     {
-      return 0;
+      if (tries > 0) 
+      {
+        ROS_WARN("Eeprom state machine took %d cycles", tries);
+      }
+      return true;;
     }
 
     fprintf(stderr, "eeprom busy reading again, waiting...\n");
     usleep(100);
-  }
+  } while (++tries < 10);
 
-  fprintf(stderr, "ERROR : EEPROM READING BUSY AFTER 10 TRIES\n");
-  return -1;
+  ROS_ERROR("Eeprom SPI state machine busy after %d cycles", tries);
+  return false;
 }
 
-int WG0X::readEeprom(EthercatCom *com)
+
+/*!
+ * \brief  Read data from single eeprom page. 
+ *
+ * Data should be less than 264 bytes.  Note that some eeproms only support 256 byte pages.  
+ * If 264 bytes of data are read from a 256 byte eeprom, then last 8 bytes of data will be zeros.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param page      EEPROM page number to read from.  Should be 0 to 4095.
+ * \param data      pointer to data buffer
+ * \param length    length of data in buffer
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length)
 {
-  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
+  if (length > MAX_EEPROM_PAGE_SIZE)
+  {
+    ROS_ERROR("Eeprom read length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
+    return false;
+  }
+
+  if (page >= NUM_EEPROM_PAGES)
+  {
+    ROS_ERROR("Eeprom read page %d > %d", page, NUM_EEPROM_PAGES-1);
+    return false;
+  }
 
   // Since we don't know the size of the eeprom there is not always 264 bytes available.
   // This may try to read 264 bytes, but only the first 256 bytes may be valid.  
-  // To any odd issue, zero out read buffer before asking for eeprom data.
-  memset(&actuator_info_,0,sizeof(actuator_info_));  
+  // To avoid any odd issue, zero out FPGA buffer before asking for eeprom data.
+  memset(data,0,length);  
   if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) 
   {
-    fprintf(stderr, "ERROR ZEROING EEPROM PAGE DATA\n");
-    return -1;
+    ROS_ERROR("Error zeroing eeprom data buffer");
+    return false;
   }
 
+  // Send command to SPI state machine to perform read of eeprom, 
+  // sendSpiEepromCmd will automatically wait for SPI state machine 
+  // to be idle before a new command is sent
   WG0XSpiEepromCmd cmd;
   memset(&cmd,0,sizeof(cmd));
-  cmd.build_read(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(com, &cmd)) {
-    fprintf(stderr, "ERROR SENDING SPI EEPROM READ COMMAND\n");
-    return -1;
-  }
-  // Read buffered data in multiple chunks
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) {
-    fprintf(stderr, "ERROR READING BUFFERED EEPROM PAGE DATA\n");
-    return -1;
+  cmd.build_read(page);
+  if (!sendSpiEepromCmd(com, cmd)) 
+  {
+    ROS_ERROR("Error sending SPI read command");
+    return false;
   }
 
-  return 0;
+  // Wait for SPI Eeprom Read to complete
+  // sendSPICommand will wait for Command to finish before returning
 
+  // Read eeprom page data from FPGA buffer
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, length)) 
+  {
+    ROS_ERROR("Error reading eeprom data from buffer");
+    return false;
+  }
+
+  return true;
 }
 
-void WG0X::program(WG0XActuatorInfo *info)
+
+/*!
+ * \brief  Reads actuator info from eeprom.  
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param acuator_info Structure where actuator info will be stored.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuator_info)
 {
-  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  BOOST_STATIC_ASSERT(sizeof(actuator_info) == 264);
 
-  writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, info, sizeof(WG0XActuatorInfo));
+  if (!readEepromPage(com, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
+  {
+    ROS_ERROR("Reading acutuator info from eeprom");
+    return false;
+  }
+  return true;
+}
+ 
+/*!
+ * \brief  Reads actuator info from eeprom.  
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param acuator_info Structure where actuator info will be stored.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeatingModelParametersEepromConfig &config)
+{
+  BOOST_STATIC_ASSERT(sizeof(config) == 256);
+
+  if (!readEepromPage(com, config.EEPROM_PAGE, &config, sizeof(config)))
+  {
+    ROS_ERROR("Reading motor heating model config from eeprom");
+    return false;
+  }
+  return true;
+}
+
+
+
+/*!
+ * \brief  Write data to single eeprom page. 
+ *
+ * Data should be less than 264 bytes.  If data size is less than 264 bytes, then 
+ * the page will be padded with 0xFF.  Note that some eeproms only support 256 byte
+ * pages.  With 256 byte eeproms, the eeprom FW with ingore last 8 bytes of requested write.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param page      EEPROM page number to write to.  Should be 0 to 4095.
+ * \param data      pointer to data buffer
+ * \param length    length of data in buffer.  If length < 264, eeprom page will be padded out to 264 bytes.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length)
+{
+  if (length > 264)
+  {
+    ROS_ERROR("Eeprom write length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
+    return false;
+  }
+
+  if (page >= NUM_EEPROM_PAGES)
+  {
+    ROS_ERROR("Eeprom write page %d > %d", page, NUM_EEPROM_PAGES-1);
+    return false;
+  }
+
+  // wait for eeprom to be ready before write data into FPGA buffer
+  if (!waitForSpiEepromReady(com))
+  {
+    return false;
+  }
+
+  const void *write_buf = data;
+
+  // if needed, pad data to 264 byte in buf
+  uint8_t buf[MAX_EEPROM_PAGE_SIZE];
+  if (length < MAX_EEPROM_PAGE_SIZE)
+  {
+    memcpy(buf, data, length);
+    memset(buf+length, 0xFF, MAX_EEPROM_PAGE_SIZE-length);
+    write_buf = buf;    
+  }
+
+  // Write data to FPGA buffer
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, write_buf, MAX_EEPROM_PAGE_SIZE))
+  {
+    ROS_ERROR("Write of SPI EEPROM buffer failed");
+    return false;
+  }
+
+  // Have SPI EEPROM state machine start SPI data transfer
   WG0XSpiEepromCmd cmd;
-  cmd.build_write(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(&com, &cmd)) {
-    fprintf(stderr, "ERROR SENDING SPI EEPROM WRITE COMMAND\n");
+  cmd.build_write(page);
+  if (!sendSpiEepromCmd(com, cmd)) 
+  {
+    ROS_ERROR("Error giving SPI EEPROM write command");
+    return false;
   }
 
-  char data[2];
-  memset(data, 0, sizeof(data));
-  data[0] = 0xD7;
-
-  if (writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
-    fprintf(stderr, "ERROR WRITING EEPROM COMMAND BUFFER\n");
+  // Wait for EEPROM write to complete
+  if (!waitForEepromReady(com))
+  {
+    return false;
   }
 
+  return true;
+}
 
-  { // Start arbitrary command
+
+/*!
+ * \brief  Waits for EEPROM to become ready
+ *
+ * Certain eeprom operations (such as page reads), are complete immediately after data is 
+ * trasferred.  Other operations (such as page writes) take some amount of time after data
+ * is trasfered to complete.  This polls the EEPROM status register until the 'ready' bit 
+ * is set.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if there is success, false if there is an error or wait takes too long
+ */
+bool WG0X::waitForEepromReady(EthercatCom *com)
+{
+  // Wait for eeprom write to complete
+  unsigned tries = 0;
+  EepromStatusReg status_reg;
+  do {
+    if (!readEepromStatusReg(com, status_reg))
+    {
+      return false;
+    }
+    if (status_reg.ready_)
+    {
+      break;
+    }
+    usleep(100);
+  } while (++tries < 20);
+
+  if (!status_reg.ready_) 
+  {
+    ROS_ERROR("Eeprom still busy after %d cycles", tries);
+    return false;
+  } 
+
+  if (tries > 10)
+  {
+    ROS_WARN("EEPROM took %d cycles to be ready", tries);
+  }
+  return true;
+}
+
+
+
+/*!
+ * \brief  Reads EEPROM status register
+ *
+ * Amoung other things, eeprom status register provide information about whether eeprom 
+ * is busy performing a write.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param reg       reference to EepromStatusReg struct where eeprom status will be stored
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg)
+{
+  // Status is read from EEPROM by having SPI state machine perform an "abitrary" operation.
+  // With an arbitrary operation, the SPI state machine shifts out byte from buffer, while
+  // storing byte shifted in from device into same location in buffer.
+  // SPI state machine has no idea what command it is sending device or how to intpret its result.
+
+  // To read eeprom status register, we transfer 2 bytes.  The first byte is the read status register 
+  // command value (0xD7).  When transfering the second byte, the EEPROM should send its status.
+  char data[2] = {0xD7, 0x00};
+  BOOST_STATIC_ASSERT(sizeof(data) == 2);
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
+  {
+    ROS_ERROR("Writing SPI buffer");
+    return false;
+  }
+    
+  { // Have SPI state machine trasfer 2 bytes
     WG0XSpiEepromCmd cmd;
     cmd.build_arbitrary(sizeof(data));
-    if (sendSpiCommand(&com, &cmd)) {
-      fprintf(stderr, "reading eeprom status failed");
+    if (!sendSpiEepromCmd(com, cmd)) 
+    {
+      ROS_ERROR("Sending SPI abitrary command");
+      return false;
     }
   }
-
-
-  if (readMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
-    fprintf(stderr, "ERROR READING EEPROM COMMAND BUFFER\n");
+    
+  // Data read from device should now be stored in FPGA buffer
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
+  {
+    ROS_ERROR("Reading status register data from SPI buffer");
+    return false;
   }
+ 
+  // Status register would be second byte of buffer
+  reg.raw_ = data[1];
+  return true;
+}
+
+
+/*!
+ * \brief  Reads SPI state machine command register
+ *
+ * For communicating with EEPROM, there is a simple state machine that transfers
+ * data to/from FPGA buffer over SPI.  
+ * When any type of comunication is done with EEPROM:
+ *  1. Write command or write data into FPGA buffer.
+ *  2. Have state machine start transfer bytes from buffer to EEPROM, and write data from EEPROM into buffer
+ *  3. Wait for state machine to complete (by reading its status)
+ *  4. Read EEPROM response from FPGA buffer.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param reg       reference to WG0XSpiEepromCmd struct where read data will be stored
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
+{
+  BOOST_STATIC_ASSERT(sizeof(WG0XSpiEepromCmd) == 3);
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
+  {
+    ROS_ERROR("Reading SPI command register with mailbox");
+    return false;
+  }
+  
+  return true;
+}
+
+
+/*!
+ * \brief  Programs acutator and heating parameters into device EEPROM.
+ *
+ * WG0X devices store configuaration info in EEPROM.  This configuration information contains
+ * information such as device name, motor parameters, and encoder parameters.  
+ *
+ * Originally, devices only stored ActuatorInfo in EEPROM.
+ * However, later we discovered that in extreme cases, certain motors may overheat.  
+ * To prevent motor overheating, a model is used to estimate motor winding temperature
+ * and stop motor if temperature gets too high.  
+ * However, the new motor heating model needs more motor parameters than were originally stored
+ * in eeprom. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param actutor_info  Actuator information to be stored in device EEPROM
+ * \param actutor_info  Motor heating motor information to be stored in device EEPROM
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
+{
+  if (!writeEepromPage(com, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
+  {
+    ROS_ERROR("Writing actuator infomation to EEPROM");
+    return false;
+  }
+  
+  return true;
+}
+
+
+/*!
+ * \brief  Programs motor heating parameters into device EEPROM.
+ *
+ * Originally, devices only stored ActuatorInfo in EEPROM.
+ * However, later we discovered that in extreme cases, certain motors may overheat.  
+ * To prevent motor overheating, a model is used to estimate motor winding temperature
+ * and stop motor if temperature gets too high.  
+ * However, the new motor heating model needs more motor parameters than were originally stored
+ * in eeprom. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param heating_config  Motor heating model parameters to be stored in device EEPROM
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::program(EthercatCom *com, const ethercat_hardware::MotorHeatingModelParametersEepromConfig &heating_config)
+{
+  if (!writeEepromPage(com, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
+  {
+    ROS_ERROR("Writing motor heating model configuration to EEPROM");
+    return false;
+  }
+  
+  return true;  
 }
 
 /*!
@@ -2115,6 +2605,11 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     {
       d.mergeSummaryf(d.WARN, "Motor model disabled");      
     }
+  }
+
+  if (motor_heating_model_ != NULL)
+  {
+    motor_heating_model_->diagnostics(d);
   }
 
   if (last_num_encoder_errors_ != status->num_encoder_errors_)

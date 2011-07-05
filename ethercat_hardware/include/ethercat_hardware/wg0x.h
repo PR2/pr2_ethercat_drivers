@@ -32,14 +32,15 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#ifndef WG0X_H
-#define WG0X_H
+#ifndef ETHERCAT_HARDWARE__WG0X_H
+#define ETHERCAT_HARDWARE__WG0X_H
 
-#include <ethercat_hardware/ethercat_device.h>
-#include <ethercat_hardware/motor_model.h>
+#include "ethercat_hardware/ethercat_device.h"
+#include "ethercat_hardware/motor_model.h"
+#include "ethercat_hardware/motor_heating_model.h"
+#include "realtime_tools/realtime_publisher.h"
 
-#include <realtime_tools/realtime_publisher.h>
-
+using namespace ethercat_hardware;
 
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
 
@@ -114,6 +115,22 @@ struct WG0XSpiEepromCmd
   static const unsigned SPI_COMMAND_ADDR = 0x0230;
   static const unsigned SPI_BUFFER_ADDR = 0xF400;
 }__attribute__ ((__packed__));
+
+
+
+struct EepromStatusReg 
+{
+  union {
+    uint8_t raw_;
+    struct {
+      uint8_t page_size_     : 1; 
+      uint8_t write_protect_ : 1;
+      uint8_t eeprom_size_   : 4;
+      uint8_t compare_       : 1;
+      uint8_t ready_         : 1;
+    } __attribute__ ((__packed__));
+  } __attribute__ ((__packed__));
+} __attribute__ ((__packed__));
 
 
 // Syncmanger control register 0x804+N*8
@@ -315,6 +332,9 @@ struct WG0XActuatorInfo
   uint32_t crc32_256_;          // CRC32 of first 256-4 bytes. (minus 4 bytes for first CRC)
   uint8_t pad2[4];              // Pad structure to 264-4 bytes
   uint32_t crc32_264_;          // CRC32 over entire structure (minus 4 bytes for second CRC)
+
+  bool verifyCRC(void) const;
+  void generateCRC(void);
 };
 
 struct WG0XStatus
@@ -403,8 +423,11 @@ public:
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
 
+  bool program(EthercatCom *com, const WG0XActuatorInfo &actutor_info);
+  bool program(EthercatCom *com, const MotorHeatingModelParametersEepromConfig &heating_config);
 
-  void program(WG0XActuatorInfo *);
+  bool readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuator_info);
+  bool readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeatingModelParametersEepromConfig &config);
 
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   virtual void collectDiagnostics(EthercatCom *com);
@@ -420,6 +443,9 @@ protected:
   WG0XActuatorInfo actuator_info_;
   WG0XConfigInfo config_info_;
   double max_current_;         //!< min(board current limit, actuator current limit)
+
+  ethercat_hardware::ActuatorInfo actuator_info_msg_; 
+  static void copyActuatorInfo(ethercat_hardware::ActuatorInfo &out,  const WG0XActuatorInfo &in);
 
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
@@ -480,9 +506,6 @@ protected:
   bool writeAppRam(EthercatCom *com, double zero_offset);
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
-  int readEeprom(EthercatCom *com);
-  int writeEeprom(EthercatCom *com);
-  int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
 
   int writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length);
   int readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length);  
@@ -495,6 +518,8 @@ protected:
                             double max_pwm_ratio, 
                             double board_resistance,
                             bool poor_measured_motor_voltage);
+
+  bool initializeMotorHeatingModel(bool allow_unprogrammed);
 
   bool verifyChecksum(const void* buffer, unsigned size);
   static bool timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount);
@@ -522,6 +547,17 @@ protected:
   bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
   void diagnoseMailboxError(EthercatCom *com);
 
+  // SPI Eeprom State machine helper functions
+  bool readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd);
+  bool sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd);
+  bool waitForSpiEepromReady(EthercatCom *com);
+
+  // Eeprom helper functions
+  bool readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg);
+  bool waitForEepromReady(EthercatCom *com);
+  bool readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length);
+  bool writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length);  
+  
 
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
@@ -556,14 +592,18 @@ protected:
 
   // Board configuration parameters
 
-  static const int ACTUATOR_INFO_PAGE = 4095;
+  static const unsigned ACTUATOR_INFO_PAGE = 4095;
+  static const unsigned NUM_EEPROM_PAGES   = 4096;
+  static const unsigned MAX_EEPROM_PAGE_SIZE = 264;
 
-
-  // Not all devices will need this (WG021) 
+  // Not all devices will need this (WG021 won't) 
   MotorModel *motor_model_; 
   bool disable_motor_model_checking_;
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
+
+  // Only device with motor heating paramereters store in eeprom config will use this
+  ethercat_hardware::MotorHeatingModel *motor_heating_model_;
 
   // Diagnostic message values
   uint32_t last_timestamp_;
@@ -590,7 +630,9 @@ public:
 
   static unsigned computeChecksum(void const *data, unsigned length);
   static unsigned int rotateRight8(unsigned in);
+
+  static double convertRawTemperature(int16_t raw_temp);
 };
 
 
-#endif /* WG0X_H */
+#endif // ETHERCAT_HARDWARE__WG0X_H

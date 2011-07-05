@@ -496,20 +496,25 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   // Force/Torque =  RawCalibrationCoeff / ( ExcitationVoltage * AmplifierGain ) * (ADCValues * 2.5V/2^16)
   //              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
   {
-    const FTDataSample &sample(status->ft_samples_[0]);
     double in[6];
     for (unsigned i=0; i<6; ++i)
     {
-      // in = (adc_value - offset) / (gain * 2^16)
-      double tmp = double(sample.data_[i]) - ft_params_.offset(i);
-      in[i] = tmp / ( ft_params_.gain(i) * double(1<<16) );
+      // Take average of last 3 samples to get better noise performance
+      static const unsigned AVG_WINDOW_LEN = 3;
+      double sum = 0.0;
+      for (unsigned j=0; j<AVG_WINDOW_LEN; ++j)
+      { 
+        sum += double(status->ft_samples_[j].data_[i]);
+      }
+      double avg = sum / double(AVG_WINDOW_LEN);
+      in[i] = (avg - ft_params_.offset(i)) / ( ft_params_.gain(i) * double(1<<16) );
     }
     for (unsigned i=0; i<6; ++i)
     {
       double sum=0.0;
       for (unsigned j=0; j<6; ++j)
       {
-        sum += in[i] * ft_params_.calibration_coeff(i,j);
+        sum += ft_params_.calibration_coeff(i,j) * in[j];
       }
       ft_analog_in_.state_.state_[i] = sum;
     }
@@ -545,10 +550,16 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
     raw_ft_publisher_->unlockAndPublish();
   }
 
-  if ((ft_publisher_ != NULL))
+  if ( (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
-    
-
+    geometry_msgs::Wrench &msg(ft_publisher_->msg_);
+    msg.force.x = ft_analog_in_.state_.state_[0];
+    msg.force.y = ft_analog_in_.state_.state_[1];
+    msg.force.z = ft_analog_in_.state_.state_[2];
+    msg.torque.x = ft_analog_in_.state_.state_[3];
+    msg.torque.y = ft_analog_in_.state_.state_[4];
+    msg.torque.z = ft_analog_in_.state_.state_[5];
+    ft_publisher_->unlockAndPublish();
   }
 
   return true;
@@ -707,7 +718,7 @@ void FTParamsInternal::print() const
   }
   for (int i=0; i<6; ++i)
   {
-    ROS_INFO("gain[%d] = [%f,%f,%f,%f,%f,%f]", i, 
+    ROS_INFO("coeff[%d] = [%f,%f,%f,%f,%f,%f]", i, 
              calibration_coeff(i,0), calibration_coeff(i,1), 
              calibration_coeff(i,2), calibration_coeff(i,3), 
              calibration_coeff(i,4), calibration_coeff(i,5)
@@ -826,3 +837,7 @@ bool FTParamsInternal::getRosParams(ros::NodeHandle nh)
 
   return true;
 }
+
+
+const unsigned WG06::NUM_FT_CHANNELS;
+const unsigned WG06::MAX_FT_SAMPLES;

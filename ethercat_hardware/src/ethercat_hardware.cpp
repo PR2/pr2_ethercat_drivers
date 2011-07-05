@@ -269,7 +269,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
       EtherCAT_SlaveHandler *sh = slaves_[slave]->sh_;
       if (sh != NULL)
       {
-        ROS_FATAL("Unable to initialize slave #%d, , product code: %d, revision: %d, serial: %d",
+        ROS_FATAL("Unable to initialize slave #%d, product code: %d, revision: %d, serial: %d",
                   slave, sh->get_product_code(), sh->get_revision(), sh->get_serial());
         sleep(1);
       } 

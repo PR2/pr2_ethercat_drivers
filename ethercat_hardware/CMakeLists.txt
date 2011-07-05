@@ -10,12 +10,12 @@ add_definitions(-Wall)
 rosbuild_add_library(
   ethercat_hardware src/ethercat_hardware.cpp src/ethercat_com.cpp src/ethercat_device.cpp 
   src/wg0x.cpp src/wg05.cpp src/wg06.cpp src/wg021.cpp src/ek1122.cpp src/wg014.cpp 
-  src/motor_model.cpp src/ethernet_interface_info.cpp)
+  src/motor_model.cpp src/ethernet_interface_info.cpp src/motor_heating_model.cpp)
 
 rosbuild_add_executable(motorconf 
   src/motorconf.cpp src/ethercat_hardware.cpp src/ethercat_com.cpp src/ethercat_device.cpp 
   src/wg0x.cpp src/wg05.cpp src/wg06.cpp src/wg021.cpp src/ek1122.cpp src/wg014.cpp 
-  src/motor_model.cpp src/ethernet_interface_info.cpp)
+  src/motor_model.cpp src/ethernet_interface_info.cpp src/motor_heating_model.cpp)
 target_link_libraries(motorconf rt)
 rosbuild_link_boost (motorconf system)
 
