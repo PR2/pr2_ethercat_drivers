@@ -63,15 +63,18 @@ void MotorHeatingModelParametersEepromConfig::generateCRC(void)
 
 MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                                      const std::string &actuator_name) :
+  diag_cycles_since_last_save_(0),
   overheat_(false),
   publisher_(NULL),
   motor_params_(motor_params),
   actuator_name_(actuator_name)
 {
   // Ideally, winding and housing temperature will be loading from save file later.  
-  // For now assume temperature starts at max
-  winding_temperature_ = motor_params_.max_winding_temperature_;
-  housing_temperature_ = motor_params_.max_winding_temperature_;
+  // For now assume temperature starts at default ambient temperature
+  static const double default_ambient_temperature = 60.0;
+  winding_temperature_ = default_ambient_temperature;
+  housing_temperature_ = default_ambient_temperature;
+  ambient_temperature_ = default_ambient_temperature;
 
   // Calculate internal parameters from motor parameters
   winding_to_housing_thermal_conductance_ = 1.0 / motor_params_.winding_to_housing_thermal_resistance_;
@@ -165,6 +168,7 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   double ambient_temperature_sum;
   double heating_energy_sum;
   double duration_since_last_sample;
+  double average_ambient_temperature;
   {
     // TODO LOCK
     overheat = overheat_;
@@ -174,12 +178,21 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     heating_energy_sum  = heating_energy_sum_;
     duration_since_last_sample = duration_since_last_sample_;
 
+    if (duration_since_last_sample > 0.0)
+    {
+      average_ambient_temperature = ambient_temperature_sum / duration_since_last_sample;
+      ambient_temperature_ = average_ambient_temperature;
+    }
+    else 
+    {
+      average_ambient_temperature = ambient_temperature_;
+    }
+    
     ambient_temperature_sum_ = 0.0;
     heating_energy_sum  = 0.0;
     duration_since_last_sample_ = 0.0;
   }
 
-  double average_ambient_temperature = ambient_temperature_sum / duration_since_last_sample;
   double average_heating_power       = heating_energy_sum / duration_since_last_sample;
 
   const int ERROR = 2;
@@ -219,6 +232,13 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     // publish sample
     publisher_->unlockAndPublish();
   }
+
+  if (++diag_cycles_since_last_save_ > 10)
+  {
+    diag_cycles_since_last_save_ = 0;
+    saveTemperatureState("/tmp");
+  }
+
 }
 
 
@@ -365,9 +385,55 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
   // Update stored temperatures
   winding_temperature_ = winding_temperature;
   housing_temperature_ = housing_temperature;
+  ambient_temperature_ = ambient_temperature;
 
   return true;
 }
+
+
+
+
+
+bool MotorHeatingModel::saveTemperatureState(const char* directory_path)
+{
+  /*
+   * This will first generate new XML data into temp file, then rename temp file to final filename
+   *
+   */
+
+  ROS_WARN("saving motor heating model state");
+
+  std::string filename = genMotorHeatingModelSaveFilename(directory_path);
+  std::string tmp_filename = filename + ".tmp";
+
+  double winding_temperature;
+  double housing_temperature;
+  double ambient_temperature;
+  {
+    // TODO : lock
+    winding_temperature = winding_temperature_;
+    housing_temperature = housing_temperature_;
+    ambient_temperature = ambient_temperature_;
+  }
+
+  TiXmlDocument xml(filename);
+  TiXmlDeclaration *decl = new TiXmlDeclaration( "1.0", "", "" );
+  TiXmlElement *elmt = new TiXmlElement("motor_heating_model");
+  elmt->SetAttribute("version", "1");
+  elmt->SetAttribute("actuator_name", actuator_name_);
+  elmt->SetDoubleAttribute("winding_temperature", winding_temperature);
+  elmt->SetDoubleAttribute("housing_temperature", housing_temperature);
+  elmt->SetDoubleAttribute("ambient_temperature", ambient_temperature);
+  elmt->SetDoubleAttribute("time", ros::Time::now().toSec() );
+
+  xml.LinkEndChild(decl);
+  xml.LinkEndChild( elmt );
+
+  xml.SaveFile(tmp_filename);
+
+  return true;
+}
+
 
 
 std::string MotorHeatingModel::genMotorHeatingModelSaveFilename(const char* directory_path) const

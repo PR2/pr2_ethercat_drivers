@@ -164,7 +164,7 @@ public:
 
 protected:
   // Following values are calculated from motor parameters.  
-  // They are more useful wht peforming motor model calculations
+  // They are more useful when peforming motor model calculations
   // 
   // Thermal is conducance amount of heat power tranfered for a 
   // given temperature differential
@@ -190,7 +190,11 @@ protected:
   double winding_temperature_;
   //! Temperature estimate of motor housing : in Celcius
   double housing_temperature_;
+  //! Last recorded ambient temperature : in Celcius
+  double ambient_temperature_;
 
+  //! Diagnostics cycles since last save
+  unsigned diag_cycles_since_last_save_;
 
   //! True if most has overheat, once set, will only clear when reset() is called
   bool overheat_;
