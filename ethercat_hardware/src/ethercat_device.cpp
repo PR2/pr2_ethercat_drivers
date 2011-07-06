@@ -34,6 +34,8 @@
 
 #include "ethercat_hardware/ethercat_device.h"
 
+#include <tinyxml/tinyxml.h>
+
 #include <dll/ethercat_device_addressed_telegram.h>
 #include <dll/ethercat_logical_addressed_telegram.h>
 #include <dll/ethercat_frame.h>

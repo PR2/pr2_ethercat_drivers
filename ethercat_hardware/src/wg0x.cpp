@@ -295,7 +295,7 @@ void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
   board_minor_ = (sh->get_revision() >> 16) & 0xff;
 
-  // Would normally configure EtherCAT intialize EtherCAT communication settings here.
+  // Would normally configure EtherCAT initialize EtherCAT communication settings here.
   // However, since all WG devices are slightly different doesn't make sense to do it here.
   // Instead make sub-classes handle this.
 }

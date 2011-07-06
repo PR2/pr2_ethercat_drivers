@@ -37,7 +37,6 @@
 
 #include <vector>
 
-#include <tinyxml/tinyxml.h>
 
 #include <ethercat/ethercat_defs.h>
 #include <al/ethercat_slave_handler.h>

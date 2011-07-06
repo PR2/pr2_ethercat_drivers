@@ -207,6 +207,9 @@ protected:
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature> *publisher_;
 
 
+  std::string genMotorHeatingModelSaveFilename(const char* directory_path) const;
+
+
   MotorHeatingModelParameters motor_params_;
   std::string actuator_name_;
 };

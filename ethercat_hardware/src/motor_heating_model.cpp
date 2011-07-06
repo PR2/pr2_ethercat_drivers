@@ -35,6 +35,10 @@
 #include "ethercat_hardware/motor_heating_model.h"
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
+#include <boost/filesystem.hpp>
+
+// Use XML format when saving or loading XML file
+#include <tinyxml/tinyxml.h>
 
 namespace ethercat_hardware
 {
@@ -59,6 +63,7 @@ void MotorHeatingModelParametersEepromConfig::generateCRC(void)
 
 MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                                      const std::string &actuator_name) :
+  overheat_(false),
   publisher_(NULL),
   motor_params_(motor_params),
   actuator_name_(actuator_name)
@@ -192,7 +197,7 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     d.mergeSummary(WARN, "Motor hot");
   }
   
-  d.addf("Max motor winding temp (C)", "%f", motor_params_.max_winding_temperature_);
+  d.addf("Motor winding temp limit (C)", "%f", motor_params_.max_winding_temperature_);
   d.addf("Motor winding temp (C)", "%f", winding_temperature);
   d.addf("Motor housing temp (C)", "%f", housing_temperature);
 
@@ -218,10 +223,157 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
 
 
 
+static bool getStringAttribute(TiXmlElement *elt, const std::string& filename, const char* param_name, std::string &value)
+{
+  const char *val_str = elt->Attribute(param_name);
+  if (val_str == NULL)
+  {
+    ROS_ERROR("No '%s' attribute for actuator '%s'", param_name, filename.c_str());
+    return false;
+  }
+  value = val_str;
+  return true;
+}
+
+
+static bool getDoubleAttribute(TiXmlElement *elt, const std::string& filename, const char* param_name, double &value)
+{
+  const char *val_str = elt->Attribute(param_name);
+  if (val_str == NULL)
+  {
+    ROS_ERROR("No '%s' attribute in '%s'", param_name, filename.c_str());
+    return false;
+  }
+
+  char *endptr=NULL;
+  value = strtod(val_str, &endptr);
+  if ((endptr == val_str) || (endptr < (val_str+strlen(val_str))))
+  {
+    ROS_ERROR("Couldn't convert '%s' to double for attribute '%s' in '%s'", 
+              val_str, param_name, filename.c_str());
+    return false;
+  }
+
+  return true;
+}
+
+
+static void saturateTemperature(double &temperature, const char *name)
+{
+  static const double max_realistic_temperature = 200.0;
+  static const double min_realistic_temperature = -10.0;
+
+  if (temperature > max_realistic_temperature)
+  {
+    ROS_WARN("%s temperature of %f Celcius is unrealisic. Using %f instead",
+                name, temperature, max_realistic_temperature);
+    temperature = max_realistic_temperature;
+  }
+  if (temperature < min_realistic_temperature)
+  {
+    ROS_WARN("%s temperature of %f Celcius is unrealisic. Using %f instead",
+                name, temperature, min_realistic_temperature);
+    temperature = min_realistic_temperature;
+  }
+}
+
+
 bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
 {
-  // TODO
-  return false;
+  /*
+   * The tempature save file will be named after the actuator it was created for
+   *   <actuactor_name>_motor_heating_model.save
+   *
+   * The temperatureState file will have a XML format:
+   * <motor_heating_model
+   *   version = "1"
+   *   actuator_name = "fl_caster_r_wheel_motor"
+   *   winding_temperature = "100.0"
+   *   housing_temperature = "100.0" 
+   *   save_time = "<wall_time when file was lasted saved>"
+   *   checksum  = "<CRC32 of all previous lines in file>, to allow user editing of files checksum can be "IGNORE-CRC"
+   * />
+   *
+   */
+
+  std::string filename = genMotorHeatingModelSaveFilename(directory_path);
+
+  if (!boost::filesystem::exists(filename))
+  {
+    ROS_WARN("Motor heating model saved file '%s' does not exist.  Using defaults", filename.c_str());
+    return false;
+  }
+
+  TiXmlDocument xml(filename);
+  if (!xml.LoadFile())
+  {
+    ROS_ERROR("Unable to parse XML in save file '%s'", filename.c_str());
+    return false;
+  }
+
+  
+  TiXmlElement *motor_temp_elt = xml.RootElement();
+  if (motor_temp_elt == NULL)
+  {
+    ROS_ERROR("Unable to parse XML in save file '%s'", filename.c_str());
+    return false;
+  }
+      
+  std::string version;
+  std::string actuator_name;
+  double winding_temperature;
+  double housing_temperature;
+  double ambient_temperature;
+  double save_time;
+  if (!getStringAttribute(motor_temp_elt, filename, "version", version))
+  {
+    return false;
+  }
+  const char* expected_version = "1";
+  if (version != expected_version)
+  {
+    ROS_ERROR("Unknown version '%s', expected '%s'", version.c_str(), expected_version);
+    return false;
+  }
+  
+  bool success = true;
+  success &= getStringAttribute(motor_temp_elt, filename, "actuator_name", actuator_name);
+  success &= getDoubleAttribute(motor_temp_elt, filename, "housing_temperature", housing_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, filename, "winding_temperature", winding_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, filename, "ambient_temperature", ambient_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, filename, "save_time", save_time);  
+
+  if (!success)
+  {
+    return false;
+  }
+
+  if (actuator_name != actuator_name_)
+  {
+    ROS_ERROR("In save file '%s' : expected actuator name '%s', got '%s'", 
+              filename.c_str(), actuator_name_.c_str(), actuator_name.c_str());
+    return false;
+  }  
+
+  saturateTemperature(housing_temperature, "Housing");
+  saturateTemperature(winding_temperature, "Winding");
+  saturateTemperature(ambient_temperature, "Ambient");
+
+  // TODO, run update module based on saved time, update time, and saved ambient temperature
+  
+
+  // Update stored temperatures
+  winding_temperature_ = winding_temperature;
+  housing_temperature_ = housing_temperature;
+
+  return true;
 }
+
+
+std::string MotorHeatingModel::genMotorHeatingModelSaveFilename(const char* directory_path) const
+{
+  return std::string(directory_path) + "/motor_heating_model-" + actuator_name_ + ".save";
+}
+
 
 };  // end namespace ethercat_hardware
