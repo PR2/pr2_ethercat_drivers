@@ -33,12 +33,17 @@
  *********************************************************************/
 
 #include "ethercat_hardware/motor_heating_model.h"
+
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/filesystem.hpp>
 
 // Use XML format when saving or loading XML file
 #include <tinyxml/tinyxml.h>
+
+#include <stdio.h>
+#include <errno.h>
+#include <exception>
 
 namespace ethercat_hardware
 {
@@ -61,16 +66,74 @@ void MotorHeatingModelParametersEepromConfig::generateCRC(void)
 }
 
 
+bool MotorHeatingModel::loaded_rosparams_ = false;
+std::string MotorHeatingModel::save_directory_("/var/lib/motor_heating_model");
+bool MotorHeatingModel::do_not_load_save_files_ = false;
+bool MotorHeatingModel::do_not_halt_ = false;
+
+
+  /*! \brief Constructor
+   * 
+   * \param motor_params Heating parameters used by motor heating model
+   * \param actuator_name Name of actuator (ex: fl_caster_roataion_motor)
+   * \param save_directory Directory where motor temperature will be routinely saved
+   * \param device_position Position of device on EtherCAT chain.  Used to prevent multiple motor models from saving at same time  
+   * 
+   */
 MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
-                                     const std::string &actuator_name) :
-  diag_cycles_since_last_save_(0),
+                                     const std::string &actuator_name,
+                                     const std::string &hwid,
+                                     unsigned device_position
+                                     ) :
   overheat_(false),
   publisher_(NULL),
+  diag_cycles_since_last_save_(0),
   motor_params_(motor_params),
-  actuator_name_(actuator_name)
+  actuator_name_(actuator_name),
+  hwid_(hwid)
 {
-  // Ideally, winding and housing temperature will be loading from save file later.  
-  // For now assume temperature starts at default ambient temperature
+
+
+  // There are a couple of rosparams that can be used to control the motor heating motor
+  //  * <namespace>/motor_heating_model/do_not_load_save_files : 
+  //      boolean : defaults to true
+  //      Do not use saved temperature data for motor.  
+  //      This might be useful for things like the the burn-in test stands 
+  //      where different parts are constantly switched in-and-out.
+  //  * <namespace>/motor_heating_model/save_directory : 
+  //      string, defaults to '/var/lib'
+  //      Location where motor heating model save data is loaded from and saved to
+  //  * <namespace>/motor_heating_model/do_not_halt : 
+  //      boolean, defaults to false 
+  //      
+  if (!loaded_rosparams_)
+  {
+    //save_directory_
+    loaded_rosparams_ = true;  
+    
+    if (!boost::filesystem::exists(save_directory_))
+    {
+      ROS_WARN("Motor heating motor save directory '%s' does not exist, creating it", save_directory_.c_str());
+      try {
+        boost::filesystem::create_directory(save_directory_);
+      } 
+      catch (const std::exception &e)
+      {
+        ROS_ERROR("Error creating save directory '%s' for motor model : %s", 
+                  save_directory_.c_str(), e.what());
+      }
+    }
+  }
+
+  save_filename_ = save_directory_ + "/" + actuator_name_ + ".save";
+
+  // If the guess is too low, the motors may not halt when they get too hot.
+  // If the guess is too high the motor may halt when they should not.
+
+  // The first time the motor heating model is run on new machine, there will be no saved motor temperature data.
+  // With the saved temperatures, we have to 'guess' an initial motor temperature. 
+  // Because the motor have been used for multiple years with only a couple incidents, 
+  // its probably better to error on the side of false negitives.
   static const double default_ambient_temperature = 60.0;
   winding_temperature_ = default_ambient_temperature;
   housing_temperature_ = default_ambient_temperature;
@@ -84,6 +147,8 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
   housing_thermal_mass_inverse_ = 
     motor_params_.housing_to_ambient_thermal_resistance_ / motor_params_.housing_thermal_time_constant_; 
 
+  // TODO, is it actually worth the overhead to have ROS node publishing motor heating information?
+  // possibly remove realtime publisher after testing of motor model has been completed.
   std::string topic("motor_temperature");
   if (!actuator_name_.empty())
   {
@@ -94,7 +159,25 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
       ROS_ERROR("Could not allocate realtime publisher");
     }
   }
+  
+  // Currently motor model data is saved as part of diagnostic publishing function.   
+  // The diagnostic publishing function is called at 1Hz.  
+  // The motor model data is saved after every N cycles. 
+  // Use device position to avoid having all devices save during same diagnostic cycle
+  diag_cycles_since_last_save_ = device_position % DIAG_CYCLES_BETWEEN_SAVES;
+
+  // have motor heating model load last saved temperaures from filesystem
+  if (!loadTemperatureState())
+  {
+    ROS_WARN("Could not load motor temperature state for %s", actuator_name_.c_str());
+  }
+
+  // TODO : maybe in future is would be better to have a shared thread for all 
+  // motor_heating_model classes that will save data for all devices.
+
 }
+
+
 
 double MotorHeatingModel::calculateMotorHeatPower(const ethercat_hardware::MotorTraceSample &s, 
                                                   const ethercat_hardware::ActuatorInfo &ai)
@@ -133,28 +216,66 @@ bool MotorHeatingModel::update(double heating_power, double ambient_temperature,
   winding_temperature_ += (heating_energy      - winding_energy_loss) * winding_thermal_mass_inverse_;
   housing_temperature_ += (winding_energy_loss - housing_energy_loss) * housing_thermal_mass_inverse_;
 
-  {
-    // TODO : LOCK
+  { // LOCKED
+    boost::lock_guard<boost::mutex> lock(mutex_);
     heating_energy_sum_ += heating_energy;
     ambient_temperature_sum_ += (ambient_temperature * duration);
     duration_since_last_sample_ += duration;
     if (winding_temperature_ > motor_params_.max_winding_temperature_)
       overheat_ = true;
-  }
+  } // LOCKED
 
   return !overheat_;
 }
 
 
-void MotorHeatingModel::updateFromDowntime(ros::Duration downtime)
+void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient_temperature)
 {
-  // TODO
+  ROS_WARN("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
+  double saved_downtime = downtime;
+
+  ros::Time start = ros::Time::now();
+
+  static const double heating_power = 0.0; // While motor was off heating power should be zero
+
+  // Simulate motor heating model with incrementally increasing simulation timestep interval
+  double interval = 0.1;
+  for (int i=0; i<200; ++i)
+  {
+    if (downtime > interval)
+    {
+      update(heating_power, saved_ambient_temperature, interval);
+      downtime -= interval;
+    }
+    else
+    {
+      update(heating_power, saved_ambient_temperature, downtime);
+      downtime = 0.0;
+      break;
+    }
+    interval *= 1.04; // increase interval by 4% every cycle
+  }
+
+  // After 200 cycles (1.8 hours of simulation time), assume motor has cooled to ambient
+  if (downtime > 0.0)
+  {
+    winding_temperature_ = saved_ambient_temperature;
+    housing_temperature_ = saved_ambient_temperature;
+  }
+
+  ros::Time stop = ros::Time::now();
+
+  ROS_WARN("Final temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
+  ROS_WARN("Took %f milliseconds to sim %f seconds", (stop-start).toSec()*1000., saved_downtime);
 }
 
+
 void MotorHeatingModel::reset()
-{  
-  //TODO LOCK
-  overheat_ = false;
+{ 
+  { // LOCKED
+    boost::lock_guard<boost::mutex> lock(mutex_);
+    overheat_ = false;
+  } // LOCKED
 }
 
 
@@ -169,8 +290,9 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   double heating_energy_sum;
   double duration_since_last_sample;
   double average_ambient_temperature;
-  {
-    // TODO LOCK
+
+  { // LOCKED
+    boost::lock_guard<boost::mutex> lock(mutex_);
     overheat = overheat_;
     winding_temperature = winding_temperature_;
     housing_temperature = housing_temperature_;
@@ -191,7 +313,8 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     ambient_temperature_sum_ = 0.0;
     heating_energy_sum  = 0.0;
     duration_since_last_sample_ = 0.0;
-  }
+  } // LOCKED
+
 
   double average_heating_power       = heating_energy_sum / duration_since_last_sample;
 
@@ -233,10 +356,11 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     publisher_->unlockAndPublish();
   }
 
-  if (++diag_cycles_since_last_save_ > 10)
+  // Save motor heating model information every 60 seconds
+  if (++diag_cycles_since_last_save_ > DIAG_CYCLES_BETWEEN_SAVES)
   {
     diag_cycles_since_last_save_ = 0;
-    saveTemperatureState("/tmp");
+    saveTemperatureState();
   }
 
 }
@@ -298,7 +422,7 @@ static void saturateTemperature(double &temperature, const char *name)
 }
 
 
-bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
+bool MotorHeatingModel::loadTemperatureState()
 {
   /*
    * The tempature save file will be named after the actuator it was created for
@@ -316,18 +440,16 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
    *
    */
 
-  std::string filename = genMotorHeatingModelSaveFilename(directory_path);
-
-  if (!boost::filesystem::exists(filename))
+  if (!boost::filesystem::exists(save_filename_))
   {
-    ROS_WARN("Motor heating model saved file '%s' does not exist.  Using defaults", filename.c_str());
+    ROS_WARN("Motor heating model saved file '%s' does not exist.  Using defaults", save_filename_.c_str());
     return false;
   }
 
-  TiXmlDocument xml(filename);
-  if (!xml.LoadFile())
+  TiXmlDocument xml;
+  if (!xml.LoadFile(save_filename_))
   {
-    ROS_ERROR("Unable to parse XML in save file '%s'", filename.c_str());
+    ROS_ERROR("Unable to parse XML in save file '%s'", save_filename_.c_str());
     return false;
   }
 
@@ -335,17 +457,18 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
   TiXmlElement *motor_temp_elt = xml.RootElement();
   if (motor_temp_elt == NULL)
   {
-    ROS_ERROR("Unable to parse XML in save file '%s'", filename.c_str());
+    ROS_ERROR("Unable to parse XML in save file '%s'", save_filename_.c_str());
     return false;
   }
       
   std::string version;
   std::string actuator_name;
+  std::string hwid;
   double winding_temperature;
   double housing_temperature;
   double ambient_temperature;
   double save_time;
-  if (!getStringAttribute(motor_temp_elt, filename, "version", version))
+  if (!getStringAttribute(motor_temp_elt, save_filename_, "version", version))
   {
     return false;
   }
@@ -357,12 +480,12 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
   }
   
   bool success = true;
-  success &= getStringAttribute(motor_temp_elt, filename, "actuator_name", actuator_name);
-  success &= getDoubleAttribute(motor_temp_elt, filename, "housing_temperature", housing_temperature);
-  success &= getDoubleAttribute(motor_temp_elt, filename, "winding_temperature", winding_temperature);
-  success &= getDoubleAttribute(motor_temp_elt, filename, "ambient_temperature", ambient_temperature);
-  success &= getDoubleAttribute(motor_temp_elt, filename, "save_time", save_time);  
-
+  success &= getStringAttribute(motor_temp_elt, save_filename_, "actuator_name", actuator_name);
+  success &= getStringAttribute(motor_temp_elt, save_filename_, "hwid", hwid);
+  success &= getDoubleAttribute(motor_temp_elt, save_filename_, "housing_temperature", housing_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, save_filename_, "winding_temperature", winding_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, save_filename_, "ambient_temperature", ambient_temperature);
+  success &= getDoubleAttribute(motor_temp_elt, save_filename_, "save_time", save_time);  
   if (!success)
   {
     return false;
@@ -371,21 +494,39 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
   if (actuator_name != actuator_name_)
   {
     ROS_ERROR("In save file '%s' : expected actuator name '%s', got '%s'", 
-              filename.c_str(), actuator_name_.c_str(), actuator_name.c_str());
+              save_filename_.c_str(), actuator_name_.c_str(), actuator_name.c_str());
     return false;
   }  
+
+  if (hwid != hwid_)
+  {
+    ROS_WARN("In save file '%s' : expected HWID '%s', got '%s'", 
+              save_filename_.c_str(), hwid_.c_str(), hwid.c_str());    
+  }
 
   saturateTemperature(housing_temperature, "Housing");
   saturateTemperature(winding_temperature, "Winding");
   saturateTemperature(ambient_temperature, "Ambient");
 
-  // TODO, run update module based on saved time, update time, and saved ambient temperature
-  
-
   // Update stored temperatures
   winding_temperature_ = winding_temperature;
   housing_temperature_ = housing_temperature;
   ambient_temperature_ = ambient_temperature;
+
+  // Update motor temperature model based on saved time, update time, and saved ambient temperature
+  double downtime = ros::Time::now().toSec() - save_time;
+  if (downtime < 0.0)
+  {
+    ROS_WARN("In save file '%s' : save time is %f seconds in future", save_filename_.c_str(), -downtime);
+  }
+  else
+  {
+    updateFromDowntime(downtime, ambient_temperature);
+  }
+
+  // Make sure simulation didn't go horribly wrong
+  saturateTemperature(housing_temperature_, "(2) Housing");
+  saturateTemperature(winding_temperature_, "(2) Winding");
 
   return true;
 }
@@ -394,7 +535,7 @@ bool MotorHeatingModel::loadTemperatureState(const char* directory_path)
 
 
 
-bool MotorHeatingModel::saveTemperatureState(const char* directory_path)
+bool MotorHeatingModel::saveTemperatureState()
 {
   /*
    * This will first generate new XML data into temp file, then rename temp file to final filename
@@ -403,43 +544,54 @@ bool MotorHeatingModel::saveTemperatureState(const char* directory_path)
 
   ROS_WARN("saving motor heating model state");
 
-  std::string filename = genMotorHeatingModelSaveFilename(directory_path);
-  std::string tmp_filename = filename + ".tmp";
+  std::string tmp_filename = save_filename_ + ".tmp";
 
   double winding_temperature;
   double housing_temperature;
   double ambient_temperature;
-  {
-    // TODO : lock
+  { // LOCKED
+    boost::lock_guard<boost::mutex> lock(mutex_);
     winding_temperature = winding_temperature_;
     housing_temperature = housing_temperature_;
     ambient_temperature = ambient_temperature_;
-  }
+  } // LOCKED
 
-  TiXmlDocument xml(filename);
+  TiXmlDocument xml;
   TiXmlDeclaration *decl = new TiXmlDeclaration( "1.0", "", "" );
   TiXmlElement *elmt = new TiXmlElement("motor_heating_model");
   elmt->SetAttribute("version", "1");
   elmt->SetAttribute("actuator_name", actuator_name_);
+  elmt->SetAttribute("hwid", hwid_);
   elmt->SetDoubleAttribute("winding_temperature", winding_temperature);
   elmt->SetDoubleAttribute("housing_temperature", housing_temperature);
   elmt->SetDoubleAttribute("ambient_temperature", ambient_temperature);
-  elmt->SetDoubleAttribute("time", ros::Time::now().toSec() );
+  elmt->SetDoubleAttribute("save_time", ros::Time::now().toSec() );
 
   xml.LinkEndChild(decl);
   xml.LinkEndChild( elmt );
 
-  xml.SaveFile(tmp_filename);
+  // save xml with temporary filename
+  if (!xml.SaveFile(tmp_filename))
+  {
+    ROS_WARN("Saving motor heating model file '%s'", tmp_filename.c_str());
+    return false;
+  }
+
+  // now rename file
+  if (rename(tmp_filename.c_str(), save_filename_.c_str()) != 0)
+  {
+    int error = errno;
+    char errbuf[100];
+    strerror_r(error, errbuf, sizeof(errbuf));
+    errbuf[sizeof(errbuf)-1] = '\0';
+    ROS_WARN("Renaming '%s' to '%s' : (%d) '%s'", 
+             tmp_filename.c_str(), save_filename_.c_str(), error, errbuf);
+    return false;
+  }
 
   return true;
 }
 
-
-
-std::string MotorHeatingModel::genMotorHeatingModelSaveFilename(const char* directory_path) const
-{
-  return std::string(directory_path) + "/motor_heating_model-" + actuator_name_ + ".save";
-}
 
 
 };  // end namespace ethercat_hardware

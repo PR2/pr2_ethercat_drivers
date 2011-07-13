@@ -420,19 +420,22 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
     return true;
   }
 
-  // 
-  motor_heating_model_ = new ethercat_hardware::MotorHeatingModel(config.params_, actuator_info_.name_);
+  // Generate hwid for motor model
+  std::ostringstream hwid;
+  hwid << unsigned(sh_->get_product_code()) << std::setw(5) << std::setfill('0') << unsigned(sh_->get_serial());
+
+
+  motor_heating_model_ = new ethercat_hardware::MotorHeatingModel(config.params_, 
+                                                                  actuator_info_.name_, 
+                                                                  hwid.str(),
+                                                                  sh_->get_ring_position());
+
   if (motor_heating_model_ == NULL)
   {
     ROS_FATAL("Error allocating motor heating model");
     return false;
-  }
+  }  
 
-  // have motor heating model load last saved temperaures from filesystem
-  if (!motor_heating_model_->loadTemperatureState("/tmp"))
-  {
-    ROS_WARN("Could not load motor temperature state for %s", actuator_info_.name_);
-  }
 
   return true;
 }
