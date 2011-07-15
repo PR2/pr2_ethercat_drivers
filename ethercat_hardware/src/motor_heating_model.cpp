@@ -39,7 +39,7 @@
 #include <boost/filesystem.hpp>
 
 // Use XML format when saving or loading XML file
-#include <tinyxml/tinyxml.h>
+#include <tinyxml.h>
 
 #include <stdio.h>
 #include <errno.h>

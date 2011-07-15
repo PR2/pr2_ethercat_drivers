@@ -37,7 +37,7 @@
 #include <getopt.h>
 #include <sys/mman.h>
 
-#include <tinyxml/tinyxml.h>
+#include <tinyxml.h>
 
 #include <ethercat/ethercat_xenomai_drv.h>
 #include <dll/ethercat_dll.h>

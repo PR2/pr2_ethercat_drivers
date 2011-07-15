@@ -16,9 +16,10 @@ rosbuild_add_executable(motorconf
   src/motorconf.cpp src/ethercat_hardware.cpp src/ethercat_com.cpp src/ethercat_device.cpp 
   src/wg0x.cpp src/wg05.cpp src/wg06.cpp src/wg021.cpp src/ek1122.cpp src/wg014.cpp 
   src/motor_model.cpp src/ethernet_interface_info.cpp src/motor_heating_model.cpp)
-target_link_libraries(motorconf rt)
+target_link_libraries(motorconf rt tinyxml)
 rosbuild_link_boost (motorconf system)
 
 rosbuild_add_gtest(test/wg0x_test 
   test/wg0x_test.cpp src/wg0x.cpp src/ethercat_com.cpp 
   src/ethercat_device.cpp src/motor_model.cpp)
+target_link_libraries(test/wg0x_test ethercat_hardware tinyxml)
