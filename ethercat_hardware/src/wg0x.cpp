@@ -46,7 +46,7 @@
 
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
-
+#include <boost/make_shared.hpp>
 
 // Temporary,, need 'log' fuction that can switch between fprintf and ROS_LOG.
 #define ERR_MODE "\033[41m"
@@ -251,8 +251,7 @@ WG0X::WG0X() :
   last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL),
-  disable_motor_model_checking_(false),
-  motor_heating_model_(NULL)
+  disable_motor_model_checking_(false)
 {
 
   last_timestamp_ = 0;
@@ -377,10 +376,11 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
 }
 
 
-
+boost::shared_ptr<ethercat_hardware::MotorHeatingModelCommon> WG0X::motor_heating_model_common_;
 
 bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
 {
+
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
   ethercat_hardware::MotorHeatingModelParametersEepromConfig config;
   if (!readMotorHeatingModelParametersFromEeprom(&com, config))
@@ -401,8 +401,8 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
     else 
     {
       ROS_FATAL("EEPROM does not contain motor model parameters");
-      // TODO: once there is ability to update motorconfig, this is will be a fatal error
       return true;
+      // TODO: once there is ability to update all MCB iwth motorconf, this is will become a fatal error
       //return false;
     }
   }
@@ -424,18 +424,21 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
   std::ostringstream hwid;
   hwid << unsigned(sh_->get_product_code()) << std::setw(5) << std::setfill('0') << unsigned(sh_->get_serial());
 
-
-  motor_heating_model_ = new ethercat_hardware::MotorHeatingModel(config.params_, 
-                                                                  actuator_info_.name_, 
-                                                                  hwid.str(),
-                                                                  sh_->get_ring_position());
-
-  if (motor_heating_model_ == NULL)
+  // All motor heating models use shared settings structure
+  if (motor_heating_model_common_.get() == NULL)
   {
-    ROS_FATAL("Error allocating motor heating model");
-    return false;
-  }  
+    ros::NodeHandle nh("~motor_heating_model");
+    motor_heating_model_common_ = boost::make_shared<ethercat_hardware::MotorHeatingModelCommon>(nh);
+    motor_heating_model_common_->initialize();
+  }
 
+  motor_heating_model_ = 
+    boost::make_shared<ethercat_hardware::MotorHeatingModel>(config.params_, 
+                                                             actuator_info_.name_, 
+                                                             hwid.str(),
+                                                             motor_heating_model_common_);
+ 
+  motor_heating_model_common_->attach(motor_heating_model_);
 
   return true;
 }
@@ -821,7 +824,10 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     {
       double ambient_temperature = convertRawTemperature(this_status->board_temperature_);
       double duration = double(timestampDiff(this_status->timestamp_, prev_status->timestamp_)) * 1e-6;
-      motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration);
+      if (!motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration))
+      {
+        rv = false;
+      }
     }
   }
 
@@ -2610,7 +2616,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     }
   }
 
-  if (motor_heating_model_ != NULL)
+  if (motor_heating_model_.get() != NULL)
   {
     motor_heating_model_->diagnostics(d);
   }

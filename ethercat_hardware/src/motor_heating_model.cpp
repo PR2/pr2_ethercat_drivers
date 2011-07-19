@@ -37,6 +37,8 @@
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/bind.hpp>
+#include <boost/foreach.hpp>
 
 // Use XML format when saving or loading XML file
 #include <tinyxml.h>
@@ -66,10 +68,121 @@ void MotorHeatingModelParametersEepromConfig::generateCRC(void)
 }
 
 
-bool MotorHeatingModel::loaded_rosparams_ = false;
-std::string MotorHeatingModel::save_directory_("/var/lib/motor_heating_model");
-bool MotorHeatingModel::do_not_load_save_files_ = false;
-bool MotorHeatingModel::do_not_halt_ = false;
+
+MotorHeatingModelCommon::MotorHeatingModelCommon(ros::NodeHandle nh)
+{
+  // There are a couple of rosparams that can be used to control the motor heating motor
+  //  * <namespace>/motor_heating_model/load_save_files : 
+  //      boolean : defaults to true
+  //      Do not load saved motor temperature data at startup .  
+  //      This might be useful for things like the the burn-in test stands 
+  //      where different parts are constantly switched in-and-out.
+  //  * <namespace>/motor_heating_model/save_directory : 
+  //      string, defaults to '/var/lib'
+  //      Location where motor heating model save data is loaded from and saved to
+  //  * <namespace>/motor_heating_model/do_not_halt : 
+  //      boolean, defaults to false 
+  //
+  if (!nh.getParam("load_save_files", load_save_files_))
+  {
+    load_save_files_ = true;
+  }
+  if (!nh.getParam("update_save_files", update_save_files_))
+  {
+    update_save_files_ = true;
+  }
+  if (!nh.getParam("do_not_halt", disable_halt_))
+  {
+    disable_halt_ = false;
+  }
+  if (!nh.getParam("save_directory", save_directory_))
+  {
+    save_directory_ = "/var/lib/motor_heating_model";
+  }
+}
+
+
+MotorHeatingModelCommon::MotorHeatingModelCommon() :
+  update_save_files_ ( true ),
+  save_directory_ ("/var/lib/motor_heating_model" ),
+  load_save_files_  ( true ),
+  disable_halt_ (false )
+{
+  
+}
+
+
+void MotorHeatingModelCommon::attach(boost::shared_ptr<MotorHeatingModel> model)
+{
+  { // LOCK
+    boost::lock_guard<boost::mutex> lock(mutex_);
+    models_.push_back(model);
+  } // UNLOCK
+}
+
+
+bool MotorHeatingModelCommon::initialize()
+{
+  if (update_save_files_)
+  {
+    // Save thread should not be started until all MotorHeatingModels have been attached()
+    save_thread_ = boost::thread(boost::bind(&MotorHeatingModelCommon::saveThreadFunc, this));
+  }
+  return true;
+}
+
+
+/*! \brief Continuously saves motor heating model state
+ *
+ * Continuously saved motor state information so state of all registered
+ * motor heating model objects.   This function is run in its own thread so
+ * the saveTemperatureState() funcion of each MotorHeatingModel object 
+ * should perform appropriate locking.
+ */
+void MotorHeatingModelCommon::saveThreadFunc()
+{
+  createSaveDirectory();  
+  while (true)
+  {
+    sleep(10);
+    { //LOCK
+      boost::lock_guard<boost::mutex> lock(mutex_);
+      BOOST_FOREACH( boost::shared_ptr<MotorHeatingModel> model, models_ )
+      {
+        model->saveTemperatureState();
+      }
+    } //UNLOCK
+  }
+  
+  { // Throw away ptrs to all motor models
+    boost::lock_guard<boost::mutex> lock(mutex_);
+    models_.clear();
+  } 
+}
+
+
+/*! \brief Creates directory for saved motor heating information
+ */
+bool MotorHeatingModelCommon::createSaveDirectory()
+{
+  // create save directory if it does not already exist
+  if (!boost::filesystem::exists(save_directory_))
+  {
+    ROS_WARN("Motor heating motor save directory '%s' does not exist, creating it", save_directory_.c_str());
+    try {
+      boost::filesystem::create_directory(save_directory_);
+    } 
+    catch (const std::exception &e)
+    {
+      ROS_ERROR("Error creating save directory '%s' for motor model : %s", 
+                save_directory_.c_str(), e.what());
+      return false;
+    }
+  }
+
+  return true;
+}
+
 
 
   /*! \brief Constructor
@@ -83,49 +196,17 @@ bool MotorHeatingModel::do_not_halt_ = false;
 MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                                      const std::string &actuator_name,
                                      const std::string &hwid,
-                                     unsigned device_position
+                                     boost::shared_ptr<MotorHeatingModelCommon> common
                                      ) :
   overheat_(false),
   publisher_(NULL),
-  diag_cycles_since_last_save_(0),
   motor_params_(motor_params),
   actuator_name_(actuator_name),
+  save_filename_(common->save_directory_ + "/" + actuator_name_ + ".save"),
   hwid_(hwid)
 {
+  
 
-
-  // There are a couple of rosparams that can be used to control the motor heating motor
-  //  * <namespace>/motor_heating_model/do_not_load_save_files : 
-  //      boolean : defaults to true
-  //      Do not use saved temperature data for motor.  
-  //      This might be useful for things like the the burn-in test stands 
-  //      where different parts are constantly switched in-and-out.
-  //  * <namespace>/motor_heating_model/save_directory : 
-  //      string, defaults to '/var/lib'
-  //      Location where motor heating model save data is loaded from and saved to
-  //  * <namespace>/motor_heating_model/do_not_halt : 
-  //      boolean, defaults to false 
-  //      
-  if (!loaded_rosparams_)
-  {
-    //save_directory_
-    loaded_rosparams_ = true;  
-    
-    if (!boost::filesystem::exists(save_directory_))
-    {
-      ROS_WARN("Motor heating motor save directory '%s' does not exist, creating it", save_directory_.c_str());
-      try {
-        boost::filesystem::create_directory(save_directory_);
-      } 
-      catch (const std::exception &e)
-      {
-        ROS_ERROR("Error creating save directory '%s' for motor model : %s", 
-                  save_directory_.c_str(), e.what());
-      }
-    }
-  }
-
-  save_filename_ = save_directory_ + "/" + actuator_name_ + ".save";
 
   // If the guess is too low, the motors may not halt when they get too hot.
   // If the guess is too high the motor may halt when they should not.
@@ -160,21 +241,14 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
     }
   }
   
-  // Currently motor model data is saved as part of diagnostic publishing function.   
-  // The diagnostic publishing function is called at 1Hz.  
-  // The motor model data is saved after every N cycles. 
-  // Use device position to avoid having all devices save during same diagnostic cycle
-  diag_cycles_since_last_save_ = device_position % DIAG_CYCLES_BETWEEN_SAVES;
-
   // have motor heating model load last saved temperaures from filesystem
-  if (!loadTemperatureState())
+  if (common->load_save_files_)
   {
-    ROS_WARN("Could not load motor temperature state for %s", actuator_name_.c_str());
+    if (!loadTemperatureState())
+    {
+      ROS_WARN("Could not load motor temperature state for %s", actuator_name_.c_str());
+    }
   }
-
-  // TODO : maybe in future is would be better to have a shared thread for all 
-  // motor_heating_model classes that will save data for all devices.
-
 }
 
 
@@ -224,7 +298,7 @@ bool MotorHeatingModel::update(double heating_power, double ambient_temperature,
     if (winding_temperature_ > motor_params_.max_winding_temperature_)
       overheat_ = true;
   } // LOCKED
-
+  
   return !overheat_;
 }
 
@@ -287,9 +361,9 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   double winding_temperature;
   double housing_temperature;
   double ambient_temperature_sum;
-  double heating_energy_sum;
   double duration_since_last_sample;
   double average_ambient_temperature;
+  double average_heating_power;
 
   { // LOCKED
     boost::lock_guard<boost::mutex> lock(mutex_);
@@ -297,26 +371,27 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     winding_temperature = winding_temperature_;
     housing_temperature = housing_temperature_;
     ambient_temperature_sum = ambient_temperature_sum_;
-    heating_energy_sum  = heating_energy_sum_;
     duration_since_last_sample = duration_since_last_sample_;
 
     if (duration_since_last_sample > 0.0)
     {
       average_ambient_temperature = ambient_temperature_sum / duration_since_last_sample;
       ambient_temperature_ = average_ambient_temperature;
+      average_heating_power = heating_energy_sum_ / duration_since_last_sample;
     }
     else 
     {
+      ROS_WARN("Duration == 0");
       average_ambient_temperature = ambient_temperature_;
+      average_heating_power = 0.0;
     }
     
     ambient_temperature_sum_ = 0.0;
-    heating_energy_sum  = 0.0;
+    heating_energy_sum_  = 0.0;
     duration_since_last_sample_ = 0.0;
   } // LOCKED
 
 
-  double average_heating_power       = heating_energy_sum / duration_since_last_sample;
 
   const int ERROR = 2;
   const int WARN = 1;
@@ -355,14 +430,6 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     // publish sample
     publisher_->unlockAndPublish();
   }
-
-  // Save motor heating model information every 60 seconds
-  if (++diag_cycles_since_last_save_ > DIAG_CYCLES_BETWEEN_SAVES)
-  {
-    diag_cycles_since_last_save_ = 0;
-    saveTemperatureState();
-  }
-
 }
 
 
@@ -541,9 +608,6 @@ bool MotorHeatingModel::saveTemperatureState()
    * This will first generate new XML data into temp file, then rename temp file to final filename
    *
    */
-
-  ROS_WARN("saving motor heating model state");
-
   std::string tmp_filename = save_filename_ + ".tmp";
 
   double winding_temperature;

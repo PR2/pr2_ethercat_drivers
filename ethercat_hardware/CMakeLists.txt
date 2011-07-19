@@ -19,7 +19,5 @@ rosbuild_add_executable(motorconf
 target_link_libraries(motorconf rt tinyxml)
 rosbuild_link_boost (motorconf system)
 
-rosbuild_add_gtest(test/wg0x_test 
-  test/wg0x_test.cpp src/wg0x.cpp src/ethercat_com.cpp 
-  src/ethercat_device.cpp src/motor_model.cpp)
+rosbuild_add_gtest(test/wg0x_test test/wg0x_test.cpp )
 target_link_libraries(test/wg0x_test ethercat_hardware tinyxml)

@@ -44,6 +44,7 @@
 
 #include <boost/utility.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/shared_ptr.hpp>
 
 #include <vector>
 #include <string>
@@ -86,17 +87,63 @@ struct MotorHeatingModelParametersEepromConfig
 {
   uint16_t major_;                      //!< Major revision of this structure
   uint16_t minor_;                      //!< Minor revision of this structure
-  uint8_t  enforce_;                    //!< 0 if heating model should be not be enforced, 0 otherwise
+  bool  enforce_;                       //!< 0 if heating model should be not be enforced, 0 otherwise
   uint8_t  pad1[3];
   MotorHeatingModelParameters params_;  //!< Motor parameters  
   uint8_t  pad2[204];
   uint32_t crc32_;                      //!< CRC32 of first 256-4 bytes of structure.
-
+ 
   static const unsigned EEPROM_PAGE = 4093; // Acutator info on page 4095, MCB config on 4094
 
   bool verifyCRC(void) const;
   void generateCRC(void);
 } __attribute__ ((__packed__));
+
+
+class MotorHeatingModel;
+
+class MotorHeatingModelCommon : private boost::noncopyable
+{
+public:
+  /** \brief Constructor will read motor heating mode settings from node handle namespace  
+   */
+  MotorHeatingModelCommon(ros::NodeHandle nh);
+  
+  /** \brief Constructor will use default settings for all parameters
+   */
+  MotorHeatingModelCommon();
+
+
+  bool initialize();
+  
+  /**! \brief Append model to list of models that need to have temperature data saved.
+   */
+  void attach(boost::shared_ptr<MotorHeatingModel> model);
+
+  //! Directory where motor model haeting data will be saved.  Defaults to /var/lib/motor_heating_model
+  //! If true, then temeperature data to will be periodically saved to file
+  bool update_save_files_;    
+  //! Directory where temperature save files should be put
+  std::string save_directory_; 
+  //! If true, then class instances will attempt to load data from a saved temperature file
+  bool load_save_files_; 
+  //! Disables halting caused by a motor being overtemperature  
+  bool disable_halt_;  
+
+protected:
+  bool createSaveDirectory();
+
+  //! thread that will periodically save temperature data
+  boost::thread save_thread_;
+  void saveThreadFunc();
+
+  //! List of MotorHeatingModels that need to have file data saved
+  std::vector< boost::shared_ptr<MotorHeatingModel> > models_; 
+
+  //!Lock around models list
+  boost::mutex mutex_;
+};
+
 
 
 class MotorHeatingModel : private boost::noncopyable
@@ -106,17 +153,18 @@ public:
   MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                     const std::string &actuator_name,
                     const std::string &hwid,
-                    unsigned device_position
+                    boost::shared_ptr<MotorHeatingModelCommon> common
                     );
   
 
-  /*! Updates motor temperature estimate. based on power flowing into for 1 cycle.
+  /*! \brief Updates motor temperature estimate
    *
    * This uses motor data to determine how much heat power was put into motor 
    * over last control cycle.  The control cycle is assumed to be relatively
    * short so the update is done as a linear estimation of differential equation
    * 
-   * Returns true if motor winding temperature is below acceptable limit, false if motor has overheated
+   * Returns true if motor winding temperature is below acceptable limit, 
+   *       false if motor has overheated and halting enabled. 
    * 
    */
   bool update(double heating_power, double ambient_temperature, double duration);
@@ -202,7 +250,6 @@ protected:
   //! mutex protects values updates by realtime thread and used by diagnostics thread  
   boost::mutex mutex_;
 
-
   //! True if most has overheat, once set, will only clear when reset() is called
   bool overheat_;
 
@@ -217,22 +264,10 @@ protected:
   //! realtime publisher for MotorHeatingSample
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature> *publisher_;
 
-  //! Diagnostics cycles between saves of diagnostic.  Diagnostic cycles are about 1 second.
-  static const unsigned DIAG_CYCLES_BETWEEN_SAVES = 60;
-  //! Diagnostics cycles since last save
-  unsigned diag_cycles_since_last_save_;
-
   MotorHeatingModelParameters motor_params_;
   std::string actuator_name_;  //!< name of actuator (ex. fl_caster_rotation_motor)
   std::string save_filename_;  //!< path to file where temperature data will be saved
   std::string hwid_;  //!< Hardware ID of device (ex. 680500501000)
-  
-  //! Only read rosparams for all motor heating once and apply settings to all devices' models
-  static bool loaded_rosparams_;
-  //! Directory where motor model haeting data will be saved.  Defaults to /var/lib/motor_heating_model
-  static std::string save_directory_;
-  static bool do_not_load_save_files_;
-  static bool do_not_halt_;
 };
 
 

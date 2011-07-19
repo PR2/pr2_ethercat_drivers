@@ -40,6 +40,8 @@
 #include "ethercat_hardware/motor_heating_model.h"
 #include "realtime_tools/realtime_publisher.h"
 
+#include <boost/shared_ptr.hpp>
+
 using namespace ethercat_hardware;
 
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
@@ -602,8 +604,9 @@ protected:
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
 
-  // Only device with motor heating paramereters store in eeprom config will use this
-  ethercat_hardware::MotorHeatingModel *motor_heating_model_;
+  // Only device with motor heating parameters store in eeprom config will use this
+  static boost::shared_ptr<ethercat_hardware::MotorHeatingModelCommon> motor_heating_model_common_;
+  boost::shared_ptr<ethercat_hardware::MotorHeatingModel> motor_heating_model_;
 
   // Diagnostic message values
   uint32_t last_timestamp_;
