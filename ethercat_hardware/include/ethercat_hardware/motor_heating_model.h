@@ -176,6 +176,8 @@ public:
     return update(heating_power, ambient_temperature, duration);
   }  
 
+  bool hasOverheated() const {return overheat_;}
+
   //! Resets motor overheat flag
   void reset();
 

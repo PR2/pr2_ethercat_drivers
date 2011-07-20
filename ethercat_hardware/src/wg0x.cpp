@@ -395,15 +395,19 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
   {
     if (allow_unprogrammed)
     {
-      ROS_WARN("EEPROM does not contain motor model parameters");
+      ROS_WARN("%s EEPROM does not contain motor heating model parameters",
+               actuator_info_.name_);
       return true;
     }
     else 
     {
-      ROS_FATAL("EEPROM does not contain motor model parameters");
+      ROS_WARN("%s EEPROM does not contain motor heating model parameters",
+               actuator_info_.name_);
       return true;
       // TODO: once there is ability to update all MCB iwth motorconf, this is will become a fatal error
-      //return false;
+      ROS_FATAL("%s EEPROM does not contain motor heating model parameters", 
+                actuator_info_.name_);
+      return false;
     }
   }
 
@@ -824,7 +828,9 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     {
       double ambient_temperature = convertRawTemperature(this_status->board_temperature_);
       double duration = double(timestampDiff(this_status->timestamp_, prev_status->timestamp_)) * 1e-6;
-      if (!motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration))
+      motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration);
+
+      if ((!motor_heating_model_common_->disable_halt_) && (motor_heating_model_->hasOverheated()))
       {
         rv = false;
       }

@@ -93,7 +93,9 @@ MotorHeatingModelCommon::MotorHeatingModelCommon(ros::NodeHandle nh)
   }
   if (!nh.getParam("do_not_halt", disable_halt_))
   {
-    disable_halt_ = false;
+    // TODO : once there has been enough testing of motor heating model on robot in real-world conditions,
+    //        enable halting by default
+    disable_halt_ = true;  
   }
   if (!nh.getParam("save_directory", save_directory_))
   {
@@ -298,14 +300,14 @@ bool MotorHeatingModel::update(double heating_power, double ambient_temperature,
     if (winding_temperature_ > motor_params_.max_winding_temperature_)
       overheat_ = true;
   } // LOCKED
-  
+   
   return !overheat_;
 }
 
 
 void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient_temperature)
 {
-  ROS_WARN("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
+  ROS_DEBUG("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
   double saved_downtime = downtime;
 
   ros::Time start = ros::Time::now();
@@ -333,14 +335,15 @@ void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient
   // After 200 cycles (1.8 hours of simulation time), assume motor has cooled to ambient
   if (downtime > 0.0)
   {
+    ROS_DEBUG("Downtime too long, using ambient temperature as final motor temperature");
     winding_temperature_ = saved_ambient_temperature;
     housing_temperature_ = saved_ambient_temperature;
   }
 
   ros::Time stop = ros::Time::now();
 
-  ROS_WARN("Final temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
-  ROS_WARN("Took %f milliseconds to sim %f seconds", (stop-start).toSec()*1000., saved_downtime);
+  ROS_DEBUG("Final temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
+  ROS_DEBUG("Took %f milliseconds to sim %f seconds", (stop-start).toSec()*1000., saved_downtime);
 }
 
 
@@ -469,6 +472,28 @@ static bool getDoubleAttribute(TiXmlElement *elt, const std::string& filename, c
 }
 
 
+static bool getIntegerAttribute(TiXmlElement *elt, const std::string& filename, const char* param_name, int &value)
+{
+  const char *val_str = elt->Attribute(param_name);
+  if (val_str == NULL)
+  {
+    ROS_ERROR("No '%s' attribute in '%s'", param_name, filename.c_str());
+    return false;
+  }
+
+  char *endptr=NULL;
+  value = strtol(val_str, &endptr, 0);
+  if ((endptr == val_str) || (endptr < (val_str+strlen(val_str))))
+  {
+    ROS_ERROR("Couldn't convert '%s' to integer for attribute '%s' in '%s'", 
+              val_str, param_name, filename.c_str());
+    return false;
+  }
+
+  return true;
+}
+
+
 static void saturateTemperature(double &temperature, const char *name)
 {
   static const double max_realistic_temperature = 200.0;
@@ -534,7 +559,7 @@ bool MotorHeatingModel::loadTemperatureState()
   double winding_temperature;
   double housing_temperature;
   double ambient_temperature;
-  double save_time;
+  int save_time_sec, save_time_nsec;
   if (!getStringAttribute(motor_temp_elt, save_filename_, "version", version))
   {
     return false;
@@ -552,7 +577,8 @@ bool MotorHeatingModel::loadTemperatureState()
   success &= getDoubleAttribute(motor_temp_elt, save_filename_, "housing_temperature", housing_temperature);
   success &= getDoubleAttribute(motor_temp_elt, save_filename_, "winding_temperature", winding_temperature);
   success &= getDoubleAttribute(motor_temp_elt, save_filename_, "ambient_temperature", ambient_temperature);
-  success &= getDoubleAttribute(motor_temp_elt, save_filename_, "save_time", save_time);  
+  success &= getIntegerAttribute(motor_temp_elt, save_filename_, "save_time_sec", save_time_sec);
+  success &= getIntegerAttribute(motor_temp_elt, save_filename_, "save_time_nsec", save_time_nsec);
   if (!success)
   {
     return false;
@@ -581,7 +607,7 @@ bool MotorHeatingModel::loadTemperatureState()
   ambient_temperature_ = ambient_temperature;
 
   // Update motor temperature model based on saved time, update time, and saved ambient temperature
-  double downtime = ros::Time::now().toSec() - save_time;
+  double downtime = (ros::Time::now() - ros::Time(save_time_sec, save_time_nsec)).toSec();
   if (downtime < 0.0)
   {
     ROS_WARN("In save file '%s' : save time is %f seconds in future", save_filename_.c_str(), -downtime);
@@ -629,7 +655,9 @@ bool MotorHeatingModel::saveTemperatureState()
   elmt->SetDoubleAttribute("winding_temperature", winding_temperature);
   elmt->SetDoubleAttribute("housing_temperature", housing_temperature);
   elmt->SetDoubleAttribute("ambient_temperature", ambient_temperature);
-  elmt->SetDoubleAttribute("save_time", ros::Time::now().toSec() );
+  ros::Time now = ros::Time::now();
+  elmt->SetAttribute("save_time_sec", now.sec);
+  elmt->SetAttribute("save_time_nsec", now.nsec);
 
   xml.LinkEndChild(decl);
   xml.LinkEndChild( elmt );
