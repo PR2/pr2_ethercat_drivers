@@ -199,8 +199,11 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
                                      const std::string &actuator_name,
                                      const std::string &hwid,
                                      boost::shared_ptr<MotorHeatingModelCommon> common
-                                     ) :
+                                     ) :  
   overheat_(false),
+  heating_energy_sum_(0.0),
+  ambient_temperature_sum_(0.0),
+  duration_since_last_sample_(0.0),
   publisher_(NULL),
   motor_params_(motor_params),
   actuator_name_(actuator_name),
@@ -230,16 +233,18 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
   housing_thermal_mass_inverse_ = 
     motor_params_.housing_to_ambient_thermal_resistance_ / motor_params_.housing_thermal_time_constant_; 
 
-  // TODO, is it actually worth the overhead to have ROS node publishing motor heating information?
-  // possibly remove realtime publisher after testing of motor model has been completed.
-  std::string topic("motor_temperature");
-  if (!actuator_name_.empty())
+
+  if (DEBUG_LEVEL) // Only use for debugging/developement.  
   {
-    topic = topic + "/" + actuator_name_;
-    publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature>(ros::NodeHandle(), topic, 1, true);
-    if (publisher_ == NULL)
+    std::string topic("motor_temperature");
+    if (!actuator_name_.empty())
     {
-      ROS_ERROR("Could not allocate realtime publisher");
+      topic = topic + "/" + actuator_name_;
+      publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature>(ros::NodeHandle(), topic, 1, true);
+      if (publisher_ == NULL)
+      {
+        ROS_ERROR("Could not allocate realtime publisher");
+      }
     }
   }
   
@@ -268,12 +273,26 @@ double MotorHeatingModel::calculateMotorHeatPower(const ethercat_hardware::Motor
   // Output voltage of MCB.  Guesstimate by multipling pwm ratio with supply voltage
   double output_voltage   = s.programmed_pwm * s.supply_voltage;
   // Back emf voltage of motor
-  double back_emf_voltage = s.velocity * ai.speed_constant;
+  double backemf_constant = 1.0 / (ai.speed_constant * 2.0 * M_PI * 1.0/60.0);
+  double backemf_voltage = s.velocity * ai.encoder_reduction * backemf_constant;
   // What ever voltage is left over must be the voltage used to drive current through the motor
-  double resistance_voltage  = output_voltage - back_emf_voltage;
+  double resistance_voltage  = output_voltage - backemf_voltage;
 
   // Power going into motor as heat (Watts)
   double heating_power = resistance_voltage * s.measured_current;
+
+  if (DEBUG_LEVEL) // Only use for debugging, (prints out debug info for unreasonable heating values)
+  {
+    if ((heating_power < -0.5) || (heating_power > 15.0))
+    {
+      ROS_DEBUG("heating power = %f, output_voltage=%f, backemf_voltage=%f, resistance_voltage=%f, current=%f",
+                heating_power, output_voltage, backemf_voltage, resistance_voltage, s.measured_current);
+    }
+  }
+
+  // Heating power can never be less than 0.0
+  heating_power = std::max(heating_power, 0.0);
+
   return heating_power;
 }
 
@@ -305,18 +324,13 @@ bool MotorHeatingModel::update(double heating_power, double ambient_temperature,
 }
 
 
-void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient_temperature)
+double MotorHeatingModel::updateFromDowntimeWithInterval(double downtime, 
+                                                         double saved_ambient_temperature, 
+                                                         double interval, 
+                                                         unsigned cycles)
 {
-  ROS_DEBUG("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
-  double saved_downtime = downtime;
-
-  ros::Time start = ros::Time::now();
-
   static const double heating_power = 0.0; // While motor was off heating power should be zero
-
-  // Simulate motor heating model with incrementally increasing simulation timestep interval
-  double interval = 0.1;
-  for (int i=0; i<200; ++i)
+  for (unsigned i=0; i<cycles; ++i)
   {
     if (downtime > interval)
     {
@@ -325,14 +339,30 @@ void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient
     }
     else
     {
+      // Done
       update(heating_power, saved_ambient_temperature, downtime);
-      downtime = 0.0;
-      break;
+      return 0.0;
     }
-    interval *= 1.04; // increase interval by 4% every cycle
   }
+  return downtime;
+}
 
-  // After 200 cycles (1.8 hours of simulation time), assume motor has cooled to ambient
+
+void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient_temperature)
+{
+  ROS_DEBUG("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
+  double saved_downtime = downtime;
+
+  ros::Time start = ros::Time::now();
+
+  // Simulate motor heating model first with increasing step sizes : 
+  // first 10 ms, then 100ms, and finally 1 seconds steps
+  downtime = updateFromDowntimeWithInterval(downtime, saved_ambient_temperature, 0.01, 200);
+  downtime = updateFromDowntimeWithInterval(downtime, saved_ambient_temperature, 0.10, 200);
+  downtime = updateFromDowntimeWithInterval(downtime, saved_ambient_temperature, 1.00, 200);
+  downtime = updateFromDowntimeWithInterval(downtime, saved_ambient_temperature, 10.0, 2000);
+
+  // If there is any time left over, assume motor has cooled to ambient
   if (downtime > 0.0)
   {
     ROS_DEBUG("Downtime too long, using ambient temperature as final motor temperature");

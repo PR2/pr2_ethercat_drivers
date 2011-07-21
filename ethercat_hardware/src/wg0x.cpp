@@ -607,6 +607,10 @@ void WG0X::clearErrorFlags(void)
   status_checksum_error_ = false;
   timestamp_jump_detected_ = false;
   if (motor_model_) motor_model_->reset();
+  if (motor_heating_model_.get() != NULL) 
+  {
+    motor_heating_model_->reset();
+  }
 }
 
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)

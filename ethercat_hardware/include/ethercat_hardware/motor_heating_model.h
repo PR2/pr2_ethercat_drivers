@@ -196,6 +196,19 @@ public:
   void updateFromDowntime(double downtime, double saved_ambient_temperature);
 
 
+  /*! \brief Updates estimated motor temperature for certain amount of downtime
+   *  
+   * Runs motor temperture simulation with a certain step interval and for a given 
+   * number of cycles.  Will stop early if downtime reaches 0.  
+   * Returns remaining downtime
+   *
+   */  
+  double updateFromDowntimeWithInterval(double downtime, 
+                                        double saved_ambient_temperature, 
+                                        double interval, 
+                                        unsigned cycles);
+
+
   /*! Determines power being put into motor as heat (in Watts)
    */
   double calculateMotorHeatPower(const ethercat_hardware::MotorTraceSample &sample,
@@ -262,7 +275,7 @@ protected:
   //! Time (in seconds) since late sample interval occurred
   double duration_since_last_sample_;
   //! Sample interval for trace (in seconds)
-  double trace_sample_interval_;
+  //double trace_sample_interval_;
   //! realtime publisher for MotorHeatingSample
   realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature> *publisher_;
 
@@ -270,6 +283,8 @@ protected:
   std::string actuator_name_;  //!< name of actuator (ex. fl_caster_rotation_motor)
   std::string save_filename_;  //!< path to file where temperature data will be saved
   std::string hwid_;  //!< Hardware ID of device (ex. 680500501000)
+
+  static const int DEBUG_LEVEL = 0; 
 };
 
 
