@@ -397,6 +397,7 @@ void Usage(string msg = "")
   fprintf(stderr, " -b, --board <b>        Set the expected board type (wg005, wg006, wg021)\n");
   fprintf(stderr, " -p, --program          Program a motor control board\n");
   fprintf(stderr, " -n, --name <n>         Set the name of the motor control board to <n>\n");
+  fprintf(stderr, " -U, --update_heating_config Update motor heating model configuration of all boards\n");
   fprintf(stderr, "     Known actuator names:\n");
   BOOST_FOREACH(ActuatorPair p, actuators)
   {
@@ -660,11 +661,11 @@ int main(int argc, char *argv[])
       {"motor", required_argument, 0, 'm'},
       {"program", no_argument, 0, 'p'},
       {"actuators", required_argument, 0, 'a'},
-      {"update_motor_heating_config", no_argument, 0, 'U'},
+      {"update_heating_config", no_argument, 0, 'U'},
       {"enforce_heating_model", no_argument, 0, 'H'},
     };
     int option_index = 0;
-    int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:U", long_options, &option_index);
+    int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:UH", long_options, &option_index);
     if (c == -1) break;
     switch (c)
     {

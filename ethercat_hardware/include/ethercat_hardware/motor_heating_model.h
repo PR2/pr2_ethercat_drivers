@@ -128,7 +128,11 @@ public:
   //! If true, then class instances will attempt to load data from a saved temperature file
   bool load_save_files_; 
   //! Disables halting caused by a motor being overtemperature  
-  bool disable_halt_;  
+  bool disable_halt_;
+  //! If true, enables motor heating model.  If false, motor heating model is run for any devices
+  bool enable_model_;
+  //! If true, each motor heating model with publish state information every 1 second
+  bool publish_temperature_;
 
 protected:
   bool createSaveDirectory();
@@ -156,7 +160,7 @@ public:
                     const std::string &save_directory
                     );
 
-  bool initialize();  
+  bool startTemperaturePublisher();
 
   /*! \brief Updates motor temperature estimate
    *
@@ -292,8 +296,6 @@ protected:
   std::string actuator_name_;  //!< name of actuator (ex. fl_caster_rotation_motor)
   std::string save_filename_;  //!< path to file where temperature data will be saved
   std::string hwid_;  //!< Hardware ID of device (ex. 680500501000)
-
-  static const int DEBUG_LEVEL = 0; 
 };
 
 

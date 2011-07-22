@@ -99,6 +99,7 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   else if (fw_major_ == 2)
   {
     // Include Accelerometer and Force/Torque sensor data
+    ROS_ERROR("WG06 FW major version %d not officially supported", fw_major_);
     status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
     has_accel_and_ft_ = true;
   }
@@ -236,6 +237,10 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Provide Force/Torque data to controllers as an AnalogIn vector 
     if (fw_major_ >= 2)
     {
+      // TODO:  Memory interface to version 2 is not finalized. 
+      ROS_ERROR("WG06 FW version 2 not supported");
+      return -1;
+      
       ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
       if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
       {

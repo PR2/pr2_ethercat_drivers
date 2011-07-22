@@ -52,6 +52,9 @@ namespace ethercat_hardware
 {
 
 
+static const int DEBUG_LEVEL = 0; 
+
+
 bool MotorHeatingModelParametersEepromConfig::verifyCRC(void) const
 {
   BOOST_STATIC_ASSERT(sizeof(ethercat_hardware::MotorHeatingModelParametersEepromConfig) == 256);
@@ -102,6 +105,14 @@ MotorHeatingModelCommon::MotorHeatingModelCommon(ros::NodeHandle nh)
   {
     save_directory_ = "/var/lib/motor_heating_model";
   }
+  if (!nh.getParam("enable_model", enable_model_))
+  {
+    enable_model_ = true;
+  }
+  if (!nh.getParam("publish_temperature", publish_temperature_))
+  {
+    publish_temperature_ = false;
+  }
 }
 
 
@@ -109,7 +120,9 @@ MotorHeatingModelCommon::MotorHeatingModelCommon() :
   update_save_files_ ( true ),
   save_directory_ ("/var/lib/motor_heating_model" ),
   load_save_files_  ( true ),
-  disable_halt_ (false )
+  disable_halt_ ( false ),
+  enable_model_( true ),
+  publish_temperature_( false )
 {
   
 }
@@ -144,7 +157,9 @@ bool MotorHeatingModelCommon::initialize()
  */
 void MotorHeatingModelCommon::saveThreadFunc()
 {
-  createSaveDirectory();  
+  // DEB install should create directory with proper permissions.
+  //createSaveDirectory();  
+
   while (true)
   {
     sleep(10);
@@ -236,22 +251,19 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
 }
 
 
-bool MotorHeatingModel::initialize()
+bool MotorHeatingModel::startTemperaturePublisher()
 {
-  if (DEBUG_LEVEL) // Only use for debugging/developement.  
+  std::string topic("motor_temperature");
+  if (!actuator_name_.empty())
   {
-    std::string topic("motor_temperature");
-    if (!actuator_name_.empty())
+    topic = topic + "/" + actuator_name_;
+    publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature>(ros::NodeHandle(), topic, 1, true);
+    if (publisher_ == NULL)
     {
-      topic = topic + "/" + actuator_name_;
-      publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::MotorTemperature>(ros::NodeHandle(), topic, 1, true);
-      if (publisher_ == NULL)
-      {
-        ROS_ERROR("Could not allocate realtime publisher");
-        return false;
-      }
+      ROS_ERROR("Could not allocate realtime publisher");
+      return false;
     }
-  }
+  }  
   return true;
 }
 
@@ -691,7 +703,7 @@ bool MotorHeatingModel::saveTemperatureState()
   // save xml with temporary filename
   if (!xml.SaveFile(tmp_filename))
   {
-    ROS_WARN("Saving motor heating model file '%s'", tmp_filename.c_str());
+    ROS_WARN("Could not save motor heating model file '%s'", tmp_filename.c_str());
     return false;
   }
 
@@ -702,7 +714,7 @@ bool MotorHeatingModel::saveTemperatureState()
     char errbuf[100];
     strerror_r(error, errbuf, sizeof(errbuf));
     errbuf[sizeof(errbuf)-1] = '\0';
-    ROS_WARN("Renaming '%s' to '%s' : (%d) '%s'", 
+    ROS_WARN("Problem renaming '%s' to '%s' : (%d) '%s'", 
              tmp_filename.c_str(), save_filename_.c_str(), error, errbuf);
     return false;
   }

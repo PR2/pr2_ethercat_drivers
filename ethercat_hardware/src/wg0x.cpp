@@ -434,8 +434,26 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
     ros::NodeHandle nh("~motor_heating_model");
     motor_heating_model_common_ = boost::make_shared<ethercat_hardware::MotorHeatingModelCommon>(nh);
     motor_heating_model_common_->initialize();
+    // Only display following warnings once.
+    if (!motor_heating_model_common_->enable_model_)
+    {
+      ROS_WARN("Motor heating model disabled for all devices");
+    }
+    if (!motor_heating_model_common_->load_save_files_)
+    {
+      ROS_WARN("Not loading motor heating model files");
+    }
+    if (!motor_heating_model_common_->update_save_files_)
+    {
+      ROS_WARN("Not saving motor heating model files");
+    }
   }
 
+  if (!motor_heating_model_common_->enable_model_)
+  {
+    return true;
+  }
+    
   motor_heating_model_ = 
     boost::make_shared<ethercat_hardware::MotorHeatingModel>(config.params_, 
                                                              actuator_info_.name_, 
@@ -449,7 +467,10 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
       ROS_WARN("Could not load motor temperature state for %s", actuator_info_.name_);
     }
   }
-  motor_heating_model_->initialize();
+  if (motor_heating_model_common_->publish_temperature_)
+  {
+    motor_heating_model_->startTemperaturePublisher();
+  }
   motor_heating_model_common_->attach(motor_heating_model_);
 
   return true;
