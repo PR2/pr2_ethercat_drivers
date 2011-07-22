@@ -39,6 +39,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/bind.hpp>
 #include <boost/foreach.hpp>
+#include <boost/timer.hpp>
 
 // Use XML format when saving or loading XML file
 #include <tinyxml.h>
@@ -198,7 +199,7 @@ bool MotorHeatingModelCommon::createSaveDirectory()
 MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                                      const std::string &actuator_name,
                                      const std::string &hwid,
-                                     boost::shared_ptr<MotorHeatingModelCommon> common
+                                     const std::string &save_directory
                                      ) :  
   overheat_(false),
   heating_energy_sum_(0.0),
@@ -207,7 +208,7 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
   publisher_(NULL),
   motor_params_(motor_params),
   actuator_name_(actuator_name),
-  save_filename_(common->save_directory_ + "/" + actuator_name_ + ".save"),
+  save_filename_(save_directory + "/" + actuator_name_ + ".save"),
   hwid_(hwid)
 {
   
@@ -232,8 +233,11 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
     motor_params_.winding_to_housing_thermal_resistance_ / motor_params_.winding_thermal_time_constant_;
   housing_thermal_mass_inverse_ = 
     motor_params_.housing_to_ambient_thermal_resistance_ / motor_params_.housing_thermal_time_constant_; 
+}
 
 
+bool MotorHeatingModel::initialize()
+{
   if (DEBUG_LEVEL) // Only use for debugging/developement.  
   {
     std::string topic("motor_temperature");
@@ -244,18 +248,11 @@ MotorHeatingModel::MotorHeatingModel(const MotorHeatingModelParameters &motor_pa
       if (publisher_ == NULL)
       {
         ROS_ERROR("Could not allocate realtime publisher");
+        return false;
       }
     }
   }
-  
-  // have motor heating model load last saved temperaures from filesystem
-  if (common->load_save_files_)
-  {
-    if (!loadTemperatureState())
-    {
-      ROS_WARN("Could not load motor temperature state for %s", actuator_name_.c_str());
-    }
-  }
+  return true;
 }
 
 
@@ -324,6 +321,7 @@ bool MotorHeatingModel::update(double heating_power, double ambient_temperature,
 }
 
 
+
 double MotorHeatingModel::updateFromDowntimeWithInterval(double downtime, 
                                                          double saved_ambient_temperature, 
                                                          double interval, 
@@ -353,7 +351,7 @@ void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient
   ROS_DEBUG("Initial temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
   double saved_downtime = downtime;
 
-  ros::Time start = ros::Time::now();
+  boost::timer timer;
 
   // Simulate motor heating model first with increasing step sizes : 
   // first 10 ms, then 100ms, and finally 1 seconds steps
@@ -370,10 +368,8 @@ void MotorHeatingModel::updateFromDowntime(double downtime, double saved_ambient
     housing_temperature_ = saved_ambient_temperature;
   }
 
-  ros::Time stop = ros::Time::now();
-
+  ROS_DEBUG("Took %f milliseconds to sim %f seconds", timer.elapsed()*1000., saved_downtime);
   ROS_DEBUG("Final temperatures : winding  = %f, housing = %f", winding_temperature_, housing_temperature_);
-  ROS_DEBUG("Took %f milliseconds to sim %f seconds", (stop-start).toSec()*1000., saved_downtime);
 }
 
 

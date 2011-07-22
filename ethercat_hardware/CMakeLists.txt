@@ -21,3 +21,6 @@ rosbuild_link_boost (motorconf system)
 
 rosbuild_add_gtest(test/wg0x_test test/wg0x_test.cpp )
 target_link_libraries(test/wg0x_test ethercat_hardware tinyxml)
+
+rosbuild_add_gtest(test/motor_heating_model_test test/motor_heating_model_test.cpp )
+target_link_libraries(test/motor_heating_model_test ethercat_hardware tinyxml)

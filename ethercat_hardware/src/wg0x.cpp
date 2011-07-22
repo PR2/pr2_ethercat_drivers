@@ -440,8 +440,16 @@ bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
     boost::make_shared<ethercat_hardware::MotorHeatingModel>(config.params_, 
                                                              actuator_info_.name_, 
                                                              hwid.str(),
-                                                             motor_heating_model_common_);
- 
+                                                             motor_heating_model_common_->save_directory_); 
+  // have motor heating model load last saved temperaures from filesystem
+  if (motor_heating_model_common_->load_save_files_)
+  {
+    if (!motor_heating_model_->loadTemperatureState())
+    {
+      ROS_WARN("Could not load motor temperature state for %s", actuator_info_.name_);
+    }
+  }
+  motor_heating_model_->initialize();
   motor_heating_model_common_->attach(motor_heating_model_);
 
   return true;

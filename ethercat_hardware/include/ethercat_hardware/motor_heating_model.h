@@ -153,9 +153,10 @@ public:
   MotorHeatingModel(const MotorHeatingModelParameters &motor_params,
                     const std::string &actuator_name,
                     const std::string &hwid,
-                    boost::shared_ptr<MotorHeatingModelCommon> common
+                    const std::string &save_directory
                     );
-  
+
+  bool initialize();  
 
   /*! \brief Updates motor temperature estimate
    *
@@ -176,7 +177,13 @@ public:
     return update(heating_power, ambient_temperature, duration);
   }  
 
+  //! Not thread save, should be called by same thread that calls update()
   bool hasOverheated() const {return overheat_;}
+  //! Gets current winding temperature estimate (for testing)
+  double getWindingTemperature() {return winding_temperature_;}
+  //! Gets current winding temperature estimate (for testing)
+  double getHousingTemperature() {return housing_temperature_;}
+
 
   //! Resets motor overheat flag
   void reset();
@@ -229,6 +236,8 @@ public:
 
   //! Appends heating diagnostic data to status wrapper
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d);
+
+
 
 
 protected:
