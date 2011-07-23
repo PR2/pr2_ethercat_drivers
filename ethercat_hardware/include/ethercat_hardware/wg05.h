@@ -32,43 +32,26 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#include <ethercat_hardware/ek1122.h>
-#include <iomanip>
+#ifndef ETHERCAT_HARDWARE_WG05_H
+#define ETHERCAT_HARDWARE_WG05_H
 
-#include <ros/console.h>
+#include <ethercat_hardware/wg0x.h>
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 73542738, EK1122, EthercatDevice);
-
-void EK1122::construct(EtherCAT_SlaveHandler *sh, int &start_address)
+/**  \brief EtherCAT driver for WG005 motor controller 
+ *
+ */
+class WG05 : public WG0X
 {
-  EthercatDevice::construct(sh, start_address);
-  sh->set_fmmu_config( new EtherCAT_FMMU_Config(0) );
-  sh->set_pd_config( new EtherCAT_PD_Config(0) );
-}
+public:
+  void construct(EtherCAT_SlaveHandler *sh, int &start_address);
+  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
+  void packCommand(unsigned char *buffer, bool halt, bool reset);  
+  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
+  enum
+  {
+    PRODUCT_CODE = 6805005
+  };
+};
 
-EK1122::~EK1122()
-{
-  delete sh_->get_fmmu_config();
-  delete sh_->get_pd_config();
-}
 
-int EK1122::initialize(pr2_hardware_interface::HardwareInterface *, bool)
-{
-  ROS_DEBUG("Device #%02d: EK1122 (%#08x)", sh_->get_ring_position(), sh_->get_product_code());
-  return 0;
-}
-void EK1122::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *)
-{
-  stringstream str;
-  str << "EtherCAT Device #" << setw(2) << setfill('0') << sh_->get_ring_position() << " (EK1122)";
-  d.name = str.str();
-  d.summary(0, "OK");
-  char serial[32];
-  snprintf(serial, sizeof(serial), "%d-%05d-%05d", sh_->get_product_code()/ 100000 , sh_->get_product_code() % 100000, sh_->get_serial());
-  d.hardware_id = serial;
-
-  d.clear();
-  d.addf("Product code", "EK1122 (%u)", sh_->get_product_code());
-
-  EthercatDevice::ethercatDiagnostics(d, 4); // EK1122 has 4 ports (2 ethernet and 2 lvds)
-}
+#endif /* ETHERCAT_HARDWARE_WG05_H */

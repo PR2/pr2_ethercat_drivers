@@ -46,11 +46,7 @@
 
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
-
-PLUGINLIB_REGISTER_CLASS(6805005, WG05, EthercatDevice);
-PLUGINLIB_REGISTER_CLASS(6805006, WG06, EthercatDevice);
-PLUGINLIB_REGISTER_CLASS(6805021, WG021, EthercatDevice);
-
+#include <boost/make_shared.hpp>
 
 // Temporary,, need 'log' fuction that can switch between fprintf and ROS_LOG.
 #define ERR_MODE "\033[41m"
@@ -63,7 +59,7 @@ PLUGINLIB_REGISTER_CLASS(6805021, WG021, EthercatDevice);
 #define WARN_HDR "\033[43mERROR\033[0m"
 
 
-static unsigned int rotateRight8(unsigned in)
+unsigned int WG0X::rotateRight8(unsigned in)
 {
   in &= 0xff;
   in = (in >> 1) | (in << 7);
@@ -71,7 +67,7 @@ static unsigned int rotateRight8(unsigned in)
   return in;
 }
 
-static unsigned computeChecksum(void const *data, unsigned length)
+unsigned WG0X::computeChecksum(void const *data, unsigned length)
 {
   const unsigned char *d = (const unsigned char *)data;
   unsigned int checksum = 0x42;
@@ -112,13 +108,13 @@ bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsig
   length_ = length - 1;
   seqnum_ = seqnum;
   write_nread_ = (type==LOCAL_BUS_WRITE) ? 1 : 0;
-  checksum_ = rotateRight8(computeChecksum(this, sizeof(*this) - 1));
+  checksum_ = WG0X::rotateRight8(WG0X::computeChecksum(this, sizeof(*this) - 1));
   return true;
 }
 
 bool WG0XMbxHdr::verifyChecksum(void) const
 {
-  return computeChecksum(this, sizeof(*this)) != 0;
+  return WG0X::computeChecksum(this, sizeof(*this)) != 0;
 }
 
 bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data)
@@ -136,7 +132,7 @@ bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsig
   {
     memset(data_, 0, length);
   }
-  unsigned int checksum = rotateRight8(computeChecksum(data_, length));
+  unsigned int checksum = WG0X::rotateRight8(WG0X::computeChecksum(data_, length));
   data_[length] = checksum;
   return true;
 }
@@ -196,6 +192,54 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
   diagnostics_info_        = new_diagnostics_info;
 }
 
+
+/*!
+ * \brief  Verify CRC stored in actuator info structure 
+ *
+ * ActuatorInfo now constains two CRCs.
+ * Originally all devices had EEPROMS with 264 byte pages, and only crc264 was used.  
+ * However, support was need for EEPROM with 246 byte pages.
+ * To have backwards compatible support, there is also a CRC of first 252 (256-4) bytes.
+ *
+ * Devices configure in past will only have 264 byte EEPROM pages, and 264byte CRC.  
+ * Newer devices might have 256 or 264 byte pages.  
+ * The 264 byte EEPROMs will store both CRCs.  
+ * The 256 byte EEPROMs will only store the 256 byte CRC.
+ * 
+ * Thus:
+ *  - Old software will be able to use 264 byte EEPROM with new dual CRC.
+ *  - New software will be able to use 264 byte EEPROM with single 264 byte CRC
+ *  - Only new sofware will be able to use 256 byte EEPROM
+ *
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if CRC is good, false if CRC is invalid
+ */
+bool WG0XActuatorInfo::verifyCRC() const
+{
+  // Actuator info contains two 
+  BOOST_STATIC_ASSERT(sizeof(WG0XActuatorInfo) == 264);
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
+  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
+  boost::crc_32_type crc32_256, crc32_264;  
+  crc32_256.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_256_));
+  crc32_264.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_264_));
+  return ((this->crc32_264_ == crc32_264.checksum()) || (this->crc32_256_ == crc32_256.checksum()));
+}
+
+/*!
+ * \brief  Calculate CRC of structure and update crc32_256_ and crc32_264_ elements
+ */
+void WG0XActuatorInfo::generateCRC(void)
+{
+  boost::crc_32_type crc32;
+  crc32.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_256_));
+  this->crc32_256_ = crc32.checksum();
+  crc32.reset();
+  crc32.process_bytes(this, offsetof(WG0XActuatorInfo, crc32_264_));
+  this->crc32_264_ = crc32.checksum();
+}
+
+
 WG0X::WG0X() :
   max_current_(0.0),
   too_many_dropped_packets_(false),
@@ -209,6 +253,18 @@ WG0X::WG0X() :
   motor_model_(NULL),
   disable_motor_model_checking_(false)
 {
+
+  last_timestamp_ = 0;
+  last_last_timestamp_ = 0;
+  drops_ = 0;
+  consecutive_drops_ = 0;
+  max_consecutive_drops_ = 0;
+  max_board_temperature_ = 0;
+  max_bridge_temperature_ = 0;
+  in_lockout_ = false;
+  resetting_ = false;
+  has_error_ = false;
+
   int error;
   if ((error = pthread_mutex_init(&wg0x_diagnostics_lock_, NULL)) != 0)
   {
@@ -227,272 +283,44 @@ WG0X::~WG0X()
   delete motor_model_;
 }
 
-WG06::WG06() :
-  pressure_checksum_error_(false),
-  accelerometer_samples_(0), 
-  accelerometer_missed_samples_(0),
-  first_publish_(true),
-  last_pressure_time_(0),
-  pressure_publisher_(0),
-  accel_publisher_(0)
-{
-
-}
-  
-WG06::~WG06()
-{
-  if (pressure_publisher_) delete pressure_publisher_;
-  if (accel_publisher_) delete accel_publisher_;
-}
 
 void WG0X::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
   EthercatDevice::construct(sh, start_address);
 
-  last_timestamp_ = 0;
-  last_last_timestamp_ = 0;
-  drops_ = 0;
-  consecutive_drops_ = 0;
-  max_consecutive_drops_ = 0;
-  max_board_temperature_ = 0;
-  max_bridge_temperature_ = 0;
-  in_lockout_ = false;
-  resetting_ = false;
-  has_error_ = false;
-
+  // WG EtherCAT devices (WG05,WG06,WG21) revisioning scheme
   fw_major_ = (sh->get_revision() >> 8) & 0xff;
   fw_minor_ = sh->get_revision() & 0xff;
   board_major_ = ((sh->get_revision() >> 24) & 0xff) - 1;
   board_minor_ = (sh->get_revision() >> 16) & 0xff;
 
-  bool isWG06 = sh_->get_product_code() == WG06::PRODUCT_CODE;
-  bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
-  unsigned int base_status = sizeof(WG0XStatus);
-
-  command_size_ = sizeof(WG0XCommand);
-  status_size_ = sizeof(WG0XStatus);
-  if (isWG06)
-  {
-    if (fw_major_ >= 1)
-      status_size_ = base_status = sizeof(WG06StatusWithAccel);
-    status_size_ += sizeof(WG06Pressure);
-  }
-  else if (isWG021)
-  {
-    status_size_ = base_status = sizeof(WG021Status);
-    command_size_ = sizeof(WG021Command);
-  }
-
-
-  EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(isWG06 ? 3 : 2);
-  //ROS_DEBUG("device %d, command  0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-  (*fmmu)[0] = EC_FMMU(start_address, // Logical start address
-                       command_size_,// Logical length
-                       0x00, // Logical StartBit
-                       0x07, // Logical EndBit
-                       COMMAND_PHY_ADDR, // Physical Start address
-                       0x00, // Physical StartBit
-                       false, // Read Enable
-                       true, // Write Enable
-                       true); // Enable
-
-  start_address += command_size_;
-
-  //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-  (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
-                       base_status, // Logical length
-                       0x00, // Logical StartBit
-                       0x07, // Logical EndBit
-                       STATUS_PHY_ADDR, // Physical Start address
-                       0x00, // Physical StartBit
-                       true, // Read Enable
-                       false, // Write Enable
-                       true); // Enable
-
-  start_address += base_status;
-
-  if (isWG06)
-  {
-    //ROS_DEBUG("device %d, pressure 0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
-    (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
-                         sizeof(WG06Pressure), // Logical length
-                         0x00, // Logical StartBit
-                         0x07, // Logical EndBit
-                         PRESSURE_PHY_ADDR, // Physical Start address
-                         0x00, // Physical StartBit
-                         true, // Read Enable
-                         false, // Write Enable
-                         true); // Enable
-
-    start_address += sizeof(WG06Pressure);
-  }
-  sh->set_fmmu_config(fmmu);
-
-  EtherCAT_PD_Config *pd = new EtherCAT_PD_Config(isWG06 ? 5 : 4);
-
-  // Sync managers
-  (*pd)[0] = EC_SyncMan(COMMAND_PHY_ADDR, command_size_, EC_BUFFERED, EC_WRITTEN_FROM_MASTER);
-  (*pd)[0].ChannelEnable = true;
-  (*pd)[0].ALEventEnable = true;
-
-  (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
-  (*pd)[1].ChannelEnable = true;
-
-  (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
-  (*pd)[2].ChannelEnable = true;
-  (*pd)[2].ALEventEnable = true;
-
-  (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
-  (*pd)[3].ChannelEnable = true;
-
-  if (isWG06)
-  {
-    (*pd)[4] = EC_SyncMan(PRESSURE_PHY_ADDR, sizeof(WG06Pressure));
-    (*pd)[4].ChannelEnable = true;
-  }
-
-  sh->set_pd_config(pd);
+  // Would normally configure EtherCAT initialize EtherCAT communication settings here.
+  // However, since all WG devices are slightly different doesn't make sense to do it here.
+  // Instead make sub-classes handle this.
 }
 
-int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
+
+/**  \brief Fills in ethercat_hardware::ActuatorInfo from WG0XActuatorInfo
+ *
+ * WG0XAcuatorInfo is a packed structure that comes directly from the device EEPROM.
+ * ethercat_hardware::ActuatorInfo is a ROS message type that is used by both
+ * motor model and motor heating model. 
+ */
+void WG0X::copyActuatorInfo(ethercat_hardware::ActuatorInfo &out,  const WG0XActuatorInfo &in)
 {
-  if ((fw_major_ == 1) && (fw_minor_ >= 21)) 
-  {
-    app_ram_status_ = APP_RAM_PRESENT;
-  }
-
-  int retval = WG0X::initialize(hw, allow_unprogrammed);
-
-  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
-
-  // Determine if device supports application RAM
-  if (!retval)
-  {
-    if (use_ros_)
-    {
-      // WG005B has very poor motor voltage measurement, don't use meaurement for dectecting problems. 
-      bool poor_measured_motor_voltage = (board_major_ <= 2);
-      double max_pwm_ratio = double(0x3C00) / double(PWM_MAX);
-      double board_resistance = 0.8;
-      if (!WG0X::initializeMotorModel(hw, "WG005", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
-      {
-        ROS_FATAL("Initializing motor trace failed");
-        sleep(1); // wait for ros to flush rosconsole output
-        return -1;
-      }
-    }
-
-  }// end if !retval
-  return retval;
+  out.id   = in.id_;
+  out.name = std::string(in.name_);
+  out.robot_name = in.robot_name_;
+  out.motor_make = in.motor_make_;
+  out.motor_model = in.motor_model_;
+  out.max_current = in.max_current_;
+  out.speed_constant = in.speed_constant_; 
+  out.motor_resistance  = in.resistance_;
+  out.motor_torque_constant = in.motor_torque_constant_;
+  out.encoder_reduction = in.encoder_reduction_;
+  out.pulses_per_revolution = in.pulses_per_revolution_;  
 }
 
-int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
-{
-  if ((fw_major_ == 1) && (fw_minor_ >= 1)) 
-  {
-    app_ram_status_ = APP_RAM_PRESENT;
-  }
-
-  int retval = WG0X::initialize(hw, allow_unprogrammed);
-  
-  if (!retval && use_ros_)
-  {
-    bool poor_measured_motor_voltage = false;
-    double max_pwm_ratio = double(0x2700) / double(PWM_MAX);
-    double board_resistance = 5.0;
-    if (!WG0X::initializeMotorModel(hw, "WG006", max_pwm_ratio, board_resistance, poor_measured_motor_voltage)) 
-    {
-      ROS_FATAL("Initializing motor trace failed");
-      sleep(1); // wait for ros to flush rosconsole output
-      return -1;
-    }
-
-    // Publish pressure sensor data as a ROS topic
-    string topic = "pressure";
-    if (!actuator_.name_.empty())
-      topic = topic + "/" + string(actuator_.name_);
-    pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
-
-    // Register accelerometer with pr2_hardware_interface::HardwareInterface
-    for (int i = 0; i < 2; ++i) 
-    {
-      pressure_sensors_[i].state_.data_.resize(22);
-      pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
-      if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
-      {
-          ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
-          return -1;
-      }
-    }
-
-    // Publish accelerometer data as a ROS topic, if firmware is recent enough
-    if (fw_major_ >= 1)
-    {
-      topic = "accelerometer";
-      if (!actuator_.name_.empty())
-        topic = topic + "/" + string(actuator_.name_);
-      accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
-
-      // Register accelerometer with pr2_hardware_interface::HardwareInterface
-      {
-        accelerometer_.name_ = actuator_info_.name_;
-        if (hw && !hw->addAccelerometer(&accelerometer_))
-        {
-            ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
-            return -1;
-        }
-      }
-
-    }
-  }
-
-  return retval;
-}
-
-int WG021::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
-{
-  // WG021 has no use for application ram
-  app_ram_status_ = APP_RAM_NOT_APPLICABLE;
-
-  int retval = WG0X::initialize(hw, allow_unprogrammed);
-
-  // Register digital outs with pr2_hardware_interface::HardwareInterface
-  struct {
-    pr2_hardware_interface::DigitalOut *d;
-    string name;
-  } digital_outs[] = {
-    {&digital_out_A_, "_digital_out_A"},
-    {&digital_out_B_, "_digital_out_B"},
-    {&digital_out_I_, "_digital_out_I"},
-    {&digital_out_M_, "_digital_out_M"},
-    {&digital_out_L0_, "_digital_out_L0"},
-    {&digital_out_L1_, "_digital_out_L1"},
-  };
-
-  for (size_t i = 0; i < sizeof(digital_outs)/sizeof(digital_outs[0]); ++i)
-  {
-    digital_outs[i].d->name_ = string(actuator_info_.name_) + digital_outs[i].name;
-    if (hw && !hw->addDigitalOut(digital_outs[i].d))
-    {
-        ROS_FATAL("A digital out of the name '%s' already exists.  Device #%02d has a duplicate name", digital_outs[i].d->name_.c_str(), sh_->get_ring_position());
-        return -1;
-    }
-  }
-
-  // Register projector with pr2_hardware_interface::HardwareInterface
-  {
-    projector_.name_ = actuator_info_.name_;
-    if (hw && !hw->addProjector(&projector_))
-    {
-        ROS_FATAL("A projector of the name '%s' already exists.  Device #%02d has a duplicate name", projector_.name_.c_str(), sh_->get_ring_position());
-        return -1;
-    }
-    projector_.command_.enable_ = true;
-    projector_.command_.current_ = 0;
-  }
-
-  return retval;
-}
 
 /**  \brief Allocates and initialized motor trace for WG0X devices than use it (WG006, WG005)
  */
@@ -508,20 +336,8 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   motor_model_ = new MotorModel(1000);
   if (motor_model_ == NULL) 
     return false;
-  
-  WG0XActuatorInfo &ai_(actuator_info_);
-  ethercat_hardware::ActuatorInfo ai;
-  ai.id   = ai_.id_;
-  ai.name = std::string(ai_.name_);
-  ai.robot_name = ai_.robot_name_;
-  ai.motor_make = ai_.motor_make_;
-  ai.motor_model = ai_.motor_model_;
-  ai.max_current = ai_.max_current_;
-  ai.speed_constant = ai_.speed_constant_; 
-  ai.motor_resistance  = ai_.resistance_;
-  ai.motor_torque_constant = ai_.motor_torque_constant_;
-  ai.encoder_reduction = ai_.encoder_reduction_;
-  ai.pulses_per_revolution = ai_.pulses_per_revolution_;
+
+  const ethercat_hardware::ActuatorInfo &ai(actuator_info_msg_);
   
   unsigned product_code = sh_->get_product_code();
   ethercat_hardware::BoardInfo bi;
@@ -559,6 +375,108 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
   return true;
 }
 
+
+boost::shared_ptr<ethercat_hardware::MotorHeatingModelCommon> WG0X::motor_heating_model_common_;
+
+bool WG0X::initializeMotorHeatingModel(bool allow_unprogrammed)
+{
+
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  ethercat_hardware::MotorHeatingModelParametersEepromConfig config;
+  if (!readMotorHeatingModelParametersFromEeprom(&com, config))
+  {
+    ROS_FATAL("Unable to read motor heating model config parameters from EEPROM");
+    return false;
+  }
+
+  // All devices need to have motor model heating model parameters stored in them...
+  // Even if device doesn't use paramers, they should be there.
+  if (!config.verifyCRC())
+  {
+    if (allow_unprogrammed)
+    {
+      ROS_WARN("%s EEPROM does not contain motor heating model parameters",
+               actuator_info_.name_);
+      return true;
+    }
+    else 
+    {
+      ROS_WARN("%s EEPROM does not contain motor heating model parameters",
+               actuator_info_.name_);
+      return true;
+      // TODO: once there is ability to update all MCB iwth motorconf, this is will become a fatal error
+      ROS_FATAL("%s EEPROM does not contain motor heating model parameters", 
+                actuator_info_.name_);
+      return false;
+    }
+  }
+
+  // Even though all devices should contain motor heating model parameters,
+  // The heating model does not need to be used.
+  if (config.enforce_ == 0)
+  {
+    return true;
+  }
+
+  // Don't need motor model if we are not using ROS (motorconf)
+  if (!use_ros_)
+  {
+    return true;
+  }
+
+  // Generate hwid for motor model
+  std::ostringstream hwid;
+  hwid << unsigned(sh_->get_product_code()) << std::setw(5) << std::setfill('0') << unsigned(sh_->get_serial());
+
+  // All motor heating models use shared settings structure
+  if (motor_heating_model_common_.get() == NULL)
+  {
+    ros::NodeHandle nh("~motor_heating_model");
+    motor_heating_model_common_ = boost::make_shared<ethercat_hardware::MotorHeatingModelCommon>(nh);
+    motor_heating_model_common_->initialize();
+    // Only display following warnings once.
+    if (!motor_heating_model_common_->enable_model_)
+    {
+      ROS_WARN("Motor heating model disabled for all devices");
+    }
+    if (!motor_heating_model_common_->load_save_files_)
+    {
+      ROS_WARN("Not loading motor heating model files");
+    }
+    if (!motor_heating_model_common_->update_save_files_)
+    {
+      ROS_WARN("Not saving motor heating model files");
+    }
+  }
+
+  if (!motor_heating_model_common_->enable_model_)
+  {
+    return true;
+  }
+    
+  motor_heating_model_ = 
+    boost::make_shared<ethercat_hardware::MotorHeatingModel>(config.params_, 
+                                                             actuator_info_.name_, 
+                                                             hwid.str(),
+                                                             motor_heating_model_common_->save_directory_); 
+  // have motor heating model load last saved temperaures from filesystem
+  if (motor_heating_model_common_->load_save_files_)
+  {
+    if (!motor_heating_model_->loadTemperatureState())
+    {
+      ROS_WARN("Could not load motor temperature state for %s", actuator_info_.name_);
+    }
+  }
+  if (motor_heating_model_common_->publish_temperature_)
+  {
+    motor_heating_model_->startTemperaturePublisher();
+  }
+  motor_heating_model_common_->attach(motor_heating_model_);
+
+  return true;
+}
+
+
 int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_unprogrammed)
 {
   ROS_DEBUG("Device #%02d: WG0%d (%#08x) Firmware Revision %d.%02d, PCB Revision %c.%02d, Serial #: %d", 
@@ -570,7 +488,7 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
 
-  if (sh_->get_product_code() == WG05::PRODUCT_CODE)
+  if (sh_->get_product_code() == WG05_PRODUCT_CODE)
   {
     if (fw_major_ != 1 || fw_minor_ < 7)
     {
@@ -595,19 +513,13 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   ROS_DEBUG("            Serial #: %05d", config_info_.device_serial_number_);
   double board_max_current = double(config_info_.absolute_current_limit_) * config_info_.nominal_current_scale_;
 
-  if (readEeprom(&com) < 0)
+  if (!readActuatorInfoFromEeprom(&com, actuator_info_))
   {
     ROS_FATAL("Unable to read actuator info from EEPROM");
     return -1;
   }
-
-  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
-  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
-  BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
-  boost::crc_32_type crc32_256, crc32_264;  
-  crc32_256.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_256_));
-  crc32_264.process_bytes(&actuator_info_, offsetof(WG0XActuatorInfo, crc32_264_));
-  if ((actuator_info_.crc32_264_ == crc32_264.checksum()) || (actuator_info_.crc32_256_ == crc32_256.checksum()))
+  
+  if (actuator_info_.verifyCRC())
   {
     if (actuator_info_.major_ != 0 || actuator_info_.minor_ != 2)
     {
@@ -623,7 +535,16 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     actuator_.name_ = actuator_info_.name_;
     ROS_DEBUG("            Name: %s", actuator_info_.name_);
 
-    bool isWG021 = sh_->get_product_code() == WG021::PRODUCT_CODE;
+    // Copy actuator info read from eeprom, into msg type
+    copyActuatorInfo(actuator_info_msg_, actuator_info_);
+
+    if (!initializeMotorHeatingModel(allow_unprogrammed))
+    {
+      return -1;
+    }
+
+
+    bool isWG021 = sh_->get_product_code() == WG021_PRODUCT_CODE;
     if (!isWG021)
     {
       // Register actuator with pr2_hardware_interface::HardwareInterface
@@ -680,8 +601,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   {
     ROS_WARN("WARNING: Device #%02d (%d%05d) is not programmed", 
              sh_->get_ring_position(), sh_->get_product_code(), sh_->get_serial());
-    actuator_info_.crc32_264_ = 0;
-    actuator_info_.crc32_256_ = 0;
+    //actuator_info_.crc32_264_ = 0;
+    //actuator_info_.crc32_256_ = 0;
 
     max_current_ = board_max_current;
   }
@@ -715,6 +636,10 @@ void WG0X::clearErrorFlags(void)
   status_checksum_error_ = false;
   timestamp_jump_detected_ = false;
   if (motor_model_) motor_model_->reset();
+  if (motor_heating_model_.get() != NULL) 
+  {
+    motor_heating_model_->reset();
+  }
 }
 
 void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
@@ -766,170 +691,6 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->mode_ |= (reset ? MODE_SAFETY_RESET : 0);
   c->digital_out_ = digital_out_.command_.data_;
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-}
-
-void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
-{
-  WG0X::packCommand(buffer, halt, reset);
-
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
-}
-
-void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
-{
-  if (reset) 
-  {
-    pressure_checksum_error_ = false;
-  }
-
-  WG0X::packCommand(buffer, halt, reset);
-
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
-
-  WG0XCommand *c = (WG0XCommand *)buffer;
-
-  if (accelerometer_.command_.range_ > 2 || 
-      accelerometer_.command_.range_ < 0)
-    accelerometer_.command_.range_ = 0;
-
-  if (accelerometer_.command_.bandwidth_ > 6 || 
-      accelerometer_.command_.bandwidth_ < 0)
-    accelerometer_.command_.bandwidth_ = 0;
-  
-  c->digital_out_ = (digital_out_.command_.data_ != 0) |
-    ((accelerometer_.command_.bandwidth_ & 0x7) << 1) | 
-    ((accelerometer_.command_.range_ & 0x3) << 4); 
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-}
-
-void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
-{
-  pr2_hardware_interface::ProjectorCommand &cmd = projector_.command_;
-
-  // Override enable if motors are halted  
-  if (reset) 
-  {
-    clearErrorFlags();
-  }
-  resetting_ = reset;
-
-  // Truncate the current to limit (do not allow negative current)
-  projector_.state_.last_commanded_current_ = cmd.current_;
-  cmd.current_ = max(min(cmd.current_, max_current_), 0.0);
-
-  // Pack command structures into EtherCAT buffer
-  WG021Command *c = (WG021Command *)buffer;
-  memset(c, 0, command_size_);
-  c->digital_out_ = digital_out_.command_.data_;
-  c->programmed_current_ = int(cmd.current_ / config_info_.nominal_current_scale_);
-  c->mode_ = (cmd.enable_ && !halt && !has_error_) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
-  c->mode_ |= reset ? MODE_SAFETY_RESET : 0;
-  c->config0_ = ((cmd.A_ & 0xf) << 4) | ((cmd.B_ & 0xf) << 0);
-  c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
-  c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
-  c->general_config_ = cmd.pulse_replicator_ == true;
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
-}
-
-bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
-{
-  bool rv = true;
-
-  int status_bytes = accel_publisher_ ? sizeof(WG06StatusWithAccel) : sizeof(WG0XStatus);
-  WG06Pressure *p = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
-
-  unsigned char* this_status = this_buffer + command_size_;
-  if (!verifyChecksum(this_status, status_bytes))
-  {
-    status_checksum_error_ = true;
-    rv = false;
-    goto end;
-  }
-
-  if (!verifyChecksum(p, sizeof(*p)))
-  {
-    pressure_checksum_error_ = true;
-    rv = false;
-    goto end;
-  }
-
-  for (int i = 0; i < 22; ++i ) {
-    pressure_sensors_[0].state_.data_[i] =
-      ((p->l_finger_tip_[i] >> 8) & 0xff) |
-      ((p->l_finger_tip_[i] << 8) & 0xff00);
-    pressure_sensors_[1].state_.data_[i] =
-      ((p->r_finger_tip_[i] >> 8) & 0xff) |
-      ((p->r_finger_tip_[i] << 8) & 0xff00);
-  }
-
-  if (p->timestamp_ != last_pressure_time_)
-  {
-    if (pressure_publisher_ && pressure_publisher_->trylock())
-    {
-      pressure_publisher_->msg_.header.stamp = ros::Time::now();
-      pressure_publisher_->msg_.set_l_finger_tip_size(22);
-      pressure_publisher_->msg_.set_r_finger_tip_size(22);
-      for (int i = 0; i < 22; ++i ) {
-        pressure_publisher_->msg_.l_finger_tip[i] = pressure_sensors_[0].state_.data_[i];
-        pressure_publisher_->msg_.r_finger_tip[i] = pressure_sensors_[1].state_.data_[i];
-      }
-      pressure_publisher_->unlockAndPublish();
-    }
-  }
-  last_pressure_time_ = p->timestamp_;
-
-
-  if (accel_publisher_)
-  {
-    WG06StatusWithAccel *status = (WG06StatusWithAccel *)(this_buffer + command_size_);
-    WG06StatusWithAccel *last_status = (WG06StatusWithAccel *)(prev_buffer + command_size_);
-    int count = uint8_t(status->accel_count_ - last_status->accel_count_);
-    accelerometer_samples_ += count;
-    // Only most recent 4 samples of accelerometer data is available in status data
-    // 4 samples will be enough with realtime loop running at 1kHz and accelerometer running at 3kHz
-    // If count is greater than 4, then some data has been "missed".
-    accelerometer_missed_samples_ += (count > 4) ? (count-4) : 0; 
-    count = min(4, count);
-    accelerometer_.state_.samples_.resize(count);
-    accelerometer_.state_.frame_id_ = string(actuator_info_.name_) + "_accelerometer_link";
-    for (int i = 0; i < count; ++i)
-    {
-      int32_t acc = status->accel_[count - i - 1];
-      int range = (acc >> 30) & 3;
-      float d = 1 << (8 - range);
-      accelerometer_.state_.samples_[i].x = 9.81 * ((((acc >>  0) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].y = 9.81 * ((((acc >> 10) & 0x3ff) << 22) >> 22) / d;
-      accelerometer_.state_.samples_[i].z = 9.81 * ((((acc >> 20) & 0x3ff) << 22) >> 22) / d;
-    }
-
-    if (accel_publisher_->trylock())
-    {
-      accel_publisher_->msg_.header.frame_id = accelerometer_.state_.frame_id_;
-      accel_publisher_->msg_.header.stamp = ros::Time::now();
-      accel_publisher_->msg_.set_samples_size(count);
-      for (int i = 0; i < count; ++i)
-      {
-        accel_publisher_->msg_.samples[i].x = accelerometer_.state_.samples_[i].x;
-        accel_publisher_->msg_.samples[i].y = accelerometer_.state_.samples_[i].y;
-        accel_publisher_->msg_.samples[i].z = accelerometer_.state_.samples_[i].z;
-      }
-      accel_publisher_->unlockAndPublish();
-    }
-  }
-
-  if (!WG0X::unpackState(this_buffer, prev_buffer))
-  {
-    rv = false;
-  }
-
- end:
-  return rv;
 }
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -996,27 +757,6 @@ bool WG0X::verifyChecksum(const void* buffer, unsigned size)
 }
 
 
-bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
-{
-  bool rv = true;
-
-  unsigned char* this_status = this_buffer + command_size_;
-  if (!verifyChecksum(this_status, status_size_))
-  {
-    status_checksum_error_  = true;
-    rv = false;
-    goto end;
-  }
-
-  if (!WG0X::unpackState(this_buffer, prev_buffer))
-  {
-    rv = false;
-  }
-
- end:
-  return rv;
-}
-
 
 /**
  * Returns (new_timestamp - old_timestamp).  Accounts for wrapping of timestamp values.
@@ -1069,6 +809,18 @@ double WG0X::calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp,
 }
 
 
+/**
+ * \brief  Converts raw 16bit temperature value returned by device into value in degress Celcius
+ * 
+ * \param raw_temp  Raw 16bit temperature value return by device
+ * \return          Temperature in degrees Celcius
+ */
+double WG0X::convertRawTemperature(int16_t raw_temp)
+{
+  return 0.0078125 * double(raw_temp);
+}
+
+
 // Returns true if timestamp changed by more than (amount) or time goes in reverse.
 bool WG0X::timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount)
 {
@@ -1081,8 +833,9 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   pr2_hardware_interface::ActuatorState &state = actuator_.state_;
   bool rv = true;
 
-  if (motor_model_ != NULL) {
-    // Collect data for motor model
+  if ((motor_model_ != NULL) || (motor_heating_model_ != NULL))
+  {
+    // Both motor model and motor heating model use MotorTraceSample
     ethercat_hardware::MotorTraceSample &s(motor_trace_sample_);
     double last_executed_current =  this_status->programmed_current_ * config_info_.nominal_current_scale_;
     double supply_voltage = double(prev_status->supply_voltage_) * config_info_.nominal_voltage_scale_;
@@ -1097,8 +850,24 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     s.velocity         = state.velocity_;
     s.encoder_position = state.position_;
     s.encoder_error_count = state.num_encoder_errors_;
-    motor_model_->sample(s);
-    motor_model_->checkPublish();
+
+    if (motor_model_ != NULL)
+    {
+      // Collect data for motor model
+      motor_model_->sample(s);
+      motor_model_->checkPublish();
+    }
+    if (motor_heating_model_ != NULL)
+    {
+      double ambient_temperature = convertRawTemperature(this_status->board_temperature_);
+      double duration = double(timestampDiff(this_status->timestamp_, prev_status->timestamp_)) * 1e-6;
+      motor_heating_model_->update(s, actuator_info_msg_, ambient_temperature, duration);
+
+      if ((!motor_heating_model_common_->disable_halt_) && (motor_heating_model_->hasOverheated()))
+      {
+        rv = false;
+      }
+    }
   }
 
   max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
@@ -1182,57 +951,6 @@ bool WG0X::publishTrace(const string &reason, unsigned level, unsigned delay)
     return true;
   }
   return false;
-}
-
-bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
-{
-  bool rv = true;
-
-  pr2_hardware_interface::ProjectorState &state = projector_.state_;
-  WG021Status *this_status, *prev_status;
-  this_status = (WG021Status *)(this_buffer + command_size_);
-  prev_status = (WG021Status *)(prev_buffer + command_size_);
-  
-  if (!verifyChecksum(this_status, status_size_))
-  {
-    status_checksum_error_ = true;
-    rv = false;
-    goto end;
-  }
-
-  digital_out_.state_.data_ = this_status->digital_out_;
-
-  state.timestamp_us_ = this_status->timestamp_;
-  state.falling_timestamp_us_ = this_status->output_stop_timestamp_;
-  state.rising_timestamp_us_ = this_status->output_start_timestamp_;
-
-  state.output_ = (this_status->output_status_ & 0x1) == 0x1;
-  state.falling_timestamp_valid_ = (this_status->output_status_ & 0x8) == 0x8;
-  state.rising_timestamp_valid_ = (this_status->output_status_ & 0x4) == 0x4;
-
-  state.A_ = ((this_status->config0_ >> 4) & 0xf);
-  state.B_ = ((this_status->config0_ >> 0) & 0xf);
-  state.I_ = ((this_status->config1_ >> 4) & 0xf);
-  state.M_ = ((this_status->config1_ >> 0) & 0xf);
-  state.L1_ = ((this_status->config2_ >> 4) & 0xf);
-  state.L0_ = ((this_status->config2_ >> 0) & 0xf);
-  state.pulse_replicator_ = (this_status->general_config_ & 0x1) == 0x1;
-
-  state.last_executed_current_ = this_status->programmed_current_ * config_info_.nominal_current_scale_;
-  state.last_measured_current_ = this_status->measured_current_ * config_info_.nominal_current_scale_;
-
-  state.max_current_ = max_current_;
-
-  max_board_temperature_ = max(max_board_temperature_, this_status->board_temperature_);
-  max_bridge_temperature_ = max(max_bridge_temperature_, this_status->bridge_temperature_);
-
-  if (!verifyState((WG0XStatus *)(this_buffer + command_size_), (WG0XStatus *)(prev_buffer + command_size_)))
-  {
-    rv = false;
-  }
-
-end:
-  return rv;
 }
 
 
@@ -1342,107 +1060,449 @@ bool WG0X::readAppRam(EthercatCom *com, double &zero_offset)
   return true;
 }
 
-int WG0X::sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd)
+
+/*!
+ * \brief  Waits for SPI eeprom state machine to be idle.
+ *
+ * Polls busy SPI bit of SPI state machine. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if state machine is free, false if there is an error, or we timed out waiting
+ */
+bool WG0X::waitForSpiEepromReady(EthercatCom *com)
 {
-  // Send command
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, cmd, sizeof(*cmd)))
+  WG0XSpiEepromCmd cmd;
+  // TODO : poll for a given number of millseconds instead of a given number of cycles
+  //start_time = 0;
+  unsigned tries = 0;
+  do {
+    //read_time = time;
+    ++tries;
+    if (!readSpiEepromCmd(com, cmd))
+    {
+      ROS_ERROR("Error reading SPI Eeprom Cmd busy bit");
+      return false;
+    }
+
+    if (!cmd.busy_) 
+    {
+      return true;
+    }       
+    
+    usleep(100);
+  } while (tries <= 10);
+
+  ROS_ERROR("Timed out waiting for SPI state machine to be idle (%d)", tries);
+  return false;
+}
+
+
+/*!
+ * \brief  Sends command to SPI EEPROM state machine.   
+ *
+ * This function makes sure SPI EEPROM state machine is idle before sending new command.
+ * It also waits for state machine to be idle before returning.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if command was send, false if there is an error
+ */
+bool WG0X::sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd)
+{
+  if (!waitForSpiEepromReady(com))
   {
-    fprintf(stderr, "ERROR WRITING EEPROM COMMAND\n");
-    return -1;
+    return false;
   }
 
-  for (int tries = 0; tries < 10; ++tries)
+  // Send command
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
   {
-    WG0XSpiEepromCmd stat;
-    if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &stat, sizeof(stat)))
+    ROS_ERROR("Error writing SPI EEPROM command");
+    return false;
+  }
+
+  // Now read back SPI EEPROM state machine register, and check : 
+  //  1. for state machine to become ready
+  //  2. that command data was properly write and not corrupted
+  WG0XSpiEepromCmd stat;
+  unsigned tries = 0;
+  do
+  {
+    if (!readSpiEepromCmd(com, stat))
     {
-      fprintf(stderr, "ERROR READING EEPROM BUSY STATUS\n");
-      return -1;
+      return false;
     }
 
-    if (stat.operation_ != cmd->operation_)
+    if (stat.operation_ != cmd.operation_)
     {
-      fprintf(stderr, "READBACK OF OPERATION INVALID : got 0x%X, expected 0x%X\n", stat.operation_, cmd->operation_);
-      return -1;
+      ROS_ERROR("Invalid readback of SPI EEPROM operation : got 0x%X, expected 0x%X\n", stat.operation_, cmd.operation_);
+      return false;
     }
 
-    // Keep looping while SPI command is running
+    // return true if command has completed
     if (!stat.busy_)
     {
-      return 0;
+      if (tries > 0) 
+      {
+        ROS_WARN("Eeprom state machine took %d cycles", tries);
+      }
+      return true;;
     }
 
     fprintf(stderr, "eeprom busy reading again, waiting...\n");
     usleep(100);
-  }
+  } while (++tries < 10);
 
-  fprintf(stderr, "ERROR : EEPROM READING BUSY AFTER 10 TRIES\n");
-  return -1;
+  ROS_ERROR("Eeprom SPI state machine busy after %d cycles", tries);
+  return false;
 }
 
-int WG0X::readEeprom(EthercatCom *com)
+
+/*!
+ * \brief  Read data from single eeprom page. 
+ *
+ * Data should be less than 264 bytes.  Note that some eeproms only support 256 byte pages.  
+ * If 264 bytes of data are read from a 256 byte eeprom, then last 8 bytes of data will be zeros.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param page      EEPROM page number to read from.  Should be 0 to 4095.
+ * \param data      pointer to data buffer
+ * \param length    length of data in buffer
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length)
 {
-  BOOST_STATIC_ASSERT(sizeof(actuator_info_) == 264);
+  if (length > MAX_EEPROM_PAGE_SIZE)
+  {
+    ROS_ERROR("Eeprom read length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
+    return false;
+  }
+
+  if (page >= NUM_EEPROM_PAGES)
+  {
+    ROS_ERROR("Eeprom read page %d > %d", page, NUM_EEPROM_PAGES-1);
+    return false;
+  }
 
   // Since we don't know the size of the eeprom there is not always 264 bytes available.
   // This may try to read 264 bytes, but only the first 256 bytes may be valid.  
-  // To any odd issue, zero out read buffer before asking for eeprom data.
-  memset(&actuator_info_,0,sizeof(actuator_info_));  
+  // To avoid any odd issue, zero out FPGA buffer before asking for eeprom data.
+  memset(data,0,length);  
   if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) 
   {
-    fprintf(stderr, "ERROR ZEROING EEPROM PAGE DATA\n");
-    return -1;
+    ROS_ERROR("Error zeroing eeprom data buffer");
+    return false;
   }
 
+  // Send command to SPI state machine to perform read of eeprom, 
+  // sendSpiEepromCmd will automatically wait for SPI state machine 
+  // to be idle before a new command is sent
   WG0XSpiEepromCmd cmd;
   memset(&cmd,0,sizeof(cmd));
-  cmd.build_read(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(com, &cmd)) {
-    fprintf(stderr, "ERROR SENDING SPI EEPROM READ COMMAND\n");
-    return -1;
-  }
-  // Read buffered data in multiple chunks
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) {
-    fprintf(stderr, "ERROR READING BUFFERED EEPROM PAGE DATA\n");
-    return -1;
+  cmd.build_read(page);
+  if (!sendSpiEepromCmd(com, cmd)) 
+  {
+    ROS_ERROR("Error sending SPI read command");
+    return false;
   }
 
-  return 0;
+  // Wait for SPI Eeprom Read to complete
+  // sendSPICommand will wait for Command to finish before returning
 
+  // Read eeprom page data from FPGA buffer
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, length)) 
+  {
+    ROS_ERROR("Error reading eeprom data from buffer");
+    return false;
+  }
+
+  return true;
 }
 
-void WG0X::program(WG0XActuatorInfo *info)
+
+/*!
+ * \brief  Reads actuator info from eeprom.  
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param acuator_info Structure where actuator info will be stored.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuator_info)
 {
-  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  BOOST_STATIC_ASSERT(sizeof(actuator_info) == 264);
 
-  writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, info, sizeof(WG0XActuatorInfo));
+  if (!readEepromPage(com, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
+  {
+    ROS_ERROR("Reading acutuator info from eeprom");
+    return false;
+  }
+  return true;
+}
+ 
+/*!
+ * \brief  Reads actuator info from eeprom.  
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param acuator_info Structure where actuator info will be stored.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeatingModelParametersEepromConfig &config)
+{
+  BOOST_STATIC_ASSERT(sizeof(config) == 256);
+
+  if (!readEepromPage(com, config.EEPROM_PAGE, &config, sizeof(config)))
+  {
+    ROS_ERROR("Reading motor heating model config from eeprom");
+    return false;
+  }
+  return true;
+}
+
+
+
+/*!
+ * \brief  Write data to single eeprom page. 
+ *
+ * Data should be less than 264 bytes.  If data size is less than 264 bytes, then 
+ * the page will be padded with 0xFF.  Note that some eeproms only support 256 byte
+ * pages.  With 256 byte eeproms, the eeprom FW with ingore last 8 bytes of requested write.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param page      EEPROM page number to write to.  Should be 0 to 4095.
+ * \param data      pointer to data buffer
+ * \param length    length of data in buffer.  If length < 264, eeprom page will be padded out to 264 bytes.
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length)
+{
+  if (length > 264)
+  {
+    ROS_ERROR("Eeprom write length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
+    return false;
+  }
+
+  if (page >= NUM_EEPROM_PAGES)
+  {
+    ROS_ERROR("Eeprom write page %d > %d", page, NUM_EEPROM_PAGES-1);
+    return false;
+  }
+
+  // wait for eeprom to be ready before write data into FPGA buffer
+  if (!waitForSpiEepromReady(com))
+  {
+    return false;
+  }
+
+  const void *write_buf = data;
+
+  // if needed, pad data to 264 byte in buf
+  uint8_t buf[MAX_EEPROM_PAGE_SIZE];
+  if (length < MAX_EEPROM_PAGE_SIZE)
+  {
+    memcpy(buf, data, length);
+    memset(buf+length, 0xFF, MAX_EEPROM_PAGE_SIZE-length);
+    write_buf = buf;    
+  }
+
+  // Write data to FPGA buffer
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, write_buf, MAX_EEPROM_PAGE_SIZE))
+  {
+    ROS_ERROR("Write of SPI EEPROM buffer failed");
+    return false;
+  }
+
+  // Have SPI EEPROM state machine start SPI data transfer
   WG0XSpiEepromCmd cmd;
-  cmd.build_write(ACTUATOR_INFO_PAGE);
-  if (sendSpiCommand(&com, &cmd)) {
-    fprintf(stderr, "ERROR SENDING SPI EEPROM WRITE COMMAND\n");
+  cmd.build_write(page);
+  if (!sendSpiEepromCmd(com, cmd)) 
+  {
+    ROS_ERROR("Error giving SPI EEPROM write command");
+    return false;
   }
 
-  char data[2];
-  memset(data, 0, sizeof(data));
-  data[0] = 0xD7;
-
-  if (writeMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
-    fprintf(stderr, "ERROR WRITING EEPROM COMMAND BUFFER\n");
+  // Wait for EEPROM write to complete
+  if (!waitForEepromReady(com))
+  {
+    return false;
   }
 
+  return true;
+}
 
-  { // Start arbitrary command
+
+/*!
+ * \brief  Waits for EEPROM to become ready
+ *
+ * Certain eeprom operations (such as page reads), are complete immediately after data is 
+ * trasferred.  Other operations (such as page writes) take some amount of time after data
+ * is trasfered to complete.  This polls the EEPROM status register until the 'ready' bit 
+ * is set.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \return          true if there is success, false if there is an error or wait takes too long
+ */
+bool WG0X::waitForEepromReady(EthercatCom *com)
+{
+  // Wait for eeprom write to complete
+  unsigned tries = 0;
+  EepromStatusReg status_reg;
+  do {
+    if (!readEepromStatusReg(com, status_reg))
+    {
+      return false;
+    }
+    if (status_reg.ready_)
+    {
+      break;
+    }
+    usleep(100);
+  } while (++tries < 20);
+
+  if (!status_reg.ready_) 
+  {
+    ROS_ERROR("Eeprom still busy after %d cycles", tries);
+    return false;
+  } 
+
+  if (tries > 10)
+  {
+    ROS_WARN("EEPROM took %d cycles to be ready", tries);
+  }
+  return true;
+}
+
+
+
+/*!
+ * \brief  Reads EEPROM status register
+ *
+ * Amoung other things, eeprom status register provide information about whether eeprom 
+ * is busy performing a write.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param reg       reference to EepromStatusReg struct where eeprom status will be stored
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg)
+{
+  // Status is read from EEPROM by having SPI state machine perform an "abitrary" operation.
+  // With an arbitrary operation, the SPI state machine shifts out byte from buffer, while
+  // storing byte shifted in from device into same location in buffer.
+  // SPI state machine has no idea what command it is sending device or how to intpret its result.
+
+  // To read eeprom status register, we transfer 2 bytes.  The first byte is the read status register 
+  // command value (0xD7).  When transfering the second byte, the EEPROM should send its status.
+  char data[2] = {0xD7, 0x00};
+  BOOST_STATIC_ASSERT(sizeof(data) == 2);
+  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
+  {
+    ROS_ERROR("Writing SPI buffer");
+    return false;
+  }
+    
+  { // Have SPI state machine trasfer 2 bytes
     WG0XSpiEepromCmd cmd;
     cmd.build_arbitrary(sizeof(data));
-    if (sendSpiCommand(&com, &cmd)) {
-      fprintf(stderr, "reading eeprom status failed");
+    if (!sendSpiEepromCmd(com, cmd)) 
+    {
+      ROS_ERROR("Sending SPI abitrary command");
+      return false;
     }
   }
-
-
-  if (readMailbox(&com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data))) {
-    fprintf(stderr, "ERROR READING EEPROM COMMAND BUFFER\n");
+    
+  // Data read from device should now be stored in FPGA buffer
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
+  {
+    ROS_ERROR("Reading status register data from SPI buffer");
+    return false;
   }
+ 
+  // Status register would be second byte of buffer
+  reg.raw_ = data[1];
+  return true;
+}
+
+
+/*!
+ * \brief  Reads SPI state machine command register
+ *
+ * For communicating with EEPROM, there is a simple state machine that transfers
+ * data to/from FPGA buffer over SPI.  
+ * When any type of comunication is done with EEPROM:
+ *  1. Write command or write data into FPGA buffer.
+ *  2. Have state machine start transfer bytes from buffer to EEPROM, and write data from EEPROM into buffer
+ *  3. Wait for state machine to complete (by reading its status)
+ *  4. Read EEPROM response from FPGA buffer.
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param reg       reference to WG0XSpiEepromCmd struct where read data will be stored
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
+{
+  BOOST_STATIC_ASSERT(sizeof(WG0XSpiEepromCmd) == 3);
+  if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
+  {
+    ROS_ERROR("Reading SPI command register with mailbox");
+    return false;
+  }
+  
+  return true;
+}
+
+
+/*!
+ * \brief  Programs acutator and heating parameters into device EEPROM.
+ *
+ * WG0X devices store configuaration info in EEPROM.  This configuration information contains
+ * information such as device name, motor parameters, and encoder parameters.  
+ *
+ * Originally, devices only stored ActuatorInfo in EEPROM.
+ * However, later we discovered that in extreme cases, certain motors may overheat.  
+ * To prevent motor overheating, a model is used to estimate motor winding temperature
+ * and stop motor if temperature gets too high.  
+ * However, the new motor heating model needs more motor parameters than were originally stored
+ * in eeprom. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param actutor_info  Actuator information to be stored in device EEPROM
+ * \param actutor_info  Motor heating motor information to be stored in device EEPROM
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
+{
+  if (!writeEepromPage(com, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
+  {
+    ROS_ERROR("Writing actuator infomation to EEPROM");
+    return false;
+  }
+  
+  return true;
+}
+
+
+/*!
+ * \brief  Programs motor heating parameters into device EEPROM.
+ *
+ * Originally, devices only stored ActuatorInfo in EEPROM.
+ * However, later we discovered that in extreme cases, certain motors may overheat.  
+ * To prevent motor overheating, a model is used to estimate motor winding temperature
+ * and stop motor if temperature gets too high.  
+ * However, the new motor heating model needs more motor parameters than were originally stored
+ * in eeprom. 
+ * 
+ * \param com       EtherCAT communication class used for communicating with device
+ * \param heating_config  Motor heating model parameters to be stored in device EEPROM
+ * \return          true if there is success, false if there is an error
+ */
+bool WG0X::program(EthercatCom *com, const ethercat_hardware::MotorHeatingModelParametersEepromConfig &heating_config)
+{
+  if (!writeEepromPage(com, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
+  {
+    ROS_ERROR("Writing motor heating model configuration to EEPROM");
+    return false;
+  }
+  
+  return true;  
 }
 
 /*!
@@ -2494,14 +2554,14 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
     unsigned product = sh_->get_product_code();
 
     // Current scale 
-    if ((product == WG05::PRODUCT_CODE) && (board_major_ == 1))
+    if ((product == WG05_PRODUCT_CODE) && (board_major_ == 1))
     {
       // WG005B measure current going into and out-of H-bridge (not entire board)
       static const double WG005B_SUPPLY_CURRENT_SCALE = (1.0 / (8152.0 * 0.851)) * 4.0;
       double bridge_supply_current = double(di.supply_current_in_) * WG005B_SUPPLY_CURRENT_SCALE;
       d.addf("Bridge Supply Current", "%f", bridge_supply_current);
     }
-    else if ((product == WG05::PRODUCT_CODE) || (product == WG021::PRODUCT_CODE)) 
+    else if ((product == WG05_PRODUCT_CODE) || (product == WG021_PRODUCT_CODE)) 
     {
       // WG005[CDEF] measures curret going into entire board.  It cannot measure negative (regenerative) current values.
       // WG021A == WG005E,  WG021B == WG005F
@@ -2536,7 +2596,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Position", "%02d", sh_->get_ring_position());
   d.addf("Product code",
         "WG0%d (%d) Firmware Revision %d.%02d, PCB Revision %c.%02d",
-        sh_->get_product_code() == WG05::PRODUCT_CODE ? 5 : 6,
+        sh_->get_product_code() == WG05_PRODUCT_CODE ? 5 : 6,
         sh_->get_product_code(), fw_major_, fw_minor_,
         'A' + board_major_, board_minor_);
 
@@ -2595,6 +2655,11 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     }
   }
 
+  if (motor_heating_model_.get() != NULL)
+  {
+    motor_heating_model_->diagnostics(d);
+  }
+
   if (last_num_encoder_errors_ != status->num_encoder_errors_)
   {
     d.mergeSummaryf(d.WARN, "Encoder errors detected");
@@ -2606,114 +2671,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Consecutive Drops", "%d", consecutive_drops_);
   d.addf("Max Consecutive Drops", "%d", max_consecutive_drops_);
 
-  unsigned numPorts = (sh_->get_product_code()==WG06::PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
+  unsigned numPorts = (sh_->get_product_code()==WG06_PRODUCT_CODE) ? 1 : 2; // WG006 has 1 port, WG005 has 2
   EthercatDevice::ethercatDiagnostics(d, numPorts); 
 }
 
-void WG06::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
-{
-  WG0X::diagnostics(d, buffer);
-  
-  pr2_hardware_interface::AccelerometerCommand acmd(accelerometer_.command_);
-
-  const char * range_str = 
-    (acmd.range_ == 0) ? "+/-2G" :
-    (acmd.range_ == 1) ? "+/-4G" :
-    (acmd.range_ == 2) ? "+/-8G" :
-    "INVALID";
-
-  const char * bandwidth_str = 
-    (acmd.bandwidth_ == 6) ? "1500Hz" :
-    (acmd.bandwidth_ == 5)  ? "750Hz" :
-    (acmd.bandwidth_ == 4)  ? "375Hz" :
-    (acmd.bandwidth_ == 3)  ? "190Hz" :
-    (acmd.bandwidth_ == 2)  ? "100Hz" :
-    (acmd.bandwidth_ == 1)   ? "50Hz" :
-    (acmd.bandwidth_ == 0)   ? "25Hz" :
-    "INVALID";
-
-  if (pressure_checksum_error_) 
-  {
-    d.mergeSummary(d.ERROR, "Checksum error on pressure data");
-  }
-
-  // Board revB=1 and revA=0 does not have accelerometer
-  bool has_accelerometer = (board_major_ >= 2);
-  double sample_frequency = 0.0;
-  ros::Time current_time(ros::Time::now());
-  if (!first_publish_)
-  {
-    sample_frequency = double(accelerometer_samples_) / (current_time - last_publish_time_).toSec();
-    {
-      if (((sample_frequency < 2000) || (sample_frequency > 4000)) && has_accelerometer)
-      {
-        d.mergeSummary(d.WARN, "Bad accelerometer sampling frequency");
-      }
-    }
-  }
-  accelerometer_samples_ = 0;
-  last_publish_time_ = current_time;
-  first_publish_ = false;
-
-  d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
-  d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
-  d.addf("Accelerometer bandwidth", "%s (%d)", bandwidth_str, acmd.bandwidth_);
-  d.addf("Accelerometer sample frequency", "%f", sample_frequency);
-  d.addf("Accelerometer missed samples", "%d", accelerometer_missed_samples_);
-                                   
-}
-
-void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
-{
-  WG021Status *status = (WG021Status *)(buffer + command_size_);
-
-  stringstream str;
-  str << "EtherCAT Device (" << actuator_info_.name_ << ")";
-  d.name = str.str();
-  char serial[32];
-  snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
-  d.hardware_id = serial;
-
-  if (!has_error_)
-    d.summary(d.OK, "OK");
-
-  d.clear();
-  d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
-  d.add("Name", actuator_info_.name_);
-  d.addf("Position", "%02d", sh_->get_ring_position());
-  d.addf("Product code",
-        "WG021 (%d) Firmware Revision %d.%02d, PCB Revision %c.%02d",
-        sh_->get_product_code(), fw_major_, fw_minor_,
-        'A' + board_major_, board_minor_);
-
-  d.add("Robot", actuator_info_.robot_name_);
-  d.add("Serial Number", serial);
-  d.addf("Nominal Current Scale", "%f",  config_info_.nominal_current_scale_);
-  d.addf("Nominal Voltage Scale",  "%f", config_info_.nominal_voltage_scale_);
-  d.addf("HW Max Current", "%f", config_info_.absolute_current_limit_ * config_info_.nominal_current_scale_);
-  d.addf("SW Max Current", "%f", actuator_info_.max_current_);
-
-  publishGeneralDiagnostics(d);
-  publishMailboxDiagnostics(d);
-
-  d.add("Mode", modeString(status->mode_));
-  d.addf("Digital out", "%d", status->digital_out_);
-  d.addf("Programmed current", "%f", status->programmed_current_ * config_info_.nominal_current_scale_);
-  d.addf("Measured current", "%f", status->measured_current_ * config_info_.nominal_current_scale_);
-  d.addf("Timestamp", "%u", status->timestamp_);
-  d.addf("Config 0", "%#02x", status->config0_);
-  d.addf("Config 1", "%#02x", status->config1_);
-  d.addf("Config 2", "%#02x", status->config2_);
-  d.addf("Output Status", "%#02x", status->output_status_);
-  d.addf("Output Start Timestamp", "%u", status->output_start_timestamp_);
-  d.addf("Output Stop Timestamp", "%u", status->output_stop_timestamp_);
-  d.addf("Board temperature", "%f", 0.0078125 * status->board_temperature_);
-  d.addf("Max board temperature", "%f", 0.0078125 * max_board_temperature_);
-  d.addf("Bridge temperature", "%f", 0.0078125 * status->bridge_temperature_);
-  d.addf("Max bridge temperature", "%f", 0.0078125 * max_bridge_temperature_);
-  d.addf("Supply voltage", "%f", status->supply_voltage_ * config_info_.nominal_voltage_scale_);
-  d.addf("LED voltage", "%f", status->led_voltage_ * config_info_.nominal_voltage_scale_);
-  d.addf("Packet count", "%d", status->packet_count_);
-
-  EthercatDevice::ethercatDiagnostics(d, 2); 
-}

@@ -60,6 +60,8 @@
 
 #include <std_msgs/Bool.h>
 
+#include <boost/regex.hpp>
+
 using namespace boost::accumulators;
  
 struct EthercatHardwareDiagnostics 

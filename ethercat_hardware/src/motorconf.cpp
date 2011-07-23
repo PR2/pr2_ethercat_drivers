@@ -37,13 +37,19 @@
 #include <getopt.h>
 #include <sys/mman.h>
 
+#include <tinyxml.h>
+
 #include <ethercat/ethercat_xenomai_drv.h>
 #include <dll/ethercat_dll.h>
 #include <al/ethercat_AL.h>
 #include <al/ethercat_master.h>
 #include <al/ethercat_slave_handler.h>
 
+#include "ethercat_hardware/motor_heating_model.h"
 #include <ethercat_hardware/wg0x.h>
+#include <ethercat_hardware/wg05.h>
+#include <ethercat_hardware/wg06.h>
+#include <ethercat_hardware/wg021.h>
 #include <ethercat_hardware/wg014.h>
 
 #include <boost/crc.hpp>
@@ -53,17 +59,29 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 
+using namespace ethercat_hardware;
+
 vector<EthercatDevice *> devices;
 
 struct Actuator {
   string motor;
   string board;
+  bool enforce_heating_model;
 };
 typedef pair<string, Actuator> ActuatorPair;
 map<string, Actuator> actuators;
 
-typedef pair<string, WG0XActuatorInfo> MotorPair;
-map<string, WG0XActuatorInfo> motors;
+struct Config 
+{
+  Config(const WG0XActuatorInfo &actuator_info, const MotorHeatingModelParametersEepromConfig &heating_config) :
+    actuator_info_(actuator_info), heating_config_(heating_config)
+  {  }
+  Config() {}
+  WG0XActuatorInfo actuator_info_;
+  MotorHeatingModelParametersEepromConfig heating_config_;
+};
+typedef pair<string, Config> MotorPair;
+map<string, Config> motors;
 
 void init(char *interface)
 {
@@ -199,44 +217,161 @@ string boardName(EthercatDevice *d)
   return "unknown";
 }
 
-void programDevice(int device, WG0XActuatorInfo &config, char *name, string expected_board)
+
+WG0X* getWGDevice(int device)
 {
   uint32_t num_slaves = EtherCAT_AL::instance()->get_num_slaves();
-  if ((device >= (int)num_slaves) || (device < 0)) {
+  if ((device >= (int)num_slaves) || (device < 0)) 
+  {
     ROS_FATAL("Invalid device number %d.  Must be value between 0 and %d", device, num_slaves-1);
-    return;
+    return NULL;
   }
  
-  if (devices[device])
-  {
-    WG0X *wg = dynamic_cast<WG0X *>(devices[device]);
-
-    if (wg) {
-      string board = boardName(devices[device]);
-      if (expected_board != board) {
-        ROS_FATAL("Device #%02d is a %s, but %s expects a %s\n", device, board.c_str(), name, expected_board.c_str());
-        return;
-      }
-      ROS_INFO("Programming device %d, to be named: %s\n", device, name);
-      strcpy(config.name_, name);
-      boost::crc_32_type crc32;
-      crc32.process_bytes(&config, offsetof(WG0XActuatorInfo, crc32_256_));
-      config.crc32_256_ = crc32.checksum();
-      crc32.reset();
-      crc32.process_bytes(&config, offsetof(WG0XActuatorInfo, crc32_264_));
-      config.crc32_264_ = crc32.checksum();
-      wg->program(&config);
-    }
-    else
-    {
-      ROS_FATAL("The device a position #%d is not programmable", device);
-    }
-  }
-  else
+  if (devices[device] == NULL)
   {
     ROS_FATAL("There is no device at position #%d", device);
+    return NULL;
   }
+  
+  WG0X *wg = dynamic_cast<WG0X *>(devices[device]);
+  if (wg==NULL) 
+  {
+    ROS_FATAL("The device a position #%d is not programmable", device);
+    return NULL;
+  }    
+
+  return wg;
 }
+
+
+bool programDevice(int device, 
+                   const Config &config, 
+                   char *name, string expected_board, bool enforce_heating_model)
+{
+  WG0X *wg = getWGDevice(device);
+  if (wg == NULL)
+  {
+    return false;
+  }
+
+  string board = boardName(devices[device]);
+  if (expected_board != board)
+  {
+    ROS_FATAL("Device #%02d is a %s, but %s expects a %s\n", device, board.c_str(), name, expected_board.c_str());
+    return false;
+  }
+  ROS_INFO("Programming device %d, to be named: %s\n", device, name);
+
+  WG0XActuatorInfo actuator_info = config.actuator_info_;
+  if (strlen(name) >= sizeof(actuator_info.name_))
+  {
+    ROS_FATAL("Device name '%s' is too long", name);
+  }
+  strncpy(actuator_info.name_, name, sizeof(actuator_info.name_));
+  actuator_info.generateCRC();
+
+  ROS_INFO("Programming actuator version %d.%d", 
+           int(actuator_info.major_), int(actuator_info.minor_));
+
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  if (!wg->program(&com, actuator_info))
+  {
+    ROS_FATAL("Error writing actuator info to device #%d", device);
+    return false;
+  }
+
+  MotorHeatingModelParametersEepromConfig heating_config = config.heating_config_;
+  heating_config.enforce_ = enforce_heating_model;
+  heating_config.generateCRC();
+  if (!wg->program(&com, config.heating_config_))
+  {
+    ROS_FATAL("Writing heating model config to device #%d", device);
+    return false;
+  }
+
+  return true;
+}
+
+
+// Uses ActuatorInfo name already stored in device
+// to find appropriate motor heating model config
+// Then only updates motor heating model config
+bool updateHeatingConfig(int device)
+{
+  WG0XActuatorInfo actuator_info;
+  EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+  WG0X *wg = getWGDevice(device);
+  if (wg == NULL)
+  {
+    ROS_WARN("Skipping update of device %d", device);      
+    return false;
+  }
+    
+  if (!wg->readActuatorInfoFromEeprom(&com, actuator_info))
+  {
+    ROS_ERROR("Could not read actuator info from device %d", device);      
+    return false;
+  }
+
+  if (!actuator_info.verifyCRC())
+  {
+    ROS_ERROR("Device %d has not actuator configuration", device);
+    return false;
+  }
+
+  if (actuators.find(actuator_info.name_) == actuators.end())
+  {
+    ROS_ERROR("Could not find actuator info for device %d with name '%s'",
+              device, actuator_info.name_);
+    return false;
+  }  
+
+  const Actuator &actuator(actuators[actuator_info.name_]);
+  const string &motor_name(actuator.motor);
+  bool enforce_heating_model = actuator.enforce_heating_model;
+
+  if (motors.find(motor_name) == motors.end())
+  {
+    ROS_ERROR("Could not find motor '%s' for device %d with actuator name '%s'",
+              motor_name.c_str(), device, actuator_info.name_);
+    return false;
+  }
+
+  const Config &config(motors[motor_name]);  
+
+  if (strcmp(config.actuator_info_.motor_model_, actuator_info.motor_model_) != 0)
+  {
+    ROS_ERROR("For device %d '%s' : the motor name stored in EEPROM '%s' does not match the motor name '%s' from XML file", 
+              device, actuator_info.name_, actuator_info.motor_model_, config.actuator_info_.motor_model_);
+    return false;
+  }
+   
+  MotorHeatingModelParametersEepromConfig heating_config = config.heating_config_;
+  heating_config.enforce_ = enforce_heating_model;
+  heating_config.generateCRC(); 
+  if (!wg->program(&com, heating_config))
+  {
+    ROS_FATAL("Writing heating model config to device #%d", device);
+    return false;
+  }
+
+  ROS_INFO("Updated device %d (%s) with heating config for motor '%s'", 
+           device, actuator_info.name_, config.actuator_info_.motor_model_);
+
+  return true;
+}
+
+
+// Updates heating configuration of all devices
+bool updateAllHeatingConfig()
+{
+  for (unsigned device=0; device<devices.size(); ++device)
+  {
+    updateHeatingConfig(device);
+  }
+  return true;
+}
+
 
 static struct
 {
@@ -249,6 +384,8 @@ static struct
   string motor_;
   string actuators_;
   string board_;
+  bool update_motor_heating_config_;
+  bool enforce_heating_model_;
 } g_options;
 
 void Usage(string msg = "")
@@ -260,6 +397,7 @@ void Usage(string msg = "")
   fprintf(stderr, " -b, --board <b>        Set the expected board type (wg005, wg006, wg021)\n");
   fprintf(stderr, " -p, --program          Program a motor control board\n");
   fprintf(stderr, " -n, --name <n>         Set the name of the motor control board to <n>\n");
+  fprintf(stderr, " -U, --update_heating_config Update motor heating model configuration of all boards\n");
   fprintf(stderr, "     Known actuator names:\n");
   BOOST_FOREACH(ActuatorPair p, actuators)
   {
@@ -270,8 +408,8 @@ void Usage(string msg = "")
   fprintf(stderr, "     Legal motor values are:\n");
   BOOST_FOREACH(MotorPair p, motors)
   {
-    string name = p.first;
-    WG0XActuatorInfo info = p.second;
+    const string &name(p.first);
+    const WG0XActuatorInfo &info(p.second.actuator_info_);
     fprintf(stderr, "        %s - %s %s\n", name.c_str(), info.motor_make_, info.motor_model_);
   }
   fprintf(stderr, " -h, --help    Print this message and exit\n");
@@ -286,7 +424,70 @@ void Usage(string msg = "")
   }
 }
 
-void parseConfig(TiXmlElement *config)
+
+bool getDoubleAttribute(TiXmlElement *params, const char* motor_name, const char* param_name, double& value)
+{
+  const char *val_str = params->Attribute(param_name);
+  if (val_str == NULL)
+  {
+    ROS_ERROR("Attribute '%s' for motor '%s' is not defined", param_name, motor_name);
+    return false;
+  }
+  
+  char *endptr=NULL;
+  value = strtod(val_str, &endptr);
+  if ((endptr == val_str) || (endptr < (val_str+strlen(val_str))))
+  {
+    ROS_ERROR("Couldn't convert '%s' to double for attribute '%s' of motor '%s'", 
+              val_str, param_name, motor_name);
+    return false;
+  }
+
+  return true;
+}
+
+bool getIntegerAttribute(TiXmlElement *params, const char* motor_name, const char* param_name, int& value)
+{
+  const char *val_str = params->Attribute(param_name);
+  if (val_str == NULL)
+  {
+    ROS_ERROR("Attribute '%s' for motor '%s' is not defined", param_name, motor_name);
+    return false;
+  }
+  
+  char *endptr=NULL;
+  value = strtol(val_str, &endptr, 0);
+  if ((endptr == val_str) || (endptr < (val_str+strlen(val_str))))
+  {
+    ROS_ERROR("Couldn't convert '%s' to integer for attribute '%s' of motor '%s'", 
+              val_str, param_name, motor_name);
+    return false;
+  }
+
+  return true;
+}
+
+bool getStringAttribute(TiXmlElement *params, const char* motor_name, const char* param_name, char* strbuf, unsigned buflen)
+{
+  const char *val = params->Attribute(param_name);
+  if (val == NULL)
+  {
+    ROS_ERROR("No '%s' attribute for motor '%s'", param_name, motor_name);
+    return false;
+  }
+  if (strlen(val) >= buflen)
+  {
+    ROS_ERROR("'%s' value '%s' for motor '%s' is too long.  Limit value to %d characters.",
+              param_name, val, motor_name, buflen-1);
+    return false;
+  }
+  strncpy(strbuf, val, buflen);
+  strbuf[buflen-1] = '\0';
+  return true;
+}
+
+
+bool parseConfig(TiXmlElement *config)
 {
   TiXmlElement *actuatorElt = config->FirstChildElement("actuators");
   TiXmlElement *motorElt = config->FirstChildElement("motors");
@@ -296,38 +497,142 @@ void parseConfig(TiXmlElement *config)
        elt = elt->NextSiblingElement("actuator"))
   {
     const char *name = elt->Attribute("name");
+    if (name == NULL)
+    {
+      ROS_ERROR("Acutuator attribute 'name' not specified");
+      return false;
+    }
+
     struct Actuator a;
-    a.motor = elt->Attribute("motor");
-    a.board = elt->Attribute("board");
+
+    const char *motor = elt->Attribute("motor");
+    if (motor == NULL)
+    {
+      ROS_ERROR("For actuator '%s', 'motor' attribute not specified", name);
+      return false;
+    }
+    a.motor = motor;
+
+    const char *board = elt->Attribute("board");
+    if (board == NULL)
+    {
+      ROS_ERROR("For actuator '%s', 'board' attribute not specified", name);
+      return false;
+    }
+    a.board = board;
+
+    const char *enforce_heating_model = elt->Attribute("enforce_heating_model");
+    if (enforce_heating_model == NULL)
+    {
+      // ROS_ERROR("For actuator '%s', 'enforce_heating_model' attribute not specified", name);
+      //return false;
+      a.enforce_heating_model=false;
+    }
+    else if (strcmp(enforce_heating_model, "true") == 0)
+    {
+      a.enforce_heating_model=true;
+    }
+    else if (strcmp(enforce_heating_model, "false") == 0)
+    {
+      a.enforce_heating_model=false;
+    }
+    else 
+    {
+      ROS_ERROR("For actuator '%s' : 'enforce_heating_model' attribute should be 'true' or 'false' not '%s'",
+                name, enforce_heating_model);
+      return false;
+    }
+
     actuators[name] = a;
   }
 
   WG0XActuatorInfo info;
   memset(&info, 0, sizeof(info));
+  info.major_ = 0;
   info.minor_ = 2;
   strcpy(info.robot_name_, "PR2");
+  ethercat_hardware::MotorHeatingModelParametersEepromConfig heating_config;
+  memset(&heating_config, 0, sizeof(heating_config));
+  heating_config.major_ = 0;
+  heating_config.minor_ = 1;
+  heating_config.enforce_ = 0; // default, don't enforce heating model
+
   for (TiXmlElement *elt = motorElt->FirstChildElement("motor");
        elt;
        elt = elt->NextSiblingElement("motor"))
   {
+    bool success = true;
     const char *name = elt->Attribute("name");
+    if (name == NULL)
+    {
+      ROS_ERROR("Motor 'name' attribute is not specified");
+      return false;
+    }
+
     TiXmlElement *params = elt->FirstChildElement("params");
+    if (params == NULL)
+    {
+      ROS_ERROR("No 'params' tag available for motor '%s'", name);
+      return false;
+    }
+
     TiXmlElement *encoder = elt->FirstChildElement("encoder");
+    if (encoder == NULL)
+    {
+      ROS_ERROR("No 'encoder' tag available for motor '%s'", name);
+      return false;
+    }
 
-    strcpy(info.motor_make_, params->Attribute("make"));
-    strcpy(info.motor_model_, params->Attribute("model"));
+    success &= getStringAttribute(params, name, "make", info.motor_make_, sizeof(info.motor_make_));
+    success &= getStringAttribute(params, name, "model", info.motor_model_, sizeof(info.motor_model_));
 
-    info.max_current_ = atof(params->Attribute("max_current"));
-    info.speed_constant_ = atof(params->Attribute("speed_constant"));
-    info.resistance_ = atof(params->Attribute("resistance"));
-    info.motor_torque_constant_ = atof(params->Attribute("motor_torque_constant"));
+    double fvalue;
 
-    info.pulses_per_revolution_ = atoi(encoder->Attribute("pulses_per_revolution"));
-    info.encoder_reduction_ = atoi(encoder->Attribute("reduction"));
+    success &= getDoubleAttribute(params, name, "max_current", fvalue);
+    info.max_current_ = fvalue;
+    success &= getDoubleAttribute(params, name, "speed_constant", fvalue);
+    info.speed_constant_ = fvalue;
+    success &= getDoubleAttribute(params, name, "resistance", fvalue);
+    info.resistance_ = fvalue;
+    success &= getDoubleAttribute(params, name, "motor_torque_constant", fvalue);
+    info.motor_torque_constant_ = fvalue;
+    success &= getDoubleAttribute(encoder, name, "reduction", fvalue);
+    info.encoder_reduction_ = fvalue;
 
-    motors[name] = info;
+    int ivalue=-1;
+    success &= getIntegerAttribute(encoder, name, "pulses_per_revolution", ivalue);
+    info.pulses_per_revolution_ = ivalue;
+    
+    ethercat_hardware::MotorHeatingModelParameters &hmp(heating_config.params_);
+    success &= getDoubleAttribute(params, name, "housing_to_ambient_thermal_resistance", fvalue);
+    hmp.housing_to_ambient_thermal_resistance_ = fvalue;
+    success &= getDoubleAttribute(params, name, "winding_to_housing_thermal_resistance", fvalue);
+    hmp.winding_to_housing_thermal_resistance_ = fvalue;
+    success &= getDoubleAttribute(params, name, "winding_thermal_time_constant", fvalue);
+    hmp.winding_thermal_time_constant_ = fvalue;
+    success &= getDoubleAttribute(params, name, "housing_thermal_time_constant", fvalue);
+    hmp.housing_thermal_time_constant_ = fvalue;      
+    success &= getDoubleAttribute(params, name, "max_winding_temperature", fvalue);
+    hmp.max_winding_temperature_       = fvalue;    
+
+    if (!success)
+    {
+      return false;
+    }
+
+    if (motors.find(name) != motors.end())
+    {
+      ROS_ERROR("Motor named '%s' exists motor than once",name);
+      return false;
+    }
+
+    motors[name] = Config(info, heating_config);
   }
+  return true;
 }
+
+
+
 
 int main(int argc, char *argv[])
 {
@@ -343,6 +648,8 @@ int main(int argc, char *argv[])
   g_options.device_ = -1;
   g_options.help_ = false;
   g_options.board_ = "";
+  g_options.update_motor_heating_config_ = false;
+  g_options.enforce_heating_model_ = false;
   while (1)
   {
     static struct option long_options[] = {
@@ -354,9 +661,11 @@ int main(int argc, char *argv[])
       {"motor", required_argument, 0, 'm'},
       {"program", no_argument, 0, 'p'},
       {"actuators", required_argument, 0, 'a'},
+      {"update_heating_config", no_argument, 0, 'U'},
+      {"enforce_heating_model", no_argument, 0, 'H'},
     };
     int option_index = 0;
-    int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:", long_options, &option_index);
+    int c = getopt_long(argc, argv, "d:b:hi:m:n:pa:UH", long_options, &option_index);
     if (c == -1) break;
     switch (c)
     {
@@ -384,6 +693,12 @@ int main(int argc, char *argv[])
       case 'a':
         g_options.actuators_ = optarg;
         break;
+      case 'U':
+        g_options.update_motor_heating_config_ = true;
+        break;
+      case 'H':
+        g_options.enforce_heating_model_ = true;
+        break;
     }
   }
 
@@ -393,13 +708,15 @@ int main(int argc, char *argv[])
     filename = g_options.actuators_;
   TiXmlDocument xml(filename);
 
-  if (xml.LoadFile())
-  {
-    parseConfig(xml.RootElement());
-  }
-  else
+  if (!xml.LoadFile())
   {
     Usage("Unable to load configuration file");
+  }
+
+  
+  if (!parseConfig(xml.RootElement()))
+  {
+    exit(EXIT_FAILURE);
   }
 
   if (g_options.help_)
@@ -430,9 +747,15 @@ int main(int argc, char *argv[])
 
   init(g_options.interface_);
 
+  if (g_options.update_motor_heating_config_)
+  {
+    updateAllHeatingConfig();
+  }
+
   if (g_options.program_)
   {
     string board = "wg005";
+    bool enforce_heating_model = false;
     if (!g_options.name_)
       Usage("You must specify a name");
     if (g_options.motor_ == "")
@@ -441,6 +764,7 @@ int main(int argc, char *argv[])
         Usage("No default motor for this name");
       g_options.motor_ = actuators[g_options.name_].motor;
       board = actuators[g_options.name_].board;
+      enforce_heating_model = actuators[g_options.name_].enforce_heating_model;
     }
     if (g_options.board_ != "") {
       board = g_options.board_;
@@ -449,9 +773,13 @@ int main(int argc, char *argv[])
       Usage("You must specify a device #");
     if (motors.find(g_options.motor_) == motors.end())
       Usage("You must specify a valid motor");
+    if (g_options.enforce_heating_model_)
+      enforce_heating_model = true;
 
-    programDevice(g_options.device_, motors[g_options.motor_], g_options.name_, board);
+    programDevice(g_options.device_, motors[g_options.motor_], g_options.name_, board, enforce_heating_model);
   }
 
   return 0;
 }
+
+

@@ -32,15 +32,17 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#ifndef WG0X_H
-#define WG0X_H
+#ifndef ETHERCAT_HARDWARE__WG0X_H
+#define ETHERCAT_HARDWARE__WG0X_H
 
-#include <ethercat_hardware/ethercat_device.h>
-#include <ethercat_hardware/motor_model.h>
+#include "ethercat_hardware/ethercat_device.h"
+#include "ethercat_hardware/motor_model.h"
+#include "ethercat_hardware/motor_heating_model.h"
+#include "realtime_tools/realtime_publisher.h"
 
-#include <realtime_tools/realtime_publisher.h>
-#include <pr2_msgs/PressureState.h>
-#include <pr2_msgs/AccelerometerState.h>
+#include <boost/shared_ptr.hpp>
+
+using namespace ethercat_hardware;
 
 enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
 
@@ -115,6 +117,22 @@ struct WG0XSpiEepromCmd
   static const unsigned SPI_COMMAND_ADDR = 0x0230;
   static const unsigned SPI_BUFFER_ADDR = 0xF400;
 }__attribute__ ((__packed__));
+
+
+
+struct EepromStatusReg 
+{
+  union {
+    uint8_t raw_;
+    struct {
+      uint8_t page_size_     : 1; 
+      uint8_t write_protect_ : 1;
+      uint8_t eeprom_size_   : 4;
+      uint8_t compare_       : 1;
+      uint8_t ready_         : 1;
+    } __attribute__ ((__packed__));
+  } __attribute__ ((__packed__));
+} __attribute__ ((__packed__));
 
 
 // Syncmanger control register 0x804+N*8
@@ -316,6 +334,9 @@ struct WG0XActuatorInfo
   uint32_t crc32_256_;          // CRC32 of first 256-4 bytes. (minus 4 bytes for first CRC)
   uint8_t pad2[4];              // Pad structure to 264-4 bytes
   uint32_t crc32_264_;          // CRC32 over entire structure (minus 4 bytes for second CRC)
+
+  bool verifyCRC(void) const;
+  void generateCRC(void);
 };
 
 struct WG0XStatus
@@ -340,61 +361,10 @@ struct WG0XStatus
   uint16_t packet_count_;
   uint8_t pad_;
   uint8_t checksum_;
+
+  static const unsigned SIZE=44;
 }__attribute__ ((__packed__));
 
-struct WG06StatusWithAccel
-{
-  uint8_t mode_;
-  uint8_t digital_out_;
-  int16_t programmed_pwm_value_;
-  int16_t programmed_current_;
-  int16_t measured_current_;
-  uint32_t timestamp_;
-  int32_t encoder_count_;
-  int32_t encoder_index_pos_;
-  uint16_t num_encoder_errors_;
-  uint8_t encoder_status_;
-  uint8_t unused1;
-  int32_t unused2;
-  int32_t unused3;
-  uint16_t board_temperature_;
-  uint16_t bridge_temperature_;
-  uint16_t supply_voltage_;
-  int16_t motor_voltage_;
-  uint16_t packet_count_;
-  uint8_t pad_;
-  uint8_t accel_count_;
-  uint32_t accel_[4];
-  uint8_t checksum_;
-}__attribute__ ((__packed__));
-
-struct WG021Status
-{
-  uint8_t mode_;
-  uint8_t digital_out_;
-  uint8_t general_config_;
-  uint8_t pad1_;
-  int16_t programmed_current_;
-  int16_t measured_current_;
-  uint32_t timestamp_;
-  uint8_t config0_;
-  uint8_t config1_;
-  uint8_t config2_;
-  uint8_t pad2_;
-  uint32_t pad3_;
-  uint16_t pad4_;
-  uint8_t pad5_;
-  uint8_t output_status_;
-  uint32_t output_start_timestamp_;
-  uint32_t output_stop_timestamp_;
-  uint16_t board_temperature_;
-  uint16_t bridge_temperature_;
-  uint16_t supply_voltage_;
-  int16_t led_voltage_;
-  uint16_t packet_count_;
-  uint8_t pad_;
-  uint8_t checksum_;
-}__attribute__ ((__packed__));
 
 struct WG0XCommand
 {
@@ -403,21 +373,6 @@ struct WG0XCommand
   int16_t programmed_pwm;
   int16_t programmed_current_;
   uint8_t pad_;
-  uint8_t checksum_;
-}__attribute__ ((__packed__));
-
-struct WG021Command
-{
-  uint8_t mode_;
-  uint8_t digital_out_;
-  uint8_t general_config_;
-  uint8_t pad1_;
-  int16_t programmed_current_;
-  int16_t pad2_;
-  int32_t pad3_;
-  uint8_t config0_;
-  uint8_t config1_;
-  uint8_t config2_;
   uint8_t checksum_;
 }__attribute__ ((__packed__));
 
@@ -470,8 +425,11 @@ public:
   void packCommand(unsigned char *buffer, bool halt, bool reset);
   bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
 
+  bool program(EthercatCom *com, const WG0XActuatorInfo &actutor_info);
+  bool program(EthercatCom *com, const MotorHeatingModelParametersEepromConfig &heating_config);
 
-  void program(WG0XActuatorInfo *);
+  bool readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuator_info);
+  bool readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeatingModelParametersEepromConfig &config);
 
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   virtual void collectDiagnostics(EthercatCom *com);
@@ -488,6 +446,9 @@ protected:
   WG0XConfigInfo config_info_;
   double max_current_;         //!< min(board current limit, actuator current limit)
 
+  ethercat_hardware::ActuatorInfo actuator_info_msg_; 
+  static void copyActuatorInfo(ethercat_hardware::ActuatorInfo &out,  const WG0XActuatorInfo &in);
+
   pr2_hardware_interface::Actuator actuator_;
   pr2_hardware_interface::DigitalOut digital_out_;
 
@@ -500,6 +461,13 @@ protected:
     MODE_SAFETY_LOCKOUT = (1 << 5),
     MODE_UNDERVOLTAGE = (1 << 6),
     MODE_RESET = (1 << 7)
+  };
+
+  enum 
+  {
+    WG05_PRODUCT_CODE = 6805005,
+    WG06_PRODUCT_CODE = 6805006,
+    WG021_PRODUCT_CODE = 6805021
   };
 
   static string modeString(uint8_t mode);
@@ -526,7 +494,7 @@ protected:
    * ros::Duration (int32_t secs, int32_t nsecs) should overflow will overflow after 68 years
    */
   ros::Duration sample_timestamp_;
-
+  
   //! Different possible states for application ram on device. 
   //  Application ram is non-volitile memory that application can use to store temporary
   //  data between runs.
@@ -540,9 +508,6 @@ protected:
   bool writeAppRam(EthercatCom *com, double zero_offset);
 
   bool verifyState(WG0XStatus *this_status, WG0XStatus *prev_status);
-  int readEeprom(EthercatCom *com);
-  int writeEeprom(EthercatCom *com);
-  int sendSpiCommand(EthercatCom *com, WG0XSpiEepromCmd const * cmd);
 
   int writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length);
   int readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length);  
@@ -556,12 +521,14 @@ protected:
                             double board_resistance,
                             bool poor_measured_motor_voltage);
 
+  bool initializeMotorHeatingModel(bool allow_unprogrammed);
+
   bool verifyChecksum(const void* buffer, unsigned size);
   static bool timestamp_jump(uint32_t timestamp, uint32_t last_timestamp, uint32_t amount);
   
   static const int PWM_MAX = 0x4000;
   
-private:
+protected:
   // Each WG0X device can only support one mailbox operation at a time
   bool lockMailbox();
   void unlockMailbox();
@@ -582,9 +549,20 @@ private:
   bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
   void diagnoseMailboxError(EthercatCom *com);
 
+  // SPI Eeprom State machine helper functions
+  bool readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd);
+  bool sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd);
+  bool waitForSpiEepromReady(EthercatCom *com);
+
+  // Eeprom helper functions
+  bool readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg);
+  bool waitForEepromReady(EthercatCom *com);
+  bool readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length);
+  bool writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length);  
+  
+
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
-  static const unsigned PRESSURE_PHY_ADDR = 0x2200;
   static const unsigned MBX_COMMAND_PHY_ADDR = 0x1400;
   static const unsigned MBX_COMMAND_SIZE = 512;
   static const unsigned MBX_STATUS_PHY_ADDR = 0x2400;
@@ -616,14 +594,19 @@ private:
 
   // Board configuration parameters
 
-  static const int ACTUATOR_INFO_PAGE = 4095;
+  static const unsigned ACTUATOR_INFO_PAGE = 4095;
+  static const unsigned NUM_EEPROM_PAGES   = 4096;
+  static const unsigned MAX_EEPROM_PAGE_SIZE = 264;
 
-
-  // Not all devices will need this (WG021) 
+  // Not all devices will need this (WG021 won't) 
   MotorModel *motor_model_; 
   bool disable_motor_model_checking_;
   ethercat_hardware::MotorTraceSample motor_trace_sample_;
   pr2_hardware_interface::DigitalOut publish_motor_trace_; 
+
+  // Only device with motor heating parameters store in eeprom config will use this
+  static boost::shared_ptr<ethercat_hardware::MotorHeatingModelCommon> motor_heating_model_common_;
+  boost::shared_ptr<ethercat_hardware::MotorHeatingModel> motor_heating_model_;
 
   // Diagnostic message values
   uint32_t last_timestamp_;
@@ -647,97 +630,12 @@ public:
 
   static double calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp, 
                                     int32_t old_position, uint32_t old_timestamp);
+
+  static unsigned computeChecksum(void const *data, unsigned length);
+  static unsigned int rotateRight8(unsigned in);
+
+  static double convertRawTemperature(int16_t raw_temp);
 };
 
-class WG05 : public WG0X
-{
-public:
-  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);  
-  void packCommand(unsigned char *buffer, bool halt, bool reset);  
-  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
-  enum
-  {
-    PRODUCT_CODE = 6805005
-  };
-};
 
-struct WG06Pressure
-{
-  uint32_t timestamp_;
-  uint16_t l_finger_tip_[22];
-  uint16_t r_finger_tip_[22];
-  uint8_t pad_;
-  uint8_t checksum_;
-} __attribute__((__packed__));
-
-class WG06 : public WG0X
-{
-public:
-  WG06();
-  ~WG06();
-  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
-  void packCommand(unsigned char *buffer, bool halt, bool reset);
-  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
-  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
-  enum
-  {
-    PRODUCT_CODE = 6805006
-  };
-private:
-  pr2_hardware_interface::PressureSensor pressure_sensors_[2];
-  pr2_hardware_interface::Accelerometer accelerometer_;
-
-  bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
-
-  unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
-  unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed
-  ros::Time last_publish_time_; //!< Time diagnostics was last published
-  bool first_publish_; 
-
-  uint32_t last_pressure_time_;
-  realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
-  realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
-};
-
-class WG021 : public WG0X
-{
-public:
-  WG021() : projector_(digital_out_A_, digital_out_B_, digital_out_I_, digital_out_M_, digital_out_L0_, digital_out_L1_) {}
-  void construct(EtherCAT_SlaveHandler *sh, int &start_address) {WG0X::construct(sh, start_address);}
-  int initialize(pr2_hardware_interface::HardwareInterface *, bool allow_unprogrammed=true);
-  void packCommand(unsigned char *buffer, bool halt, bool reset);
-  bool unpackState(unsigned char *this_buffer, unsigned char *prev_buffer);
-  void diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
-  enum
-  {
-    PRODUCT_CODE = 6805021
-  };
-  enum
-  {
-    PROJECTOR_CONFIG_ENABLE = 8,
-    PROJECTOR_CONFIG_ENABLE_ENABLED = 8,
-    PROJECTOR_CONFIG_ENABLE_DISABLED = 0,
-
-    PROJECTOR_CONFIG_ACTION = 4,
-    PROJECTOR_CONFIG_ACTION_ON = 4,
-    PROJECTOR_CONFIG_ACTION_OFF = 0,
-
-    PROJECTOR_CONFIG_POLARITY = 2,
-    PROJECTOR_CONFIG_POLARITY_ACTIVE_HIGH = 2,
-    PROJECTOR_CONFIG_POLARITY_ACTIVE_LOW = 0,
-
-    PROJECTOR_CONFIG_STATE = 1,
-    PROJECTOR_CONFIG_STATE_HIGH = 1,
-    PROJECTOR_CONFIG_STATE_LOW = 0
-  };
-private:
-  pr2_hardware_interface::DigitalOut digital_out_A_;
-  pr2_hardware_interface::DigitalOut digital_out_B_;
-  pr2_hardware_interface::DigitalOut digital_out_I_;
-  pr2_hardware_interface::DigitalOut digital_out_M_;
-  pr2_hardware_interface::DigitalOut digital_out_L0_;
-  pr2_hardware_interface::DigitalOut digital_out_L1_;
-  pr2_hardware_interface::Projector projector_;
-};
-
-#endif /* WG0X_H */
+#endif // ETHERCAT_HARDWARE__WG0X_H
