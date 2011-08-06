@@ -60,7 +60,8 @@ WG06::WG06() :
   ft_sample_count_(0),
   ft_missed_samples_(0),
   diag_last_ft_sample_count_(0),
-  raw_ft_publisher_(NULL)
+  raw_ft_publisher_(NULL),  
+  ft_publisher_(NULL)
 {
 
 }
@@ -238,8 +239,8 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if (fw_major_ >= 2)
     {
       // TODO:  Memory interface to version 2 is not finalized. 
-      ROS_ERROR("WG06 FW version 2 not supported");
-      return -1;
+      //ROS_ERROR("WG06 FW version 2 not supported");
+      //return -1;
       
       ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
       if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
