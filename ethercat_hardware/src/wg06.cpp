@@ -212,11 +212,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       enable_ft_sensor_ = false; //default to to false
     }
 
-    if (enable_ft_sensor_)
-    {
-      ROS_INFO("Enabling F/T sensor");
-    }
-
     if (enable_ft_sensor_ && (fw_major_ < 2))
     {
       ROS_WARN("Gripper firmware version %d does not support enabling force/torque sensor", fw_major_);
@@ -531,7 +526,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   }
 
   // perform offset and gains multiplication on raw data
-  // and then multiple by calibration matrix to get force and torque values.
+  // and then multiply by calibration matrix to get force and torque values.
   // The calibration matrix is based on "raw"  deltaR/R values from strain gauges
   //
   // Force/Torque = Coeff * ADCVoltage
@@ -711,20 +706,23 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
   char serial[32];
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
-
-  d.summary(d.OK, "OK");
   d.clear();
-    
-  // TODO, maybe do more error checking on pressure sensor, and put diagnostics in its own topic 
+
+  if (enable_pressure_sensor_)
+  {    
+    d.summary(d.OK, "OK");
+  }
+  else
+  {
+    d.summary(d.OK, "Pressure sensor disabled by user");
+  }
+
   if (pressure_checksum_error_)
   {
     d.mergeSummary(d.ERROR, "Checksum error on pressure data");
   }
-  else if (!enable_pressure_sensor_)
-  {
-    d.summary(d.OK, "Pressure sensor disabled by user");
-  }
-  else
+    
+  if (enable_pressure_sensor_)
   {
     // look at pressure sensor value to detect any damaged cables, or possibly missing sensor
     unsigned l_finger_good_count = 0;
@@ -773,31 +771,31 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
         d.mergeSummary(d.WARN, "Sensor on right finger may have damaged sensor regions");
       }
     } 
+
+    { // put right and left finger data in dianostics
+      std::stringstream ss;
+
+      for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
+      {
+        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
+           << pressure->r_finger_tip_[region_num] << " ";
+        if (region_num%8 == 7) 
+          ss << std::endl;      
+      }
+      d.add("Right finger data",  ss.str());
+
+      ss.str("");
+
+      for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
+      {
+        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
+           << pressure->l_finger_tip_[region_num] << " ";
+        if (region_num%8 == 7) ss << std::endl;      
+      }
+      d.add("Left finger data",  ss.str());
+    }
   }
 
-
-  { // put right and left finger data in dianostics
-    std::stringstream ss;
-
-    for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
-    {
-      ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
-         << pressure->r_finger_tip_[region_num] << " ";
-      if (region_num%8 == 7) 
-        ss << std::endl;      
-    }
-    d.add("Right finger data",  ss.str());
-
-    ss.str("");
-
-    for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
-    {
-      ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
-         << pressure->l_finger_tip_[region_num] << " ";
-      if (region_num%8 == 7) ss << std::endl;      
-    }
-    d.add("Left finger data",  ss.str());
-  }
 }
 
 
