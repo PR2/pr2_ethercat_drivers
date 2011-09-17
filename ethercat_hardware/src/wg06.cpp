@@ -57,6 +57,8 @@ WG06::WG06() :
   last_pressure_time_(0),
   pressure_publisher_(NULL),
   accel_publisher_(NULL),
+  ft_overload_limit_(31100),
+  ft_overload_flags_(0),
   ft_sample_count_(0),
   ft_missed_samples_(0),
   diag_last_ft_sample_count_(0),
@@ -103,7 +105,6 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   else if (fw_major_ == 2)
   {
     // Include Accelerometer and Force/Torque sensor data
-    ROS_ERROR("WG06 FW major version %d not officially supported", fw_major_);
     status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
     has_accel_and_ft_ = true;
   }
@@ -276,10 +277,6 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Provide Force/Torque data to controllers as an AnalogIn vector 
     if ((fw_major_ >= 2) && (enable_ft_sensor_))
     {
-      // TODO:  Memory interface to version 2 is not finalized. 
-      //ROS_ERROR("WG06 FW version 2 not supported");
-      //return -1;            
-
       ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
       if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
       {
@@ -338,6 +335,7 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   if (reset) 
   {
     pressure_checksum_error_ = false;
+    ft_overload_flags_ = 0;
   }
 
   WG0X::packCommand(buffer, halt, reset);
@@ -512,16 +510,21 @@ bool WG06::unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_st
  * \return True, if there are no problems, false if there is something wrong with the data. 
  */
 bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
-{
-  ft_raw_analog_in_.state_.state_.resize(NUM_FT_CHANNELS);
-  ft_analog_in_.state_.state_.resize(6);
-  
-  // Fill in raw analog output with most recent data sample
+{  
+  // Fill in raw analog output with most recent data sample.  
+  // Also, make sure values are within bounds.  
+  // Out-of-bound values indicate a broken sensor or an overload.
   {
+    ft_raw_analog_in_.state_.state_.resize(6);
     const FTDataSample &sample(status->ft_samples_[0]);
-    for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
+    for (unsigned i=0; i<6; ++i)
     {
-      ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
+      int raw_data = sample.data_[i];
+      if (abs(raw_data) > ft_overload_limit_)
+      {
+        ft_overload_flags_ |= (1<<i);
+      }
+      ft_raw_analog_in_.state_.state_[i] = double(raw_data);
     }
   }
 
@@ -541,6 +544,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   //              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
   {
     double in[6];
+    ft_analog_in_.state_.state_.resize(6);
     for (unsigned i=0; i<6; ++i)
     {
       // Take average of last 3 samples to get better noise performance
@@ -596,6 +600,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
 
   if ( (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
+    ft_publisher_->msg_.header.stamp = ros::Time::now();
     geometry_msgs::Wrench &msg(ft_publisher_->msg_.wrench);
     msg.force.x = ft_analog_in_.state_.state_[0];
     msg.force.y = ft_analog_in_.state_.state_[1];
@@ -821,6 +826,21 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
     d.addf(ss.str(), "%d", int(sample.data_[i]));
   }
   d.addf("FT Vhalf", "%d", int(sample.vhalf_));
+
+  if (ft_overload_flags_ != 0)
+  {
+    d.mergeSummary(d.ERROR, "Force/Torque sensor overloaded");
+    ss.str("");
+    for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
+    {
+      ss << "Ch" << i << " ";
+    }
+  }
+  else 
+  {
+    ss.str("None");
+  }
+  d.add("Overload Channels", ss.str());
 
   const std::vector<double> &ft_data( ft_analog_in_.state_.state_ );
   if (ft_data.size() == 6)

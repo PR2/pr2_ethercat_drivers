@@ -99,7 +99,6 @@ public:
 
   bool getRosParams(ros::NodeHandle nh);
   bool getDoubleArray(XmlRpc::XmlRpcValue params, const char* name, double *results, unsigned len);
-protected:
   double calibration_coeff_[36];
   double offsets_[6];
   double gains_[6];
@@ -196,6 +195,8 @@ private:
 
   static const unsigned MAX_FT_SAMPLES = 4;  
   static const unsigned NUM_FT_CHANNELS = 6;
+  int      ft_overload_limit_; //!< Limit on raw range of F/T input 
+  uint8_t  ft_overload_flags_;  //!< Bits 0-5 set to true if raw FT input goes beyond limit
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
   uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published

@@ -216,7 +216,7 @@ void WG0XDiagnostics::update(const WG0XSafetyDisableStatus &new_status, const WG
  */
 bool WG0XActuatorInfo::verifyCRC() const
 {
-  // Actuator info contains two 
+  // Actuator info contains two CRCs
   BOOST_STATIC_ASSERT(sizeof(WG0XActuatorInfo) == 264);
   BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_256_) == (256-4));
   BOOST_STATIC_ASSERT( offsetof(WG0XActuatorInfo, crc32_264_) == (264-4));
