@@ -40,7 +40,7 @@
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
 #include <ethercat_hardware/RawFTData.h>
-#include <geometry_msgs/Wrench.h>
+#include <geometry_msgs/WrenchStamped.h>
 
 struct WG06StatusWithAccel
 {
@@ -99,7 +99,6 @@ public:
 
   bool getRosParams(ros::NodeHandle nh);
   bool getDoubleArray(XmlRpc::XmlRpcValue params, const char* name, double *results, unsigned len);
-protected:
   double calibration_coeff_[36];
   double offsets_[6];
   double gains_[6];
@@ -177,9 +176,10 @@ private:
   void diagnosticsWG06(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *);
   void diagnosticsAccel(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer);
   void diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06StatusWithAccelAndFT *status);
+  void diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer);
 
   //! True if device has accelerometer and force/torque sensor
-  bool has_accel_and_ft_;  
+  bool has_accel_and_ft_;
 
   bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
 
@@ -188,12 +188,15 @@ private:
   ros::Time last_publish_time_; //!< Time diagnostics was last published
   bool first_publish_; 
 
+  static const unsigned NUM_PRESSURE_REGIONS = 22;    
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
 
   static const unsigned MAX_FT_SAMPLES = 4;  
   static const unsigned NUM_FT_CHANNELS = 6;
+  int      ft_overload_limit_; //!< Limit on raw range of F/T input 
+  uint8_t  ft_overload_flags_;  //!< Bits 0-5 set to true if raw FT input goes beyond limit
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
   uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
@@ -201,9 +204,12 @@ private:
   pr2_hardware_interface::AnalogIn ft_analog_in_;  //!< Provides F/T data to controllers
   //! Realtime Publisher of RAW F/T data 
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
-  realtime_tools::RealtimePublisher<geometry_msgs::Wrench> *ft_publisher_;
+  realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped> *ft_publisher_;
   //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
   FTParamsInternal ft_params_;
+
+  bool enable_pressure_sensor_;
+  bool enable_ft_sensor_;
 };
 
 #endif /* ETHERCAT_HARDWARE_WG06_H */

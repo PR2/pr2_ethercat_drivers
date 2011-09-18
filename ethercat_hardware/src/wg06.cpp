@@ -57,10 +57,16 @@ WG06::WG06() :
   last_pressure_time_(0),
   pressure_publisher_(NULL),
   accel_publisher_(NULL),
+  ft_overload_limit_(31100),
+  ft_overload_flags_(0),
   ft_sample_count_(0),
   ft_missed_samples_(0),
   diag_last_ft_sample_count_(0),
-  raw_ft_publisher_(NULL)
+  raw_ft_publisher_(NULL),
+  ft_publisher_(NULL),
+  enable_pressure_sensor_(true),
+  enable_ft_sensor_(false)
+  // ft_publisher_(NULL)
 {
 
 }
@@ -99,7 +105,6 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   else if (fw_major_ == 2)
   {
     // Include Accelerometer and Force/Torque sensor data
-    ROS_ERROR("WG06 FW major version %d not officially supported", fw_major_);
     status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
     has_accel_and_ft_ = true;
   }
@@ -196,6 +201,41 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       return -1;
     }
 
+    // For some versions of software pressure and force/torque sensors can be selectively enabled / disabled    
+    ros::NodeHandle nh(string("~/") + actuator_.name_);
+    bool pressure_enabled_ ;
+    if (!nh.getParam("enable_pressure_sensor", enable_pressure_sensor_))
+    {
+      pressure_enabled_ = true; //default to to true
+    }
+    if (!nh.getParam("enable_ft_sensor", enable_ft_sensor_))
+    {
+      enable_ft_sensor_ = false; //default to to false
+    }
+
+    if (enable_ft_sensor_ && (fw_major_ < 2))
+    {
+      ROS_WARN("Gripper firmware version %d does not support enabling force/torque sensor", fw_major_);
+      enable_ft_sensor_ = false;
+    }
+
+    // FW version 2+ supports selectively enabling/disabling pressure and F/T sensor
+    if (fw_major_ >= 2)
+    {
+      static const uint8_t PRESSURE_ENABLE_FLAG = 0x1;
+      static const uint8_t FT_ENABLE_FLAG       = 0x2;
+      static const unsigned PRESSURE_FT_ENABLE_ADDR = 0xAA;
+      uint8_t pressure_ft_enable_ = 0;
+      if (enable_pressure_sensor_) pressure_ft_enable_ |= PRESSURE_ENABLE_FLAG;
+      if (enable_ft_sensor_) pressure_ft_enable_ |= FT_ENABLE_FLAG;
+      EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+      if (writeMailbox(&com, PRESSURE_FT_ENABLE_ADDR, &pressure_ft_enable_, 1) != 0)
+      {
+        ROS_FATAL("Could not enable/disable pressure and force/torque sensors");
+        return -1;
+      }
+    }
+
     // Publish pressure sensor data as a ROS topic
     string topic = "pressure";
     if (!actuator_.name_.empty())
@@ -235,12 +275,8 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 
     // FW version 2 supports Force/Torque sensor.
     // Provide Force/Torque data to controllers as an AnalogIn vector 
-    if (fw_major_ >= 2)
+    if ((fw_major_ >= 2) && (enable_ft_sensor_))
     {
-      // TODO:  Memory interface to version 2 is not finalized. 
-      ROS_ERROR("WG06 FW version 2 not supported");
-      return -1;
-      
       ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
       if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
       {
@@ -277,7 +313,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
           topic = "ft";
           if (!actuator_.name_.empty())
             topic = topic + "/" + string(actuator_.name_);
-          ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::Wrench>(ros::NodeHandle(), topic, 1);
+          ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped>(ros::NodeHandle(), topic, 1);
           if (ft_publisher_ == NULL)
           {
             ROS_FATAL("Could not allocate ft publisher");
@@ -299,6 +335,7 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   if (reset) 
   {
     pressure_checksum_error_ = false;
+    ft_overload_flags_ = 0;
   }
 
   WG0X::packCommand(buffer, halt, reset);
@@ -359,7 +396,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     }
   }
 
-  if (has_accel_and_ft_)
+  if (has_accel_and_ft_ && enable_ft_sensor_)
   {
     WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(this_buffer + command_size_);
     WG06StatusWithAccelAndFT *last_status = (WG06StatusWithAccelAndFT *)(prev_buffer + command_size_);
@@ -473,21 +510,26 @@ bool WG06::unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_st
  * \return True, if there are no problems, false if there is something wrong with the data. 
  */
 bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
-{
-  ft_raw_analog_in_.state_.state_.resize(NUM_FT_CHANNELS);
-  ft_analog_in_.state_.state_.resize(6);
-  
-  // Fill in raw analog output with most recent data sample
+{  
+  // Fill in raw analog output with most recent data sample.  
+  // Also, make sure values are within bounds.  
+  // Out-of-bound values indicate a broken sensor or an overload.
   {
+    ft_raw_analog_in_.state_.state_.resize(6);
     const FTDataSample &sample(status->ft_samples_[0]);
-    for (unsigned i=0; i<NUM_FT_CHANNELS; ++i)
+    for (unsigned i=0; i<6; ++i)
     {
-      ft_raw_analog_in_.state_.state_[i] = double(sample.data_[i]);
+      int raw_data = sample.data_[i];
+      if (abs(raw_data) > ft_overload_limit_)
+      {
+        ft_overload_flags_ |= (1<<i);
+      }
+      ft_raw_analog_in_.state_.state_[i] = double(raw_data);
     }
   }
 
   // perform offset and gains multiplication on raw data
-  // and then multiple by calibration matrix to get force and torque values.
+  // and then multiply by calibration matrix to get force and torque values.
   // The calibration matrix is based on "raw"  deltaR/R values from strain gauges
   //
   // Force/Torque = Coeff * ADCVoltage
@@ -502,6 +544,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   //              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
   {
     double in[6];
+    ft_analog_in_.state_.state_.resize(6);
     for (unsigned i=0; i<6; ++i)
     {
       // Take average of last 3 samples to get better noise performance
@@ -557,7 +600,8 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
 
   if ( (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
-    geometry_msgs::Wrench &msg(ft_publisher_->msg_);
+    ft_publisher_->msg_.header.stamp = ros::Time::now();
+    geometry_msgs::Wrench &msg(ft_publisher_->msg_.wrench);
     msg.force.x = ft_analog_in_.state_.state_[0];
     msg.force.y = ft_analog_in_.state_.state_[1];
     msg.force.z = ft_analog_in_.state_.state_[2];
@@ -577,9 +621,11 @@ void WG06::multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsi
   diagnosticsWG06(d, buffer);  
   vec.push_back(d);
   diagnosticsAccel(d, buffer);
+  vec.push_back(d);  
+  diagnosticsPressure(d, buffer);
   vec.push_back(d);
-  
-  if (has_accel_and_ft_)
+
+  if (has_accel_and_ft_ && enable_ft_sensor_)
   {
     WG06StatusWithAccelAndFT *status = (WG06StatusWithAccelAndFT *)(buffer + command_size_);
     // perform f/t sample
@@ -648,12 +694,113 @@ void WG06::diagnosticsAccel(diagnostic_updater::DiagnosticStatusWrapper &d, unsi
 void WG06::diagnosticsWG06(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
 {
   WG0X::diagnostics(d, buffer);
-  
-  // TODO, maybe do more error checking on pressure sensor, and put diagnostics in its own topic 
-  if (pressure_checksum_error_) 
+  // nothing else to do here 
+}
+
+void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned char *buffer)
+{
+  int status_bytes = 
+    has_accel_and_ft_  ? sizeof(WG06StatusWithAccelAndFT) :  // Has FT sensor and accelerometer
+    accel_publisher_   ? sizeof(WG06StatusWithAccel) : 
+                         sizeof(WG0XStatus);
+  WG06Pressure *pressure = (WG06Pressure *)(buffer + command_size_ + status_bytes);
+
+  stringstream str;
+  str << "Pressure sensors (" << actuator_info_.name_ << ")";
+  d.name = str.str();
+  char serial[32];
+  snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
+  d.hardware_id = serial;
+  d.clear();
+
+  if (enable_pressure_sensor_)
+  {    
+    d.summary(d.OK, "OK");
+  }
+  else
+  {
+    d.summary(d.OK, "Pressure sensor disabled by user");
+  }
+
+  if (pressure_checksum_error_)
   {
     d.mergeSummary(d.ERROR, "Checksum error on pressure data");
   }
+    
+  if (enable_pressure_sensor_)
+  {
+    // look at pressure sensor value to detect any damaged cables, or possibly missing sensor
+    unsigned l_finger_good_count = 0;
+    unsigned r_finger_good_count = 0;
+
+    for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
+    {
+      uint16_t l_data = pressure->l_finger_tip_[region_num];
+      if ((l_data != 0xFFFF) && (l_data != 0x0000))
+      {
+        ++l_finger_good_count;
+      }
+
+      uint16_t r_data = pressure->r_finger_tip_[region_num];
+      if ((r_data != 0xFFFF) && (r_data != 0x0000))
+      {
+        ++r_finger_good_count;
+      }
+    }
+      
+    // if no pressure sensor regions are return acceptable data, then its possible that the
+    // pressure sensor is not connected at all.  This is just a warning, because on many robots
+    // the pressure sensor may not be installed
+    if ((l_finger_good_count == 0) && (r_finger_good_count == 0))
+    {
+      d.mergeSummary(d.WARN, "Pressure sensors may not been connected");
+    }
+    else 
+    {
+      // At least one pressure sensor seems to be present ...       
+      if (l_finger_good_count == 0)
+      {
+        d.mergeSummary(d.WARN, "Sensor on left finger may not be connected");
+      }
+      else if (l_finger_good_count < NUM_PRESSURE_REGIONS)
+      {
+        d.mergeSummary(d.WARN, "Sensor on left finger may have damaged sensor regions");
+      }
+
+      if (r_finger_good_count == 0)
+      {
+        d.mergeSummary(d.WARN, "Sensor on right finger may not been connected");
+      }
+      else if (r_finger_good_count < NUM_PRESSURE_REGIONS)
+      {
+        d.mergeSummary(d.WARN, "Sensor on right finger may have damaged sensor regions");
+      }
+    } 
+
+    { // put right and left finger data in dianostics
+      std::stringstream ss;
+
+      for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
+      {
+        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
+           << pressure->r_finger_tip_[region_num] << " ";
+        if (region_num%8 == 7) 
+          ss << std::endl;      
+      }
+      d.add("Right finger data",  ss.str());
+
+      ss.str("");
+
+      for (unsigned region_num=0; region_num<NUM_PRESSURE_REGIONS; ++region_num)
+      {
+        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') 
+           << pressure->l_finger_tip_[region_num] << " ";
+        if (region_num%8 == 7) ss << std::endl;      
+      }
+      d.add("Left finger data",  ss.str());
+    }
+  }
+
 }
 
 
@@ -679,6 +826,21 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
     d.addf(ss.str(), "%d", int(sample.data_[i]));
   }
   d.addf("FT Vhalf", "%d", int(sample.vhalf_));
+
+  if (ft_overload_flags_ != 0)
+  {
+    d.mergeSummary(d.ERROR, "Force/Torque sensor overloaded");
+    ss.str("");
+    for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
+    {
+      ss << "Ch" << i << " ";
+    }
+  }
+  else 
+  {
+    ss.str("None");
+  }
+  d.add("Overload Channels", ss.str());
 
   const std::vector<double> &ft_data( ft_analog_in_.state_.state_ );
   if (ft_data.size() == 6)
