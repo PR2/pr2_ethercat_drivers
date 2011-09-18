@@ -8,13 +8,13 @@
   <license>BSD,binary only,GPL</license>  
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/pr2_ethercat_drivers</url>
-  <depend stack="common" /> <!-- tinyxml, pluginlib -->
   <depend stack="common_msgs" /> <!-- geometry_msgs, diagnostic_msgs, visualization_msgs -->
   <depend stack="diagnostics" /> <!-- diagnostic_updater -->
+  <depend stack="pluginlib" /> <!-- pluginlib -->
   <depend stack="pr2_common" /> <!-- pr2_msgs -->
   <depend stack="pr2_mechanism" /> <!-- pr2_hardware_interface, realtime_tools -->
   <depend stack="ros" />
-  <depend stack="ros_comm" /> <!-- roscpp, rostest, geometry_msgs, pr2_msgs, visualization_msgs, rospy, diagnostic_msgs -->
+  <depend stack="ros_comm" /> <!-- rostest, rospy, roscpp -->
   <depend stack="rx" /> <!-- wxswig -->
 
 </stack>
