@@ -1,3 +1,15 @@
+Index: tests/posix/CMakeLists.txt
+===================================================================
+--- tests/posix/CMakeLists.txt      (revision 36)
++++ tests/posix/CMakeLists.txt      (working copy)
+@@ -5,4 +5,5 @@
+ # removed eval_test
+ #ADD_EXECUTABLE(eval_test eval_test.cpp process_data.cpp)
+ #TARGET_LINK_LIBRARIES(eval_test eml)
++TARGET_LINK_LIBRARIES(master_test pthread rt)
+ SET_TARGET_PROPERTIES(master_test PROPERTIES LINK_FLAGS "${POSIX_USER_LDFLAGS}")
+
+
 Index: tests/posix/eval_test.cpp
 ===================================================================
 --- tests/posix/eval_test.cpp	(revision 36)
@@ -2746,4 +2758,3 @@ Index: CMakeLists.txt
 +        SET (POSIX_USER_LDFLAGS "-lpthread -lrt")
  
  	INCLUDE_DIRECTORIES(${EML_SOURCE_DIR}/include/ethercat/arch-RTnet)
- 
