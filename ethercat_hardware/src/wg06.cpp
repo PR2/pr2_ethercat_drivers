@@ -59,6 +59,7 @@ WG06::WG06() :
   accel_publisher_(NULL),
   ft_overload_limit_(31100),
   ft_overload_flags_(0),
+  ft_sampling_rate_error_(false),
   ft_sample_count_(0),
   ft_missed_samples_(0),
   diag_last_ft_sample_count_(0),
@@ -236,40 +237,17 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       }
     }
 
-    // Publish pressure sensor data as a ROS topic
-    string topic = "pressure";
-    if (!actuator_.name_.empty())
-      topic = topic + "/" + string(actuator_.name_);
-    pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
-
-    // Register accelerometer with pr2_hardware_interface::HardwareInterface
-    for (int i = 0; i < 2; ++i) 
+    if (!initializePressure(hw))
     {
-      pressure_sensors_[i].state_.data_.resize(22);
-      pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
-      if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
-      {
-          ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
-          return -1;
-      }
+      return -1;
     }
 
     // Publish accelerometer data as a ROS topic, if firmware is recent enough
     if (fw_major_ >= 1)
     {
-      topic = "accelerometer";
-      if (!actuator_.name_.empty())
-        topic = topic + "/" + string(actuator_.name_);
-      accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
-
-      // Register accelerometer with pr2_hardware_interface::HardwareInterface
+      if (!initializeAccel(hw))
       {
-        accelerometer_.name_ = actuator_info_.name_;
-        if (hw && !hw->addAccelerometer(&accelerometer_))
-        {
-            ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
-            return -1;
-        }
+        return -1;
       }
     }
 
@@ -277,51 +255,10 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Provide Force/Torque data to controllers as an AnalogIn vector 
     if ((fw_major_ >= 2) && (enable_ft_sensor_))
     {
-      ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
-      if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
+      if (!initializeFT(hw))
       {
-        ROS_FATAL("An analog in of the name '%s' already exists.  Device #%02d has a duplicate name",
-                  ft_raw_analog_in_.name_.c_str(), sh_->get_ring_position());
         return -1;
       }
-      // FT provides 6 values : 3 Forces + 3 Torques
-      ft_raw_analog_in_.state_.state_.resize(6); 
-
-      // For now publish RAW F/T values for engineering purposes.  In future this publisher may be disabled by default.
-      topic = "raw_ft";
-      if (!actuator_.name_.empty())
-        topic = topic + "/" + string(actuator_.name_);
-      raw_ft_publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData>(ros::NodeHandle(), topic, 1);
-      if (raw_ft_publisher_ == NULL)
-      {
-        ROS_FATAL("Could not allocate raw_ft publisher");
-        return -1;
-      }
-      // Allocate space for raw f/t data values
-      raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
-
-      if (!actuator_.name_.empty())
-      {
-        ft_analog_in_.state_.state_.resize(6);
-        ros::NodeHandle nh("~" + string(actuator_.name_));
-        FTParamsInternal ft_params;
-        if ( ft_params.getRosParams(nh) )
-        {
-          ft_params_ = ft_params;
-          ft_params_.print();
-          // If we have ft_params, publish F/T values.  
-          topic = "ft";
-          if (!actuator_.name_.empty())
-            topic = topic + "/" + string(actuator_.name_);
-          ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped>(ros::NodeHandle(), topic, 1);
-          if (ft_publisher_ == NULL)
-          {
-            ROS_FATAL("Could not allocate ft publisher");
-            return -1;
-          }
-        }
-      }
-
     }
 
 
@@ -330,12 +267,115 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
   return retval;
 }
 
+
+bool WG06::initializePressure(pr2_hardware_interface::HardwareInterface *hw)
+{
+  // Publish pressure sensor data as a ROS topic
+  string topic = "pressure";
+  if (!actuator_.name_.empty())
+    topic = topic + "/" + string(actuator_.name_);
+  pressure_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::PressureState>(ros::NodeHandle(), topic, 1);
+  
+  // Register pressure sensor with pr2_hardware_interface::HardwareInterface
+  for (int i = 0; i < 2; ++i) 
+  {
+    pressure_sensors_[i].state_.data_.resize(22);
+    pressure_sensors_[i].name_ = string(actuator_info_.name_) + string(i ? "r_finger_tip" : "l_finger_tip");
+    if (hw && !hw->addPressureSensor(&pressure_sensors_[i]))
+    {
+      ROS_FATAL("A pressure sensor of the name '%s' already exists.  Device #%02d has a duplicate name", pressure_sensors_[i].name_.c_str(), sh_->get_ring_position());
+      return false;
+    }
+  }
+
+  return true;
+}
+
+
+bool WG06::initializeAccel(pr2_hardware_interface::HardwareInterface *hw)
+{
+  string topic = "accelerometer";
+  if (!actuator_.name_.empty())
+  {
+    topic = topic + "/" + string(actuator_.name_);
+  }
+  accel_publisher_ = new realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState>(ros::NodeHandle(), topic, 1);
+  
+  // Register accelerometer with pr2_hardware_interface::HardwareInterface
+  accelerometer_.name_ = actuator_info_.name_;
+  if (hw && !hw->addAccelerometer(&accelerometer_))
+  {
+    ROS_FATAL("An accelerometer of the name '%s' already exists.  Device #%02d has a duplicate name", accelerometer_.name_.c_str(), sh_->get_ring_position());
+    return false;
+  }
+  return true;
+}
+
+
+bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
+{
+  ft_raw_analog_in_.name_ = actuator_.name_ + "_ft_raw";
+  if (hw && !hw->addAnalogIn(&ft_raw_analog_in_))
+  {
+    ROS_FATAL("An analog in of the name '%s' already exists.  Device #%02d has a duplicate name",
+              ft_raw_analog_in_.name_.c_str(), sh_->get_ring_position());
+    return false;
+  }
+  // FT provides 6 values : 3 Forces + 3 Torques
+  ft_raw_analog_in_.state_.state_.resize(6); 
+  // FT usually provides 3-4 new samples per cycle
+  force_torque_.state_.samples_.reserve(4);
+  force_torque_.state_.good_ = true;
+
+  // For now publish RAW F/T values for engineering purposes.  In future this publisher may be disabled by default.
+  std::string topic = "raw_ft";
+  if (!actuator_.name_.empty())
+    topic = topic + "/" + string(actuator_.name_);
+  raw_ft_publisher_ = new realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData>(ros::NodeHandle(), topic, 1);
+  if (raw_ft_publisher_ == NULL)
+  {
+    ROS_FATAL("Could not allocate raw_ft publisher");
+    return false;
+  }
+  // Allocate space for raw f/t data values
+  raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
+
+  force_torque_.command_.halt_on_error_ = false;
+  force_torque_.state_.good_ = true;
+
+  if (!actuator_.name_.empty())
+  {
+    ft_analog_in_.state_.state_.resize(6);
+    ros::NodeHandle nh("~" + string(actuator_.name_));
+    FTParamsInternal ft_params;
+    if ( ft_params.getRosParams(nh) )
+    {
+      ft_params_ = ft_params;
+      ft_params_.print();
+      // If we have ft_params, publish F/T values.  
+      topic = "ft";
+      if (!actuator_.name_.empty())
+        topic = topic + "/" + string(actuator_.name_);
+      ft_publisher_ = new realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped>(ros::NodeHandle(), topic, 1);
+      if (ft_publisher_ == NULL)
+      {
+        ROS_FATAL("Could not allocate ft publisher");
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+
 void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   if (reset) 
   {
     pressure_checksum_error_ = false;
     ft_overload_flags_ = 0;
+    ft_sampling_rate_error_ = false;
   }
 
   WG0X::packCommand(buffer, halt, reset);
@@ -505,79 +545,129 @@ bool WG06::unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_st
 
 
 /*!
+ * \brief Convert FTDataSample to Wrench using gain, offset, and coefficient matrix
+ * 
+ * perform offset and gains multiplication on raw data
+ * and then multiply by calibration matrix to get force and torque values.
+ * The calibration matrix is based on "raw"  deltaR/R values from strain gauges
+ *
+ * Force/Torque = Coeff * ADCVoltage
+ *
+ * Coeff = RawCoeff / ( ExcitationVoltage * AmplifierGain )
+ *       = RawCoeff / ( 2.5V * AmplifierGain )
+ *
+ * ADCVoltage = Vref / 2^16 
+ *            = 2.5 / 2^16
+ * 
+ * Force/Torque =  RawCalibrationCoeff / ( ExcitationVoltage * AmplifierGain ) * (ADCValues * 2.5V/2^16)
+ *              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
+ * 
+ * Note on hardware circuit and Vref and excitation voltage should have save value.  
+ * Thus, with Force/Torque calculation they cancel out. 
+ */
+void WG06::convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs::Wrench &wrench)
+{
+  // Apply gains / offset to F/T raw analog inputs
+  // Also, make sure values are within bounds.  
+  // Out-of-bound values indicate a broken sensor or an overload.
+  double in[6];
+  for (unsigned i=0; i<6; ++i)
+  {
+    int raw_data = sample.data_[i];
+    if (abs(raw_data) > ft_overload_limit_)
+    {
+      ft_overload_flags_ |= (1<<i);
+    }
+    in[i] = (double(raw_data) - ft_params_.offset(i)) / ( ft_params_.gain(i) * double(1<<16) );
+  }
+
+  // Apply coeffiecient matrix multiplication to raw inputs to get force/torque values
+  double out[6];
+  for (unsigned i=0; i<6; ++i)
+  {
+    double sum=0.0;
+    for (unsigned j=0; j<6; ++j)
+    {
+      sum += ft_params_.calibration_coeff(i,j) * in[j];
+    }
+    out[i] = sum;
+  }
+
+  wrench.force.x  = out[0];
+  wrench.force.y  = out[1];
+  wrench.force.z  = out[2];
+  wrench.torque.x = out[3];
+  wrench.torque.y = out[4];
+  wrench.torque.z = out[5];
+}
+
+
+/*!
  * \brief Unpack force/torque ADC samples from realtime data.
  *
  * \return True, if there are no problems, false if there is something wrong with the data. 
  */
 bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
 {  
-  // Fill in raw analog output with most recent data sample.  
-  // Also, make sure values are within bounds.  
-  // Out-of-bound values indicate a broken sensor or an overload.
+  pr2_hardware_interface::ForceTorqueState &ft_state(force_torque_.state_);
+
+  ros::Time current_time(ros::Time::now());
+
+  // Fill in raw analog output with most recent data sample, (might become deprecated?)
   {
     ft_raw_analog_in_.state_.state_.resize(6);
     const FTDataSample &sample(status->ft_samples_[0]);
     for (unsigned i=0; i<6; ++i)
     {
       int raw_data = sample.data_[i];
-      if (abs(raw_data) > ft_overload_limit_)
-      {
-        ft_overload_flags_ |= (1<<i);
-      }
       ft_raw_analog_in_.state_.state_[i] = double(raw_data);
     }
   }
-
-  // perform offset and gains multiplication on raw data
-  // and then multiply by calibration matrix to get force and torque values.
-  // The calibration matrix is based on "raw"  deltaR/R values from strain gauges
-  //
-  // Force/Torque = Coeff * ADCVoltage
-  //
-  // Coeff = RawCoeff / ( ExcitationVoltage * AmplifierGain )
-  //       = RawCoeff / ( 2.5V * AmplifierGain )
-  //
-  // ADCVoltage = Vref / 2^16 
-  //            = 2.5 / 2^16
-  // 
-  // Force/Torque =  RawCalibrationCoeff / ( ExcitationVoltage * AmplifierGain ) * (ADCValues * 2.5V/2^16)
-  //              = (RawCalibration * ADCValues) / (AmplifierGain * 2^16)
-  {
-    double in[6];
-    ft_analog_in_.state_.state_.resize(6);
-    for (unsigned i=0; i<6; ++i)
-    {
-      // Take average of last 3 samples to get better noise performance
-      static const unsigned AVG_WINDOW_LEN = 3;
-      double sum = 0.0;
-      for (unsigned j=0; j<AVG_WINDOW_LEN; ++j)
-      { 
-        sum += double(status->ft_samples_[j].data_[i]);
-      }
-      double avg = sum / double(AVG_WINDOW_LEN);
-      in[i] = (avg - ft_params_.offset(i)) / ( ft_params_.gain(i) * double(1<<16) );
-    }
-    for (unsigned i=0; i<6; ++i)
-    {
-      double sum=0.0;
-      for (unsigned j=0; j<6; ++j)
-      {
-        sum += ft_params_.calibration_coeff(i,j) * in[j];
-      }
-      ft_analog_in_.state_.state_[i] = sum;
-    }
-  }
-
 
   unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
   ft_sample_count_ += new_samples;
   int missed_samples = std::max(int(0), int(new_samples) - 4);
   ft_missed_samples_ += missed_samples;
-    
+  unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES); 
+
+  // Also, if number of new_samples is ever 0, then there is also an error
+  if (usable_samples == 0)
+  {
+    ft_sampling_rate_error_ = true;
+  }
+
+  // Make room in data structure for more f/t samples
+  ft_state.samples_.resize(usable_samples);
+
+  // If any f/t channel is overload or the sampling rate is bad, there is an error.
+  ft_state.good_ = ((!ft_sampling_rate_error_) && (ft_overload_flags_ == 0));
+
+
+  for (unsigned sample_index=0; sample_index<usable_samples; ++sample_index)
+  {
+    // samples are stored in status data, so that newest sample is at index 0.
+    // this is the reverse of the order data is stored in hardware_interface::ForceTorque buffer.
+    unsigned status_sample_index = usable_samples-sample_index-1;
+    const FTDataSample &sample(status->ft_samples_[status_sample_index]); 
+    geometry_msgs::Wrench &wrench(ft_state.samples_[sample_index]);
+    convertFTDataSampleToWrench(sample, wrench);
+  }
+
+  // Put newest sample into analog vector for controllers (deprecated)
+  if (usable_samples > 0)
+  {
+    const geometry_msgs::Wrench &wrench(ft_state.samples_[usable_samples-1]);
+    ft_analog_in_.state_.state_[0] = wrench.force.x;
+    ft_analog_in_.state_.state_[1] = wrench.force.y;
+    ft_analog_in_.state_.state_[2] = wrench.force.z;
+    ft_analog_in_.state_.state_[3] = wrench.torque.x;
+    ft_analog_in_.state_.state_[4] = wrench.torque.y;
+    ft_analog_in_.state_.state_[5] = wrench.torque.z;
+  }
+
   // Put all new samples in buffer and publish it
   if ((raw_ft_publisher_ != NULL) && (raw_ft_publisher_->trylock()))
   {
-    unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES);  
     raw_ft_publisher_->msg_.samples.resize(usable_samples);
     raw_ft_publisher_->msg_.sample_count = ft_sample_count_;
     raw_ft_publisher_->msg_.missed_samples = ft_missed_samples_;
@@ -598,20 +688,17 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
     raw_ft_publisher_->unlockAndPublish();
   }
 
-  if ( (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
+  // Put newest sample in realtime publisher
+  if ( (usable_samples > 0) && (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
-    ft_publisher_->msg_.header.stamp = ros::Time::now();
-    geometry_msgs::Wrench &msg(ft_publisher_->msg_.wrench);
-    msg.force.x = ft_analog_in_.state_.state_[0];
-    msg.force.y = ft_analog_in_.state_.state_[1];
-    msg.force.z = ft_analog_in_.state_.state_[2];
-    msg.torque.x = ft_analog_in_.state_.state_[3];
-    msg.torque.y = ft_analog_in_.state_.state_[4];
-    msg.torque.z = ft_analog_in_.state_.state_[5];
+    ft_publisher_->msg_.header.stamp = current_time;
+    ft_publisher_->msg_.wrench = ft_state.samples_[usable_samples-1];
     ft_publisher_->unlockAndPublish();
   }
 
-  return true;
+  // If this returns false, it will cause motors to halt.
+  // Return "good_" state of sensor, unless halt_on_error is false. 
+  return ft_state.good_ || !force_torque_.command_.halt_on_error_;
 }
 
 
@@ -822,14 +909,14 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
   const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
   for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
   {
-    ss.str(""); ss << "FT In"<< (i+1);
+    ss.str(""); ss << "Ch"<< (i);
     d.addf(ss.str(), "%d", int(sample.data_[i]));
   }
   d.addf("FT Vhalf", "%d", int(sample.vhalf_));
 
   if (ft_overload_flags_ != 0)
   {
-    d.mergeSummary(d.ERROR, "Force/Torque sensor overloaded");
+    d.mergeSummary(d.ERROR, "Sensor overloaded");
     ss.str("");
     for (unsigned i=0;i<NUM_FT_CHANNELS;++i)
     {
@@ -841,6 +928,11 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
     ss.str("None");
   }
   d.add("Overload Channels", ss.str());
+
+  if (ft_sampling_rate_error_)
+  {
+    d.mergeSummary(d.ERROR, "Sampling rate error");
+  }
 
   const std::vector<double> &ft_data( ft_analog_in_.state_.state_ );
   if (ft_data.size() == 6)

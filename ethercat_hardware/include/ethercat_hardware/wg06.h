@@ -169,6 +169,10 @@ private:
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
 
+  bool initializePressure(pr2_hardware_interface::HardwareInterface *hw);
+  bool initializeAccel(pr2_hardware_interface::HardwareInterface *hw);
+  bool initializeFT(pr2_hardware_interface::HardwareInterface *hw);
+
   bool unpackPressure(WG06Pressure *p);
   bool unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status);
   bool unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status);
@@ -193,15 +197,21 @@ private:
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
 
+  void convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs::Wrench &wrench);
   static const unsigned MAX_FT_SAMPLES = 4;  
   static const unsigned NUM_FT_CHANNELS = 6;
   int      ft_overload_limit_; //!< Limit on raw range of F/T input 
   uint8_t  ft_overload_flags_;  //!< Bits 0-5 set to true if raw FT input goes beyond limit
+  bool     ft_sampling_rate_error_; //!< True if FT sampling rate was incorrect
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
   uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed
   uint64_t diag_last_ft_sample_count_; //!< F/T Sample count last time diagnostics was published
   pr2_hardware_interface::AnalogIn ft_raw_analog_in_;  //!< Provides raw F/T data to controllers
-  pr2_hardware_interface::AnalogIn ft_analog_in_;  //!< Provides F/T data to controllers
+  //! Provides F/T data to controllers (deprecated, use pr2_hardware_interface::ForceTorque instead)
+  pr2_hardware_interface::AnalogIn ft_analog_in_;  
+  //! Provides F/T data to controllers
+  pr2_hardware_interface::ForceTorque force_torque_;
+
   //! Realtime Publisher of RAW F/T data 
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
   realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped> *ft_publisher_;
