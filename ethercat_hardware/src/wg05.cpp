@@ -148,11 +148,6 @@ int WG05::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
 void WG05::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   WG0X::packCommand(buffer, halt, reset);
-
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
 }
 
 bool WG05::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)

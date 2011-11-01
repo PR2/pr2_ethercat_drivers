@@ -380,11 +380,6 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 
   WG0X::packCommand(buffer, halt, reset);
 
-  if (reset)
-  {
-    last_num_encoder_errors_ = actuator_.state_.num_encoder_errors_;
-  }
-
   WG0XCommand *c = (WG0XCommand *)buffer;
 
   if (accelerometer_.command_.range_ > 2 || 

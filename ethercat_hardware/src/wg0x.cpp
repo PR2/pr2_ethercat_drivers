@@ -246,9 +246,9 @@ WG0X::WG0X() :
   status_checksum_error_(false),
   timestamp_jump_detected_(false),
   fpga_internal_reset_detected_(false),
+  encoder_errors_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
-  last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL),
   disable_motor_model_checking_(false)
@@ -635,6 +635,7 @@ void WG0X::clearErrorFlags(void)
   too_many_dropped_packets_ = false;
   status_checksum_error_ = false;
   timestamp_jump_detected_ = false;
+  encoder_errors_detected_ = false;
   if (motor_model_) motor_model_->reset();
   if (motor_heating_model_.get() != NULL) 
   {
@@ -907,6 +908,11 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
   {
     rv = false;
     goto end;
+  }
+
+  if (this_status->num_encoder_errors_ != prev_status->num_encoder_errors_)
+  {
+    encoder_errors_detected_ = true;
   }
 
   if (state.is_enabled_ && motor_model_)
@@ -2486,7 +2492,9 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   }
 
   if (too_many_dropped_packets_)
+  {
     d.mergeSummary(d.ERROR, "Too many dropped packets");
+  }
 
   if (status_checksum_error_)
   {
@@ -2587,8 +2595,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-  if (!has_error_)
-    d.summary(d.OK, "OK");
+  d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -2660,7 +2667,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     motor_heating_model_->diagnostics(d);
   }
 
-  if (last_num_encoder_errors_ != status->num_encoder_errors_)
+  if (encoder_errors_detected_)
   {
     d.mergeSummaryf(d.WARN, "Encoder errors detected");
   }

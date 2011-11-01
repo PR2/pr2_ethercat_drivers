@@ -248,8 +248,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-  if (!has_error_)
-    d.summary(d.OK, "OK");
+  d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
