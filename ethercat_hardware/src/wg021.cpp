@@ -47,6 +47,8 @@
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 
+#include "ethercat_hardware/wg_util.h"
+
 PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805021, WG021, EthercatDevice);
 
 void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
@@ -181,7 +183,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
   c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
   c->general_config_ = cmd.pulse_replicator_ == true;
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+  c->checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(c, command_size_ - 1));
 }
 
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)

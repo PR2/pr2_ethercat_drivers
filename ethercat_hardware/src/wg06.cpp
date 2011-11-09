@@ -46,6 +46,8 @@
 
 #include <boost/static_assert.hpp>
 
+#include "ethercat_hardware/wg_util.h"
+
 PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805006, WG06, EthercatDevice);
 
 
@@ -433,7 +435,7 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->digital_out_ = (digital_out_.command_.data_ != 0) |
     ((accelerometer_.command_.bandwidth_ & 0x7) << 1) | 
     ((accelerometer_.command_.range_ & 0x3) << 4); 
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+  c->checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(c, command_size_ - 1));
 }
 
 

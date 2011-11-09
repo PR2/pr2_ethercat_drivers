@@ -135,100 +135,6 @@ struct EepromStatusReg
 } __attribute__ ((__packed__));
 
 
-// Syncmanger control register 0x804+N*8
-struct SyncManControl {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t mode            : 2;
-      uint8_t direction       : 2;
-      uint8_t ecat_irq_enable : 1;
-      uint8_t pdi_irq_enable  : 1;
-      uint8_t watchdog_enable : 1;
-      uint8_t res1            : 1;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  //static const unsigned BASE_ADDR=0x804;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger status register 0x805+N*8
-struct SyncManStatus {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t interrupt_write : 1;
-      uint8_t interrupt_read  : 1;
-      uint8_t res1            : 1;
-      uint8_t mailbox_status  : 1;
-      uint8_t buffer_status   : 2;
-      uint8_t res2            : 2;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  //static const unsigned BASE_ADDR=0x805;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger activation register 0x806+N*8
-struct SyncManActivate {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t enable : 1;
-      uint8_t repeat_request : 1;
-      uint8_t res4 : 4;
-      uint8_t ecat_latch_event : 1;
-      uint8_t pdi_latch_event : 1;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  static const unsigned BASE_ADDR=0x806;
-  static unsigned baseAddress(unsigned num);
-  //void print(std::ostream &os=std::cout) const;  
-  bool writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger PDI control register 0x807+N*8
-struct SyncManPDIControl {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t deactivate : 1;
-      uint8_t repeat_ack : 1;
-      uint8_t res6 : 6;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));      
-  //static const unsigned BASE_ADDR=0x807;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-
-// For SyncManager settings REG 0x800+8*N
-struct SyncMan {
-  union {
-    uint8_t raw[8];
-    struct {
-      uint16_t start_addr;
-      uint16_t length;
-      SyncManControl control;
-      SyncManStatus status;
-      SyncManActivate activate;
-      SyncManPDIControl pdi_control;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));
-  
-  // Base address for first syncmanager
-  static const unsigned BASE_ADDR=0x800;
-  // Base address of Nth syncmanager for N=0-7
-  static unsigned baseAddress(unsigned num);
-  
-  bool readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num);
-  //void print(unsigned num, std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-
 struct WG0XSafetyDisableStatus
 {
   uint8_t safety_disable_status_;
@@ -630,9 +536,6 @@ public:
 
   static double calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp, 
                                     int32_t old_position, uint32_t old_timestamp);
-
-  static unsigned computeChecksum(void const *data, unsigned length);
-  static unsigned int rotateRight8(unsigned in);
 
   static double convertRawTemperature(int16_t raw_temp);
 };

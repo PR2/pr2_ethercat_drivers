@@ -58,27 +58,8 @@
 #define ERROR_HDR "\033[41mERROR\033[0m"
 #define WARN_HDR "\033[43mERROR\033[0m"
 
+#include "ethercat_hardware/wg_util.h"
 
-unsigned int WG0X::rotateRight8(unsigned in)
-{
-  in &= 0xff;
-  in = (in >> 1) | (in << 7);
-  in &= 0xff;
-  return in;
-}
-
-unsigned WG0X::computeChecksum(void const *data, unsigned length)
-{
-  const unsigned char *d = (const unsigned char *)data;
-  unsigned int checksum = 0x42;
-  for (unsigned int i = 0; i < length; ++i)
-  {
-    checksum = rotateRight8(checksum);
-    checksum ^= d[i];
-    checksum &= 0xff;
-  }
-  return checksum;
-}
 
 bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum)
 {
@@ -108,13 +89,13 @@ bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsig
   length_ = length - 1;
   seqnum_ = seqnum;
   write_nread_ = (type==LOCAL_BUS_WRITE) ? 1 : 0;
-  checksum_ = WG0X::rotateRight8(WG0X::computeChecksum(this, sizeof(*this) - 1));
+  checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(this, sizeof(*this) - 1));
   return true;
 }
 
 bool WG0XMbxHdr::verifyChecksum(void) const
 {
-  return WG0X::computeChecksum(this, sizeof(*this)) != 0;
+  return wg_util::computeChecksum(this, sizeof(*this)) != 0;
 }
 
 bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data)
@@ -132,7 +113,7 @@ bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsig
   {
     memset(data_, 0, length);
   }
-  unsigned int checksum = WG0X::rotateRight8(WG0X::computeChecksum(data_, length));
+  unsigned int checksum = wg_util::rotateRight8(wg_util::computeChecksum(data_, length));
   data_[length] = checksum;
   return true;
 }
@@ -691,7 +672,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->mode_ = (cmd.enable_ && !halt && !has_error_) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
   c->mode_ |= (reset ? MODE_SAFETY_RESET : 0);
   c->digital_out_ = digital_out_.command_.data_;
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+  c->checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(c, command_size_ - 1));
 }
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -747,7 +728,7 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
 bool WG0X::verifyChecksum(const void* buffer, unsigned size)
 {
-  bool success = computeChecksum(buffer, size) == 0;
+  bool success = wg_util::computeChecksum(buffer, size) == 0;
   if (!success) {
     if (tryLockWG0XDiagnostics()) {
       ++wg0x_collect_diagnostics_.checksum_errors_;
@@ -1572,47 +1553,6 @@ void safe_usleep(uint32_t usec)
 }
 
 
-unsigned SyncMan::baseAddress(unsigned num) 
-{
-  assert(num < 8);
-  return BASE_ADDR + 8 * num;
-}  
-  
-
-/*!
- * \brief  Read data from Sync Manager
- *
- * \param com       used to perform communication with device
- * \param sh        slave to read data from
- * \param addrMode  addressing mode used to read data (FIXED/POSITIONAL)
- * \param num       syncman number to read 0-7
- * \return          returns true for success, false for failure 
- */
-bool SyncMan::readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num)
-{
-  return ( EthercatDevice::readData(com, sh, baseAddress(num), this, sizeof(*this), addrMode) == 0);
-}
-
-
-unsigned SyncManActivate::baseAddress(unsigned num)
-{
-  assert(num < 8);
-  return BASE_ADDR + 8 * num;
-}
-
-/*!
- * \brief  Write data to Sync Manager Activation register
- *
- * \param com       used to perform communication with device
- * \param sh        slave to read data from
- * \param addrMode  addressing mode used to read data (FIXED/POSITIONAL)
- * \param num       syncman number to read 0-7
- * \return          returns true for success, false for failure 
- */
-bool SyncManActivate::writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const
-{
-  return ( EthercatDevice::writeData(com, sh, baseAddress(num), this, sizeof(*this), addrMode) == 0);
-}
 
 
 void updateIndexAndWkc(EC_Telegram *tg, EC_Logic *logic) 
@@ -2271,7 +2211,7 @@ int WG0X::readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned 
       return -1;
     }
     
-    if (computeChecksum(&stat, length+1) != 0) 
+    if (wg_util::computeChecksum(&stat, length+1) != 0) 
     {
       fprintf(stderr, "%s : " ERROR_HDR 
               "checksum error reading mailbox data\n", __func__);
