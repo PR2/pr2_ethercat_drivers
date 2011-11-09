@@ -1,0 +1,7 @@
+string processor_name    # name of soft-processor to firmware to read
+                         # certain devices may have more than one soft-processor
+---
+bool success             # true if firmware was successfully read from device
+string error_msg         # descriptive error message if call was not successful
+uint32[] instructions    # list of firmware binary instructions.  
+                         # not all soft-processors instructions use all 32bits for each instruction

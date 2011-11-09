@@ -37,6 +37,8 @@
 
 #include <ethercat_hardware/wg0x.h>
 
+#include <ethercat_hardware/wg_soft_processor.h>
+
 #include <pr2_msgs/PressureState.h>
 #include <pr2_msgs/AccelerometerState.h>
 #include <ethercat_hardware/RawFTData.h>
@@ -147,6 +149,17 @@ struct WG06Pressure
   static const unsigned SIZE=94;
 } __attribute__((__packed__));
 
+
+struct WG06BigPressure
+{
+  WG06Pressure pressure_;
+  uint8_t pad_[418];
+  uint8_t checksum_;
+  static const unsigned SIZE=513;
+} __attribute__((__packed__));
+
+
+
 class WG06 : public WG0X
 {
 public:
@@ -164,7 +177,8 @@ public:
   };
 private:
 
-  static const unsigned PRESSURE_PHY_ADDR = 0x2200;
+  static const unsigned PRESSURE_PHY_ADDR     = 0x2200;
+  static const unsigned BIG_PRESSURE_PHY_ADDR = 0x2600;
 
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
@@ -172,8 +186,9 @@ private:
   bool initializePressure(pr2_hardware_interface::HardwareInterface *hw);
   bool initializeAccel(pr2_hardware_interface::HardwareInterface *hw);
   bool initializeFT(pr2_hardware_interface::HardwareInterface *hw);
+  bool initializeSoftProcessor(ros::NodeHandle nh);
 
-  bool unpackPressure(WG06Pressure *p);
+  bool unpackPressure(unsigned char* pressure_buf);
   bool unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status);
   bool unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status);
 
@@ -186,6 +201,8 @@ private:
   bool has_accel_and_ft_;
 
   bool pressure_checksum_error_; //!< Set true where checksum error on pressure data is detected, cleared on reset
+  unsigned pressure_checksum_error_count_; //!< debugging
+  unsigned pressure_size_; //!< Size in bytes of pressure data region
 
   unsigned accelerometer_samples_; //!< Number of accelerometer samples since last publish cycle
   unsigned accelerometer_missed_samples_;  //!< Total of accelerometer samples that were missed
@@ -220,6 +237,14 @@ private:
 
   bool enable_pressure_sensor_;
   bool enable_ft_sensor_;
+
+  /** Certain version of WG06 firmware (2.xx and 3.xx) use soft-processors to 
+   *  communicate with certain peripherals (pressure sensor, F/T sensor, accelerometer...)
+   *  For purposes of supporting new types of devices, the soft-processor FW can be be
+   *  modified through use of service calls.   
+   */
+  bool enable_soft_processor_access_;
+  WGSoftProcessor soft_processor_;
 };
 
 #endif /* ETHERCAT_HARDWARE_WG06_H */

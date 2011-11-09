@@ -50,7 +50,9 @@ PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805006, WG06, EthercatDevice);
 
 
 WG06::WG06() :
+  has_accel_and_ft_(false),
   pressure_checksum_error_(false),
+  pressure_checksum_error_count_(0),
   accelerometer_samples_(0), 
   accelerometer_missed_samples_(0),
   first_publish_(true),
@@ -66,7 +68,8 @@ WG06::WG06() :
   raw_ft_publisher_(NULL),
   ft_publisher_(NULL),
   enable_pressure_sensor_(true),
-  enable_ft_sensor_(false)
+  enable_ft_sensor_(false),
+  enable_soft_processor_access_(true)
   // ft_publisher_(NULL)
 {
 
@@ -88,12 +91,16 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccel) == WG06StatusWithAccel::SIZE);
   BOOST_STATIC_ASSERT(sizeof(FTDataSample) == FTDataSample::SIZE);
   BOOST_STATIC_ASSERT(sizeof(WG06Pressure) == WG06Pressure::SIZE);
+  BOOST_STATIC_ASSERT(sizeof(WG06BigPressure) == WG06BigPressure::SIZE);
   BOOST_STATIC_ASSERT(sizeof(WG06StatusWithAccelAndFT) == WG06StatusWithAccelAndFT::SIZE);  
 
-  unsigned int base_status = sizeof(WG0XStatus);
+  unsigned int base_status_size = sizeof(WG0XStatus);
 
   command_size_ = sizeof(WG0XCommand);
   status_size_ = sizeof(WG0XStatus);
+  pressure_size_ = sizeof(WG06Pressure);
+  unsigned pressure_phy_addr = PRESSURE_PHY_ADDR;
+
   if (fw_major_ == 0)
   {
     // Do nothing - status memory map is same size as WG05
@@ -101,19 +108,25 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   if (fw_major_ == 1)
   {
     // Include Accelerometer data
-    status_size_ = base_status = sizeof(WG06StatusWithAccel);
+    status_size_ = base_status_size = sizeof(WG06StatusWithAccel);
   }
-  else if (fw_major_ == 2)
+  else if ((fw_major_ == 2) || (fw_major_ == 3))
   {
     // Include Accelerometer and Force/Torque sensor data
-    status_size_ = base_status = sizeof(WG06StatusWithAccelAndFT);
+    status_size_ = base_status_size = sizeof(WG06StatusWithAccelAndFT);
     has_accel_and_ft_ = true;
+    if (fw_major_ == 3)
+    {
+      // Pressure data size is 513 bytes instead of 94.  The physical address has also moved.
+      pressure_size_ = sizeof(WG06BigPressure);
+      pressure_phy_addr = BIG_PRESSURE_PHY_ADDR;
+    }
   }
   else 
   {
     ROS_ERROR("Unsupported WG06 FW major version %d", fw_major_);
   }
-  status_size_ += sizeof(WG06Pressure);
+  status_size_ += pressure_size_;
 
 
   EtherCAT_FMMU_Config *fmmu = new EtherCAT_FMMU_Config(3);
@@ -132,7 +145,7 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 
   //ROS_DEBUG("device %d, status   0x%X = 0x10000+%d", (int)sh->get_ring_position(), start_address, start_address-0x10000);
   (*fmmu)[1] = EC_FMMU(start_address, // Logical start address
-                       base_status, // Logical length
+                       base_status_size, // Logical length
                        0x00, // Logical StartBit
                        0x07, // Logical EndBit
                        STATUS_PHY_ADDR, // Physical Start address
@@ -141,19 +154,19 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
                        false, // Write Enable
                        true); // Enable
 
-  start_address += base_status;
+  start_address += base_status_size;
 
   (*fmmu)[2] = EC_FMMU(start_address, // Logical start address
-                       sizeof(WG06Pressure), // Logical length
+                       pressure_size_, // Logical length
                        0x00, // Logical StartBit
                        0x07, // Logical EndBit
-                       PRESSURE_PHY_ADDR, // Physical Start address
+                       pressure_phy_addr, // Physical Start address
                        0x00, // Physical StartBit
                        true, // Read Enable
                        false, // Write Enable
                        true); // Enable
 
-  start_address += sizeof(WG06Pressure);
+  start_address += pressure_size_;
 
   sh->set_fmmu_config(fmmu);
 
@@ -164,7 +177,7 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   (*pd)[0].ChannelEnable = true;
   (*pd)[0].ALEventEnable = true;
 
-  (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
+  (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status_size);
   (*pd)[1].ChannelEnable = true;
 
   (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
@@ -174,7 +187,7 @@ void WG06::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
   (*pd)[3].ChannelEnable = true;
 
-  (*pd)[4] = EC_SyncMan(PRESSURE_PHY_ADDR, sizeof(WG06Pressure));
+  (*pd)[4] = EC_SyncMan(pressure_phy_addr, pressure_size_);
   (*pd)[4].ChannelEnable = true;
 
   sh->set_pd_config(pd);
@@ -256,6 +269,16 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     if ((fw_major_ >= 2) && (enable_ft_sensor_))
     {
       if (!initializeFT(hw))
+      {
+        return -1;
+      }
+    }
+
+    // FW version 2 and 3 uses soft-processors to control certain peripherals.
+    // Allow the firmware on these soft-processors to be read/write through ROS service calls
+    if ((fw_major_ >= 2) && enable_soft_processor_access_)
+    {
+      if (!initializeSoftProcessor(nh))
       {
         return -1;
       }
@@ -369,6 +392,23 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
 }
 
 
+bool WG06::initializeSoftProcessor(ros::NodeHandle nh)
+{
+  // Add soft-processors to list
+  soft_processor_.add("pressure", 0xA000, 0x249);
+  soft_processor_.add("accel", 0xB000, 0x24A);
+
+  // Start services
+  if (!soft_processor_.initialize(nh))
+  {
+    return false;
+  }
+
+  return true;
+}
+
+
+
 void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
 {
   if (reset) 
@@ -396,6 +436,7 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
 }
 
+
 bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 {
   bool rv = true;
@@ -405,7 +446,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     accel_publisher_   ? sizeof(WG06StatusWithAccel) : 
                          sizeof(WG0XStatus);  
 
-  WG06Pressure *pressure = (WG06Pressure *)(this_buffer + command_size_ + status_bytes);
+  unsigned char *pressure_buf = (this_buffer + command_size_ + status_bytes);
 
   unsigned char* this_status = this_buffer + command_size_;
   if (!verifyChecksum(this_status, status_bytes))
@@ -415,7 +456,7 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
     goto end;
   }
 
-  if (!unpackPressure(pressure))
+  if (!unpackPressure(pressure_buf))
   {
     rv = false;
     //goto end;  // all other tasks should not be effected by bad pressure sensor data
@@ -457,15 +498,27 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
  *
  * \return True, if there are no problems, false if there is something wrong with the data. 
  */
-bool WG06::unpackPressure(WG06Pressure *p)
-{
-
-  if (!verifyChecksum(p, sizeof(*p)))
+bool WG06::unpackPressure(unsigned char *pressure_buf)
+{  
+  if (!verifyChecksum(pressure_buf, pressure_size_))
   {
+    ++pressure_checksum_error_count_;
+    std::stringstream ss;
+    ss << "Pressure buffer checksum error : " << std::endl;
+    for (unsigned ii=0; ii<pressure_size_; ++ii)
+    {
+      ss << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+         << unsigned(pressure_buf[ii]) << " ";
+      if ((ii%8) == 7) ss << std::endl;
+    }
+    ROS_ERROR_STREAM(ss.str());
+    std::cerr << ss.str() << std::endl;
     pressure_checksum_error_ = true;
     return false;
   }
-  else {
+  else 
+  {
+    WG06Pressure *p( (WG06Pressure *) pressure_buf);
     for (int i = 0; i < 22; ++i ) {
       pressure_sensors_[0].state_.data_[i] =
         ((p->l_finger_tip_[i] >> 8) & 0xff) |
@@ -858,6 +911,10 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
         d.mergeSummary(d.WARN, "Sensor on right finger may have damaged sensor regions");
       }
     } 
+
+    d.addf("Timestamp", "%u", pressure->timestamp_);
+    d.addf("Data size", "%u", pressure_size_);
+    d.addf("Checksum error count", "%u", pressure_checksum_error_count_);
 
     { // put right and left finger data in dianostics
       std::stringstream ss;
