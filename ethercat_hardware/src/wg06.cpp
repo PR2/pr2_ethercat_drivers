@@ -278,7 +278,7 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
     // Allow the firmware on these soft-processors to be read/write through ROS service calls
     if ((fw_major_ >= 2) && enable_soft_processor_access_)
     {
-      if (!initializeSoftProcessor(nh))
+      if (!initializeSoftProcessor())
       {
         return -1;
       }
@@ -392,14 +392,14 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
 }
 
 
-bool WG06::initializeSoftProcessor(ros::NodeHandle nh)
+bool WG06::initializeSoftProcessor()
 {
   // Add soft-processors to list
-  soft_processor_.add("pressure", 0xA000, 0x249);
-  soft_processor_.add("accel", 0xB000, 0x24A);
+  soft_processor_.add(actuator_.name_, "pressure", 0xA000, 0x249);
+  soft_processor_.add(actuator_.name_, "accel", 0xB000, 0x24A);
 
   // Start services
-  if (!soft_processor_.initialize(nh))
+  if (!soft_processor_.initialize())
   {
     return false;
   }

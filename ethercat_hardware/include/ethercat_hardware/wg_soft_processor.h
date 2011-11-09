@@ -40,7 +40,7 @@
 #include <ethercat_hardware/SoftProcessorFirmwareRead.h>
 #include <ethercat_hardware/SoftProcessorReset.h>
 
-#include <map>
+#include <vector>
 #include <ostream>
 #include <string>
 
@@ -56,24 +56,28 @@ class WGSoftProcessor
 {
 public:
   WGSoftProcessor();
-  bool initialize(ros::NodeHandle nh);
+  bool initialize();
 
   struct Info 
   {
     Info() : iram_address_(-1), ctrl_address_(-1) {}
-    Info( std::string name, unsigned iram_address, unsigned ctrl_address ) :
-      name_(name), iram_address_(iram_address), ctrl_address_(ctrl_address) {}
-    std::string name_;
+    Info( const std::string &actuator_name, 
+          const std::string &processor_name, 
+          unsigned iram_address, unsigned ctrl_address ) :
+      actuator_name_(actuator_name), processor_name_(processor_name),
+      iram_address_(iram_address), ctrl_address_(ctrl_address) {}
+    std::string actuator_name_;
+    std::string processor_name_;
     unsigned iram_address_;
     unsigned ctrl_address_;
   };
 
-  void add(const std::string &name, unsigned iram_address, unsigned ctrl_address);  
+  void add(const std::string &actuator_name, const std::string &processor_name, 
+           unsigned iram_address, unsigned ctrl_address);  
 
 protected:
 
-  typedef std::map<std::string, Info> ProcessorMap;
-  ProcessorMap processors_;
+  std::vector<Info> processors_;
 
   bool writeFirmwareCB(ethercat_hardware::SoftProcessorFirmwareWrite::Request &request, 
                        ethercat_hardware::SoftProcessorFirmwareWrite::Response &response);
@@ -93,7 +97,7 @@ protected:
   bool releaseReset(const Info &info, std::ostream &err_msg);
 
   //! Get pointer to soft processor by name. Returns NULL if processor d/n exist and create message in err_out
-  const WGSoftProcessor::Info* get(const std::string &name, std::ostream &err_out) const;
+  const WGSoftProcessor::Info* get(const std::string &actuator_name, const std::string &processor_name, std::ostream &err_out) const;
 };
 
 

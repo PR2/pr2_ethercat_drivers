@@ -186,7 +186,7 @@ private:
   bool initializePressure(pr2_hardware_interface::HardwareInterface *hw);
   bool initializeAccel(pr2_hardware_interface::HardwareInterface *hw);
   bool initializeFT(pr2_hardware_interface::HardwareInterface *hw);
-  bool initializeSoftProcessor(ros::NodeHandle nh);
+  bool initializeSoftProcessor();
 
   bool unpackPressure(unsigned char* pressure_buf);
   bool unpackAccel(WG06StatusWithAccel *status, WG06StatusWithAccel *last_status);

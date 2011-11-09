@@ -1,6 +1,7 @@
 #include <ethercat_hardware/wg_soft_processor.h>
 
 #include <sstream>
+#include <boost/foreach.hpp>
 
 namespace ethercat_hardware
 {
@@ -10,31 +11,41 @@ WGSoftProcessor::WGSoftProcessor()
 
 }
 
-bool WGSoftProcessor::initialize(ros::NodeHandle nh)
+bool WGSoftProcessor::initialize()
 {
-  ros::NodeHandle nh2("soft_processor");
-  read_firmware_service_ = nh2.advertiseService("read_firmware", &WGSoftProcessor::readFirmwareCB, this);
-  write_firmware_service_ = nh2.advertiseService("write_firmware", &WGSoftProcessor::writeFirmwareCB, this);
-  reset_service_ = nh2.advertiseService("reset", &WGSoftProcessor::resetCB, this);
+  ros::NodeHandle nh("~/soft_processor/");
+  read_firmware_service_ = nh.advertiseService("read_firmware", &WGSoftProcessor::readFirmwareCB, this);
+  write_firmware_service_ = nh.advertiseService("write_firmware", &WGSoftProcessor::writeFirmwareCB, this);
+  reset_service_ = nh.advertiseService("reset", &WGSoftProcessor::resetCB, this);
   return true;
 }
 
 
-void WGSoftProcessor::add(const std::string &name, unsigned iram_address, unsigned ctrl_address)
+void WGSoftProcessor::add(const std::string &actuator_name, 
+                          const std::string &processor_name,
+                          unsigned iram_address, unsigned ctrl_address)
 {
-  processors_.insert(ProcessorMap::value_type(name, Info(name, iram_address, ctrl_address)));
+  Info info(actuator_name, processor_name, iram_address, ctrl_address);
+  processors_.push_back(info);
+  ROS_INFO("Processor : %s/%s", actuator_name.c_str(), processor_name.c_str());
 }
 
 
-const WGSoftProcessor::Info* WGSoftProcessor::get(const std::string &name, std::ostream &err_out) const
+
+const WGSoftProcessor::Info* WGSoftProcessor::get(const std::string &actuator_name, 
+                                                  const std::string &processor_name,
+                                                  std::ostream &err_out) const
 {
-  ProcessorMap::const_iterator iter = processors_.find(name);
-  if (iter == processors_.end())
+  BOOST_FOREACH(const Info &info, processors_)
   {
-    err_out << "No processor with name : " << name;
-    return NULL;
+    if ((info.actuator_name_ == actuator_name) && (info.processor_name_ == processor_name))
+    {
+      return &info;
+    }
   }
-  return &(iter->second);
+
+  err_out << "No actuator/processor with name " << actuator_name << "/" << processor_name;
+  return NULL;
 }
 
 
@@ -47,13 +58,12 @@ bool WGSoftProcessor::readFirmwareCB(ethercat_hardware::SoftProcessorFirmwareRea
 
   std::ostringstream err_out;
 
-  const Info *info = get(request.processor_name, err_out);
+  const Info *info = get(request.actuator_name, request.processor_name, err_out);
   if (!info)
   {
     response.error_msg = err_out.str();
     return true;
   }
-
 
   response.success = true;
   return true;
@@ -69,7 +79,7 @@ bool WGSoftProcessor::writeFirmwareCB(ethercat_hardware::SoftProcessorFirmwareWr
 
   std::ostringstream err_out;
 
-  const Info *info = get(request.processor_name, err_out);
+  const Info *info = get(request.actuator_name, request.processor_name, err_out);
   if (!info)
   {
     response.error_msg = err_out.str();
@@ -106,7 +116,7 @@ bool WGSoftProcessor::resetCB(ethercat_hardware::SoftProcessorReset::Request &re
 
   std::ostringstream err_out;
 
-  const Info *info = get(request.processor_name, err_out);
+  const Info *info = get(request.actuator_name, request.processor_name, err_out);
   if (!info)
   {
     response.error_msg = err_out.str();
