@@ -1,4 +1,5 @@
 all: installed
+	rm -rf build
 
 TARBALL = build/eml-r36.tar.bz2
 TARBALL_URL = http://pr.willowgarage.com/downloads/eml-r36.tar.bz2
@@ -12,7 +13,7 @@ installed: wiped $(SOURCE_DIR)/unpacked Makefile
 	mkdir -p build && \
 	cd build && \
 	cmake -D CMAKE_INSTALL_PREFIX=`rospack find eml`/eml .. && \
-	make install
+	make install && \
 	touch installed
 
 wiped: Makefile
