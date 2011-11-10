@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <boost/foreach.hpp>
+#include <boost/static_assert.hpp>
 
 namespace ethercat_hardware
 {
@@ -11,8 +12,9 @@ WGSoftProcessor::WGSoftProcessor()
 
 }
 
-bool WGSoftProcessor::initialize()
+bool WGSoftProcessor::initialize(EthercatCom *com)
 {
+  com_ = com;
   ros::NodeHandle nh("~/soft_processor/");
   read_firmware_service_ = nh.advertiseService("read_firmware", &WGSoftProcessor::readFirmwareCB, this);
   write_firmware_service_ = nh.advertiseService("write_firmware", &WGSoftProcessor::writeFirmwareCB, this);
@@ -21,11 +23,12 @@ bool WGSoftProcessor::initialize()
 }
 
 
-void WGSoftProcessor::add(const std::string &actuator_name, 
+void WGSoftProcessor::add(WGMailbox *mbx,
+                          const std::string &actuator_name, 
                           const std::string &processor_name,
                           unsigned iram_address, unsigned ctrl_address)
 {
-  Info info(actuator_name, processor_name, iram_address, ctrl_address);
+  Info info(mbx, actuator_name, processor_name, iram_address, ctrl_address);
   processors_.push_back(info);
   ROS_INFO("Processor : %s/%s", actuator_name.c_str(), processor_name.c_str());
 }
@@ -63,6 +66,35 @@ bool WGSoftProcessor::readFirmwareCB(ethercat_hardware::SoftProcessorFirmwareRea
   {
     response.error_msg = err_out.str();
     return true;
+  }
+
+  // Each instruction is maped to 32bit memory array.  Read 64 instructions at a time.
+  response.instructions.resize(IRAM_INSTRUCTION_LENGTH);
+  static const unsigned INSTRUCTION_READ_CHUNK = 64;
+  uint8_t buf[INSTRUCTION_READ_CHUNK*4]; // Each instruction in 4 bytes
+  
+  BOOST_STATIC_ASSERT((IRAM_INSTRUCTION_LENGTH%INSTRUCTION_READ_CHUNK) == 0);
+
+  for (unsigned ii=0; ii<(IRAM_INSTRUCTION_LENGTH/INSTRUCTION_READ_CHUNK); ii+=INSTRUCTION_READ_CHUNK)
+  {
+    if (info->mbx_->readMailbox(com_, info->iram_address_ + ii*4, buf, sizeof(buf)))
+    {
+      response.error_msg = "Error reading IRAM data with mailbox";
+      return true;
+    }
+    
+    // Data 4-bytes and make integer out of them
+    for (unsigned jj=0; jj<INSTRUCTION_READ_CHUNK; ++jj)
+    {     
+      // instrutions are little endian
+      uint32_t instruction = 
+        (uint32_t(buf[jj*4+3])<<24) | 
+        (uint32_t(buf[jj*4+2])<<16) | 
+        (uint32_t(buf[jj*4+1])<<8 ) | 
+        (uint32_t(buf[jj*4+0])<<0 ) ;
+      
+      response.instructions[ii+jj] = instruction;
+    }
   }
 
   response.success = true;

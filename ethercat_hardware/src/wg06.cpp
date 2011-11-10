@@ -396,12 +396,16 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
 
 bool WG06::initializeSoftProcessor()
 {
+  // TODO: do not use direct access to device.  Not safe while realtime loop is running
+  // ALSO, this leaks memory
+  EthercatDirectCom *com = new EthercatDirectCom(EtherCAT_DataLinkLayer::instance());
+
   // Add soft-processors to list
-  soft_processor_.add(actuator_.name_, "pressure", 0xA000, 0x249);
-  soft_processor_.add(actuator_.name_, "accel", 0xB000, 0x24A);
+  soft_processor_.add(&mailbox_, actuator_.name_, "pressure", 0xA000, 0x249);
+  soft_processor_.add(&mailbox_, actuator_.name_, "accel", 0xB000, 0x24A);
 
   // Start services
-  if (!soft_processor_.initialize())
+  if (!soft_processor_.initialize(com))
   {
     return false;
   }

@@ -36,9 +36,11 @@
 #define ETHERCAT_HARDWARE__WG_SOFT_PROCESSOR_H
 
 #include <ros/ros.h>
-#include <ethercat_hardware/SoftProcessorFirmwareWrite.h>
-#include <ethercat_hardware/SoftProcessorFirmwareRead.h>
-#include <ethercat_hardware/SoftProcessorReset.h>
+#include "ethercat_hardware/ethercat_com.h"
+#include "ethercat_hardware/wg_mailbox.h"
+#include "ethercat_hardware/SoftProcessorFirmwareWrite.h"
+#include "ethercat_hardware/SoftProcessorFirmwareRead.h"
+#include "ethercat_hardware/SoftProcessorReset.h"
 
 #include <vector>
 #include <ostream>
@@ -56,26 +58,30 @@ class WGSoftProcessor
 {
 public:
   WGSoftProcessor();
-  bool initialize();
+  bool initialize(EthercatCom *com);
 
   struct Info 
   {
-    Info() : iram_address_(-1), ctrl_address_(-1) {}
-    Info( const std::string &actuator_name, 
+    Info() : mbx_(NULL), iram_address_(-1), ctrl_address_(-1) {}
+    Info( WGMailbox *mbx,
+          const std::string &actuator_name, 
           const std::string &processor_name, 
           unsigned iram_address, unsigned ctrl_address ) :
-      actuator_name_(actuator_name), processor_name_(processor_name),
+      mbx_(mbx), actuator_name_(actuator_name), processor_name_(processor_name),
       iram_address_(iram_address), ctrl_address_(ctrl_address) {}
+    WGMailbox *mbx_;    
     std::string actuator_name_;
     std::string processor_name_;
     unsigned iram_address_;
     unsigned ctrl_address_;
   };
 
-  void add(const std::string &actuator_name, const std::string &processor_name, 
+  void add(WGMailbox *mbx, const std::string &actuator_name, const std::string &processor_name, 
            unsigned iram_address, unsigned ctrl_address);  
 
 protected:
+
+  static const unsigned IRAM_INSTRUCTION_LENGTH = 1024;
 
   std::vector<Info> processors_;
 
@@ -98,6 +104,8 @@ protected:
 
   //! Get pointer to soft processor by name. Returns NULL if processor d/n exist and create message in err_out
   const WGSoftProcessor::Info* get(const std::string &actuator_name, const std::string &processor_name, std::ostream &err_out) const;
+    
+  EthercatCom *com_;
 };
 
 
