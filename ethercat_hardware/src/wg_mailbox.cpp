@@ -52,6 +52,40 @@ namespace ethercat_hardware
 
 
 
+enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
+
+struct WG0XMbxHdr
+{
+  uint16_t address_;
+  union
+  {
+    uint16_t command_;
+    struct
+    {
+      uint16_t length_:12;
+      uint16_t seqnum_: 3;  // bits[14:12] sequence number, 0=disable, 1-7 normal sequence number
+      uint16_t write_nread_:1;
+    }__attribute__ ((__packed__));
+  };
+  uint8_t checksum_;
+
+  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum);
+  bool verifyChecksum(void) const;
+}__attribute__ ((__packed__));
+
+static const unsigned MBX_SIZE = 512;
+static const unsigned MBX_DATA_SIZE = (MBX_SIZE - sizeof(WG0XMbxHdr) - 1);
+struct WG0XMbxCmd
+{
+  WG0XMbxHdr hdr_;
+  uint8_t data_[MBX_DATA_SIZE];
+  uint8_t checksum_;
+
+  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data);
+}__attribute__ ((__packed__));
+
+
+
 bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum)
 {
   if (type==LOCAL_BUS_WRITE) 
