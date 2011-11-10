@@ -34,9 +34,7 @@
 
 #pragma once
 
-
 #include "ethercat_hardware/ethercat_com.h"
-#include "ethercat_hardware/mailbox.h"
 #include <diagnostic_updater/DiagnosticStatusWrapper.h>
 
 namespace ethercat_hardware
@@ -87,13 +85,10 @@ struct MbxDiagnostics
 };
 
 
-class WGMailbox : public Mailbox
+class WGMailbox
 {
 public:
   WGMailbox();
-
-  bool write(EthercatCom *com, unsigned address, void const *data, unsigned length);
-  bool read(EthercatCom *com, unsigned address, void *data, unsigned length);
 
   bool initialize(EtherCAT_SlaveHandler *sh);
   int writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length);

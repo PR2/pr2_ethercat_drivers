@@ -40,68 +40,11 @@
 #include "ethercat_hardware/motor_heating_model.h"
 #include "realtime_tools/realtime_publisher.h"
 #include "ethercat_hardware/wg_mailbox.h"
+#include "ethercat_hardware/wg_eeprom.h"
 
 #include <boost/shared_ptr.hpp>
 
 using namespace ethercat_hardware;
-
-struct WG0XSpiEepromCmd
-{
-  uint16_t page_;
-  union
-  {
-    uint8_t command_;
-    struct
-    {
-      uint8_t operation_ :4;
-      uint8_t start_ :1;
-      uint8_t busy_ :1;
-      uint8_t unused2_ :2;
-    }__attribute__ ((__packed__));
-  };
-
-  void build_read(unsigned page)
-  {
-    this->page_ = page & 0xffff;
-    this->operation_ = SPI_READ_OP;
-    this->start_ = 1;
-  }
-  void build_write(unsigned page)
-  {
-    this->page_ = page & 0xffff;
-    this->operation_ = SPI_WRITE_OP;
-    this->start_ = 1;
-  }
-  void build_arbitrary(unsigned length)
-  {
-    this->page_ = (length-1) & 0xffff;
-    this->operation_ = SPI_ARBITRARY_OP;
-    this->start_ = 1;
-  }
-
-  static const unsigned SPI_READ_OP = 0;
-  static const unsigned SPI_WRITE_OP = 1;
-  static const unsigned SPI_ARBITRARY_OP = 3;
-
-  static const unsigned SPI_COMMAND_ADDR = 0x0230;
-  static const unsigned SPI_BUFFER_ADDR = 0xF400;
-}__attribute__ ((__packed__));
-
-
-
-struct EepromStatusReg 
-{
-  union {
-    uint8_t raw_;
-    struct {
-      uint8_t page_size_     : 1; 
-      uint8_t write_protect_ : 1;
-      uint8_t eeprom_size_   : 4;
-      uint8_t compare_       : 1;
-      uint8_t ready_         : 1;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));
-} __attribute__ ((__packed__));
 
 
 struct WG0XSafetyDisableStatus
@@ -407,17 +350,8 @@ protected:
   //! Mailbox access to device
   ethercat_hardware::WGMailbox mailbox_;
 
-  // SPI Eeprom State machine helper functions
-  bool readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd);
-  bool sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd);
-  bool waitForSpiEepromReady(EthercatCom *com);
-
-  // Eeprom helper functions
-  bool readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg);
-  bool waitForEepromReady(EthercatCom *com);
-  bool readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length);
-  bool writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length);  
-  
+  //! Access to device eeprom
+  ethercat_hardware::WGEeprom eeprom_;
 
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
@@ -447,8 +381,6 @@ protected:
   // Board configuration parameters
 
   static const unsigned ACTUATOR_INFO_PAGE = 4095;
-  static const unsigned NUM_EEPROM_PAGES   = 4096;
-  static const unsigned MAX_EEPROM_PAGE_SIZE = 264;
 
   // Not all devices will need this (WG021 won't) 
   MotorModel *motor_model_; 

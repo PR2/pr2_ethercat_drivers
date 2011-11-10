@@ -980,164 +980,6 @@ bool WG0X::readAppRam(EthercatCom *com, double &zero_offset)
 
 
 /*!
- * \brief  Waits for SPI eeprom state machine to be idle.
- *
- * Polls busy SPI bit of SPI state machine. 
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if state machine is free, false if there is an error, or we timed out waiting
- */
-bool WG0X::waitForSpiEepromReady(EthercatCom *com)
-{
-  WG0XSpiEepromCmd cmd;
-  // TODO : poll for a given number of millseconds instead of a given number of cycles
-  //start_time = 0;
-  unsigned tries = 0;
-  do {
-    //read_time = time;
-    ++tries;
-    if (!readSpiEepromCmd(com, cmd))
-    {
-      ROS_ERROR("Error reading SPI Eeprom Cmd busy bit");
-      return false;
-    }
-
-    if (!cmd.busy_) 
-    {
-      return true;
-    }       
-    
-    usleep(100);
-  } while (tries <= 10);
-
-  ROS_ERROR("Timed out waiting for SPI state machine to be idle (%d)", tries);
-  return false;
-}
-
-
-/*!
- * \brief  Sends command to SPI EEPROM state machine.   
- *
- * This function makes sure SPI EEPROM state machine is idle before sending new command.
- * It also waits for state machine to be idle before returning.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if command was send, false if there is an error
- */
-bool WG0X::sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd)
-{
-  if (!waitForSpiEepromReady(com))
-  {
-    return false;
-  }
-
-  // Send command
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
-  {
-    ROS_ERROR("Error writing SPI EEPROM command");
-    return false;
-  }
-
-  // Now read back SPI EEPROM state machine register, and check : 
-  //  1. for state machine to become ready
-  //  2. that command data was properly write and not corrupted
-  WG0XSpiEepromCmd stat;
-  unsigned tries = 0;
-  do
-  {
-    if (!readSpiEepromCmd(com, stat))
-    {
-      return false;
-    }
-
-    if (stat.operation_ != cmd.operation_)
-    {
-      ROS_ERROR("Invalid readback of SPI EEPROM operation : got 0x%X, expected 0x%X\n", stat.operation_, cmd.operation_);
-      return false;
-    }
-
-    // return true if command has completed
-    if (!stat.busy_)
-    {
-      if (tries > 0) 
-      {
-        ROS_WARN("Eeprom state machine took %d cycles", tries);
-      }
-      return true;;
-    }
-
-    fprintf(stderr, "eeprom busy reading again, waiting...\n");
-    usleep(100);
-  } while (++tries < 10);
-
-  ROS_ERROR("Eeprom SPI state machine busy after %d cycles", tries);
-  return false;
-}
-
-
-/*!
- * \brief  Read data from single eeprom page. 
- *
- * Data should be less than 264 bytes.  Note that some eeproms only support 256 byte pages.  
- * If 264 bytes of data are read from a 256 byte eeprom, then last 8 bytes of data will be zeros.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param page      EEPROM page number to read from.  Should be 0 to 4095.
- * \param data      pointer to data buffer
- * \param length    length of data in buffer
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length)
-{
-  if (length > MAX_EEPROM_PAGE_SIZE)
-  {
-    ROS_ERROR("Eeprom read length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
-    return false;
-  }
-
-  if (page >= NUM_EEPROM_PAGES)
-  {
-    ROS_ERROR("Eeprom read page %d > %d", page, NUM_EEPROM_PAGES-1);
-    return false;
-  }
-
-  // Since we don't know the size of the eeprom there is not always 264 bytes available.
-  // This may try to read 264 bytes, but only the first 256 bytes may be valid.  
-  // To avoid any odd issue, zero out FPGA buffer before asking for eeprom data.
-  memset(data,0,length);  
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) 
-  {
-    ROS_ERROR("Error zeroing eeprom data buffer");
-    return false;
-  }
-
-  // Send command to SPI state machine to perform read of eeprom, 
-  // sendSpiEepromCmd will automatically wait for SPI state machine 
-  // to be idle before a new command is sent
-  WG0XSpiEepromCmd cmd;
-  memset(&cmd,0,sizeof(cmd));
-  cmd.build_read(page);
-  if (!sendSpiEepromCmd(com, cmd)) 
-  {
-    ROS_ERROR("Error sending SPI read command");
-    return false;
-  }
-
-  // Wait for SPI Eeprom Read to complete
-  // sendSPICommand will wait for Command to finish before returning
-
-  // Read eeprom page data from FPGA buffer
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, length)) 
-  {
-    ROS_ERROR("Error reading eeprom data from buffer");
-    return false;
-  }
-
-  return true;
-}
-
-
-/*!
  * \brief  Reads actuator info from eeprom.  
  * 
  * \param com       EtherCAT communication class used for communicating with device
@@ -1148,7 +990,7 @@ bool WG0X::readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuat
 {
   BOOST_STATIC_ASSERT(sizeof(actuator_info) == 264);
 
-  if (!readEepromPage(com, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
+  if (!eeprom_.readEepromPage(com, &mailbox_, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
   {
     ROS_ERROR("Reading acutuator info from eeprom");
     return false;
@@ -1167,7 +1009,7 @@ bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeat
 {
   BOOST_STATIC_ASSERT(sizeof(config) == 256);
 
-  if (!readEepromPage(com, config.EEPROM_PAGE, &config, sizeof(config)))
+  if (!eeprom_.readEepromPage(com, &mailbox_, config.EEPROM_PAGE, &config, sizeof(config)))
   {
     ROS_ERROR("Reading motor heating model config from eeprom");
     return false;
@@ -1176,196 +1018,6 @@ bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeat
 }
 
 
-
-/*!
- * \brief  Write data to single eeprom page. 
- *
- * Data should be less than 264 bytes.  If data size is less than 264 bytes, then 
- * the page will be padded with 0xFF.  Note that some eeproms only support 256 byte
- * pages.  With 256 byte eeproms, the eeprom FW with ingore last 8 bytes of requested write.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param page      EEPROM page number to write to.  Should be 0 to 4095.
- * \param data      pointer to data buffer
- * \param length    length of data in buffer.  If length < 264, eeprom page will be padded out to 264 bytes.
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length)
-{
-  if (length > 264)
-  {
-    ROS_ERROR("Eeprom write length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
-    return false;
-  }
-
-  if (page >= NUM_EEPROM_PAGES)
-  {
-    ROS_ERROR("Eeprom write page %d > %d", page, NUM_EEPROM_PAGES-1);
-    return false;
-  }
-
-  // wait for eeprom to be ready before write data into FPGA buffer
-  if (!waitForSpiEepromReady(com))
-  {
-    return false;
-  }
-
-  const void *write_buf = data;
-
-  // if needed, pad data to 264 byte in buf
-  uint8_t buf[MAX_EEPROM_PAGE_SIZE];
-  if (length < MAX_EEPROM_PAGE_SIZE)
-  {
-    memcpy(buf, data, length);
-    memset(buf+length, 0xFF, MAX_EEPROM_PAGE_SIZE-length);
-    write_buf = buf;    
-  }
-
-  // Write data to FPGA buffer
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, write_buf, MAX_EEPROM_PAGE_SIZE))
-  {
-    ROS_ERROR("Write of SPI EEPROM buffer failed");
-    return false;
-  }
-
-  // Have SPI EEPROM state machine start SPI data transfer
-  WG0XSpiEepromCmd cmd;
-  cmd.build_write(page);
-  if (!sendSpiEepromCmd(com, cmd)) 
-  {
-    ROS_ERROR("Error giving SPI EEPROM write command");
-    return false;
-  }
-
-  // Wait for EEPROM write to complete
-  if (!waitForEepromReady(com))
-  {
-    return false;
-  }
-
-  return true;
-}
-
-
-/*!
- * \brief  Waits for EEPROM to become ready
- *
- * Certain eeprom operations (such as page reads), are complete immediately after data is 
- * trasferred.  Other operations (such as page writes) take some amount of time after data
- * is trasfered to complete.  This polls the EEPROM status register until the 'ready' bit 
- * is set.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if there is success, false if there is an error or wait takes too long
- */
-bool WG0X::waitForEepromReady(EthercatCom *com)
-{
-  // Wait for eeprom write to complete
-  unsigned tries = 0;
-  EepromStatusReg status_reg;
-  do {
-    if (!readEepromStatusReg(com, status_reg))
-    {
-      return false;
-    }
-    if (status_reg.ready_)
-    {
-      break;
-    }
-    usleep(100);
-  } while (++tries < 20);
-
-  if (!status_reg.ready_) 
-  {
-    ROS_ERROR("Eeprom still busy after %d cycles", tries);
-    return false;
-  } 
-
-  if (tries > 10)
-  {
-    ROS_WARN("EEPROM took %d cycles to be ready", tries);
-  }
-  return true;
-}
-
-
-
-/*!
- * \brief  Reads EEPROM status register
- *
- * Amoung other things, eeprom status register provide information about whether eeprom 
- * is busy performing a write.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param reg       reference to EepromStatusReg struct where eeprom status will be stored
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg)
-{
-  // Status is read from EEPROM by having SPI state machine perform an "abitrary" operation.
-  // With an arbitrary operation, the SPI state machine shifts out byte from buffer, while
-  // storing byte shifted in from device into same location in buffer.
-  // SPI state machine has no idea what command it is sending device or how to intpret its result.
-
-  // To read eeprom status register, we transfer 2 bytes.  The first byte is the read status register 
-  // command value (0xD7).  When transfering the second byte, the EEPROM should send its status.
-  char data[2] = {0xD7, 0x00};
-  BOOST_STATIC_ASSERT(sizeof(data) == 2);
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
-  {
-    ROS_ERROR("Writing SPI buffer");
-    return false;
-  }
-    
-  { // Have SPI state machine trasfer 2 bytes
-    WG0XSpiEepromCmd cmd;
-    cmd.build_arbitrary(sizeof(data));
-    if (!sendSpiEepromCmd(com, cmd)) 
-    {
-      ROS_ERROR("Sending SPI abitrary command");
-      return false;
-    }
-  }
-    
-  // Data read from device should now be stored in FPGA buffer
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
-  {
-    ROS_ERROR("Reading status register data from SPI buffer");
-    return false;
-  }
- 
-  // Status register would be second byte of buffer
-  reg.raw_ = data[1];
-  return true;
-}
-
-
-/*!
- * \brief  Reads SPI state machine command register
- *
- * For communicating with EEPROM, there is a simple state machine that transfers
- * data to/from FPGA buffer over SPI.  
- * When any type of comunication is done with EEPROM:
- *  1. Write command or write data into FPGA buffer.
- *  2. Have state machine start transfer bytes from buffer to EEPROM, and write data from EEPROM into buffer
- *  3. Wait for state machine to complete (by reading its status)
- *  4. Read EEPROM response from FPGA buffer.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param reg       reference to WG0XSpiEepromCmd struct where read data will be stored
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
-{
-  BOOST_STATIC_ASSERT(sizeof(WG0XSpiEepromCmd) == 3);
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
-  {
-    ROS_ERROR("Reading SPI command register with mailbox");
-    return false;
-  }
-  
-  return true;
-}
 
 
 /*!
@@ -1388,7 +1040,7 @@ bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
  */
 bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
 {
-  if (!writeEepromPage(com, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
+  if (!eeprom_.writeEepromPage(com, &mailbox_, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
   {
     ROS_ERROR("Writing actuator infomation to EEPROM");
     return false;
@@ -1414,7 +1066,7 @@ bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
  */
 bool WG0X::program(EthercatCom *com, const ethercat_hardware::MotorHeatingModelParametersEepromConfig &heating_config)
 {
-  if (!writeEepromPage(com, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
+  if (!eeprom_.writeEepromPage(com, &mailbox_, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
   {
     ROS_ERROR("Writing motor heating model configuration to EEPROM");
     return false;

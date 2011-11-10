@@ -971,16 +971,4 @@ void WGMailbox::publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWr
 }
 
 
-bool WGMailbox::write(EthercatCom *com, unsigned address, void const *data, unsigned length)
-{
-  return (writeMailbox(com, address, data, length) == 0);
-}
-
-
-bool WGMailbox::read(EthercatCom *com, unsigned address, void *data, unsigned length)
-{
-  return (readMailbox(com, address, data, length) == 0);
-}
-
-
 }; //end namespace ethercat_hardware
