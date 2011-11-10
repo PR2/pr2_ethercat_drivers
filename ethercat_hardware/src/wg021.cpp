@@ -102,11 +102,11 @@ void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
   (*pd)[1].ChannelEnable = true;
 
-  (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
+  (*pd)[2] = EC_SyncMan(WGMailbox::MBX_COMMAND_PHY_ADDR, WGMailbox::MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
   (*pd)[2].ChannelEnable = true;
   (*pd)[2].ALEventEnable = true;
 
-  (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
+  (*pd)[3] = EC_SyncMan(WGMailbox::MBX_STATUS_PHY_ADDR, WGMailbox::MBX_STATUS_SIZE, EC_QUEUED);
   (*pd)[3].ChannelEnable = true;
 
   sh->set_pd_config(pd);
@@ -269,7 +269,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("SW Max Current", "%f", actuator_info_.max_current_);
 
   publishGeneralDiagnostics(d);
-  publishMailboxDiagnostics(d);
+  mailbox_.publishMailboxDiagnostics(d);
 
   d.add("Mode", modeString(status->mode_));
   d.addf("Digital out", "%d", status->digital_out_);

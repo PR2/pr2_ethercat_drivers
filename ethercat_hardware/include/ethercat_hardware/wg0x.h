@@ -39,42 +39,11 @@
 #include "ethercat_hardware/motor_model.h"
 #include "ethercat_hardware/motor_heating_model.h"
 #include "realtime_tools/realtime_publisher.h"
+#include "ethercat_hardware/wg_mailbox.h"
 
 #include <boost/shared_ptr.hpp>
 
 using namespace ethercat_hardware;
-
-enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
-
-struct WG0XMbxHdr
-{
-  uint16_t address_;
-  union
-  {
-    uint16_t command_;
-    struct
-    {
-      uint16_t length_:12;
-      uint16_t seqnum_: 3;  // bits[14:12] sequence number, 0=disable, 1-7 normal sequence number
-      uint16_t write_nread_:1;
-    }__attribute__ ((__packed__));
-  };
-  uint8_t checksum_;
-
-  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum);
-  bool verifyChecksum(void) const;
-}__attribute__ ((__packed__));
-
-static const unsigned MBX_SIZE = 512;
-static const unsigned MBX_DATA_SIZE = (MBX_SIZE - sizeof(WG0XMbxHdr) - 1);
-struct WG0XMbxCmd
-{
-  WG0XMbxHdr hdr_;
-  uint8_t data_[MBX_DATA_SIZE];
-  uint8_t checksum_;
-
-  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data);
-}__attribute__ ((__packed__));
 
 struct WG0XSpiEepromCmd
 {
@@ -435,25 +404,8 @@ protected:
   static const int PWM_MAX = 0x4000;
   
 protected:
-  // Each WG0X device can only support one mailbox operation at a time
-  bool lockMailbox();
-  void unlockMailbox();
-  pthread_mutex_t mailbox_lock_;
-  MbxDiagnostics mailbox_diagnostics_;
-  MbxDiagnostics mailbox_publish_diagnostics_;
-
-  // Mailbox helper functions
-  int writeMailbox_(EthercatCom *com, unsigned address, void const *data, unsigned length);
-  int readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length);  
-  bool verifyDeviceStateForMailboxOperation();
-  bool clearReadMailbox(EthercatCom *com);
-  bool waitForReadMailboxReady(EthercatCom *com);
-  bool waitForWriteMailboxReady(EthercatCom *com);
-  bool readMailboxRepeatRequest(EthercatCom *com);
-  bool _readMailboxRepeatRequest(EthercatCom *com);
-  bool writeMailboxInternal(EthercatCom *com, void const *data, unsigned length);
-  bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
-  void diagnoseMailboxError(EthercatCom *com);
+  //! Mailbox access to device
+  ethercat_hardware::WGMailbox mailbox_;
 
   // SPI Eeprom State machine helper functions
   bool readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd);
@@ -469,15 +421,9 @@ protected:
 
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
-  static const unsigned MBX_COMMAND_PHY_ADDR = 0x1400;
-  static const unsigned MBX_COMMAND_SIZE = 512;
-  static const unsigned MBX_STATUS_PHY_ADDR = 0x2400;
-  static const unsigned MBX_STATUS_SIZE = 512;
 
   static const unsigned PDO_COMMAND_SYNCMAN_NUM = 0;
   static const unsigned PDO_STATUS_SYNCMAN_NUM  = 1;
-  static const unsigned MBX_COMMAND_SYNCMAN_NUM = 2;
-  static const unsigned MBX_STATUS_SYNCMAN_NUM  = 3;
 
   enum
   {
