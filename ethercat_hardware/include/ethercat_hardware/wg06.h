@@ -213,7 +213,7 @@ private:
   static const unsigned NUM_PRESSURE_REGIONS = 22;    
   uint32_t last_pressure_time_;
   realtime_tools::RealtimePublisher<pr2_msgs::PressureState> *pressure_publisher_;
-  realtime_tools::RealtimePublisher<std_msgs::ByteMultiArray> *raw_pressure_publisher_; //!< publisher for raw pressure data
+  //realtime_tools::RealtimePublisher<std_msgs::ByteMultiArray> *raw_pressure_publisher_;
   realtime_tools::RealtimePublisher<pr2_msgs::AccelerometerState> *accel_publisher_;
 
   void convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs::Wrench &wrench);

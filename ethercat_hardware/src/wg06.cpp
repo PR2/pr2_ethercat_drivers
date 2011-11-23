@@ -313,12 +313,19 @@ bool WG06::initializePressure(pr2_hardware_interface::HardwareInterface *hw)
     }
   }
 
+
+  /********************* Uncomment ********************
+
   // For development purposes publish a ROS message with raw values of pressure data
   topic = "raw_pressure";
   if (!actuator_.name_.empty())
     topic = topic + "/" + string(actuator_.name_);
-  raw_pressure_publisher_ = new realtime_tools::RealtimePublisher<std_msgs::ByteMultiArray>(ros::NodeHandle(), topic, 2);
-  raw_pressure_publisher_->msg_.data.reserve(pressure_size_);  // reserve room sure there is room for pressure data in message
+  raw_pressure_publisher_ = 
+    new realtime_tools::RealtimePublisher<std_msgs::ByteMultiArray>(ros::NodeHandle(), topic, 2);
+  // reserve room sure there is room for pressure data in message
+  raw_pressure_publisher_->msg_.data.reserve(pressure_size_);  
+
+  ********************* Uncomment ********************/
 
   return true;
 }
@@ -557,20 +564,24 @@ bool WG06::unpackPressure(unsigned char *pressure_buf)
     }
     last_pressure_time_ = p->timestamp_;
 
+
+    /********************* Uncomment ********************
     
-    // Also publish raw pressure sensor data new message every realtime cyle
+    // Also publish raw pressure sensor data new message every realtime cycle
     // NOTE : this will product a lot of data to ROS, might not be a good idea 
     // to do this for things other than development
     if (raw_pressure_publisher_ != NULL) 
     {
       if (!raw_pressure_publisher_->trylock())
       {
-        // If we could not obtain lock, it probably mean that ROS publisher just can't keep up.
+        // If we could not obtain lock, it probably mean that 
+        // the ROS publisher just can't keep up.
         // In this case, we just silently drop message.  
       }
       else 
       {
-        // Have lock on realtime publisher message.  Can change message while holding lock        
+        // Have lock on realtime publisher message.  
+        // Can change message while holding lock        
 
         // First copy data into "data" element of ByteMultiArray.  
         // For C++ the the data element ends up being a std::vector<uint8_t>
@@ -580,16 +591,21 @@ bool WG06::unpackPressure(unsigned char *pressure_buf)
           raw_pressure_publisher_->msg_.data[ii] = pressure_buf[ii];
         }
 
-        // The std_msgs::ByteMultiArray has a complex "format" element that describes 
-        // how to convert a 1D data array in multi-dimentional array.
+        // The std_msgs::ByteMultiArray has a complex "format" element 
+        // that describes how to convert a 1D data array into
+        // a multi-dimensional array.
         // However, we are going to leave the header blank and assume
-        // that the program recieves the data won't care about the format field.
+        // that the program receives the data won't care about the 
+        // format field.
 
-        // Now that we are done with the data, release the lock and allow data to get publishd
+        // Now that we are done with the data.
+        // release the lock and allow data to get published
         raw_pressure_publisher_->unlockAndPublish();
       }
     }
-    
+
+    ******************** Uncomment ********************/
+
 
   }
 
@@ -988,7 +1004,7 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
     }
   }
 
-  d.addf("Hello", "%s", "World!");
+  // d.addf("Hello", "%s", "World!");
 }
 
 
