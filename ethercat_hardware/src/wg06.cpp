@@ -313,6 +313,13 @@ bool WG06::initializePressure(pr2_hardware_interface::HardwareInterface *hw)
     }
   }
 
+  // For development purposes publish a ROS message with raw values of pressure data
+  topic = "raw_pressure";
+  if (!actuator_.name_.empty())
+    topic = topic + "/" + string(actuator_.name_);
+  raw_pressure_publisher_ = new realtime_tools::RealtimePublisher<std_msgs::ByteMultiArray>(ros::NodeHandle(), topic, 2);
+  raw_pressure_publisher_->msg_.data.reserve(pressure_size_);  // reserve room sure there is room for pressure data in message
+
   return true;
 }
 
@@ -549,6 +556,41 @@ bool WG06::unpackPressure(unsigned char *pressure_buf)
       }
     }
     last_pressure_time_ = p->timestamp_;
+
+    
+    // Also publish raw pressure sensor data new message every realtime cyle
+    // NOTE : this will product a lot of data to ROS, might not be a good idea 
+    // to do this for things other than development
+    if (raw_pressure_publisher_ != NULL) 
+    {
+      if (!raw_pressure_publisher_->trylock())
+      {
+        // If we could not obtain lock, it probably mean that ROS publisher just can't keep up.
+        // In this case, we just silently drop message.  
+      }
+      else 
+      {
+        // Have lock on realtime publisher message.  Can change message while holding lock        
+
+        // First copy data into "data" element of ByteMultiArray.  
+        // For C++ the the data element ends up being a std::vector<uint8_t>
+        raw_pressure_publisher_->msg_.data.resize(pressure_size_);        
+        for (unsigned ii=0; ii<pressure_size_; ++ii)
+        {
+          raw_pressure_publisher_->msg_.data[ii] = pressure_buf[ii];
+        }
+
+        // The std_msgs::ByteMultiArray has a complex "format" element that describes 
+        // how to convert a 1D data array in multi-dimentional array.
+        // However, we are going to leave the header blank and assume
+        // that the program recieves the data won't care about the format field.
+
+        // Now that we are done with the data, release the lock and allow data to get publishd
+        raw_pressure_publisher_->unlockAndPublish();
+      }
+    }
+    
+
   }
 
   return true;
@@ -946,6 +988,7 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
     }
   }
 
+  d.addf("Hello", "%s", "World!");
 }
 
 
