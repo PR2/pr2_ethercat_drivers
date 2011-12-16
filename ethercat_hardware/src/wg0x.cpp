@@ -853,7 +853,12 @@ end:
     bool new_error = in_lockout_ && !resetting_ && !has_error_;
     if (new_error || publish_motor_trace_.command_.data_)
     {
-      const char* reason = (new_error) ? "Safety Lockout" : "Publishing manually triggered";
+      const char* reason = "Publishing manually triggered";
+      if (new_error)
+      {
+        bool undervoltage = (this_status->mode_ & MODE_UNDERVOLTAGE);    
+        reason = (undervoltage) ? "Undervoltage Lockout" : "Safety Lockout";
+      }    
       int level          = (new_error) ? 2 : 0;
       motor_model_->flagPublish(reason, level , 100);
       publish_motor_trace_.command_.data_ = 0;
