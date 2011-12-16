@@ -277,9 +277,13 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
 
   // When working with experimental setups we don't want motor model to halt motors when it detects a problem.
   // Allow rosparam to disable motor model halting for a specific motor.
-  if (!ros::NodeHandle().getParam(ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
+  if (!ros::param::get("~/" + ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
   {
     disable_motor_model_checking_ = false;
+  }
+  if (disable_motor_model_checking_)
+  {
+    ROS_WARN("Disabling motor model on %s", ai.name.c_str());
   }
 
   return true;
