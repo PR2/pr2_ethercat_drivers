@@ -86,6 +86,7 @@ struct EthercatHardwareDiagnostics
   struct netif_counters counters_;
   bool input_thread_is_stopped_;
   bool motors_halted_; //!< True if motors are halted  
+  const char* motors_halted_reason_; //!< reason that motors first halted 
 
   static const bool collect_extra_timing_ = true;
 };
@@ -257,6 +258,8 @@ private:
   void loadNonEthercatDevices();
   EthercatDevice *configNonEthercatDevice(const std::string &product_id, const std::string &data);
 
+  void haltMotors(bool error, const char* reason);
+
   ros::NodeHandle node_;
 
   struct netif *ni_;
@@ -288,7 +291,6 @@ private:
   ros::Time last_reset_;
 
   realtime_tools::RealtimePublisher<std_msgs::Bool> motor_publisher_;
-  ros::Time motor_last_published_;
 
   EthercatOobCom *oob_com_;  
 

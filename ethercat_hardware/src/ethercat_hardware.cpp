@@ -38,6 +38,8 @@
 #include <dll/ethercat_dll.h>
 #include <dll/ethercat_device_addressed_telegram.h>
 
+#include <sstream>
+
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <boost/foreach.hpp>
@@ -51,7 +53,9 @@ EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
   halt_after_reset_(false),
   reset_motors_service_count_(0), 
   halt_motors_service_count_(0),
-  halt_motors_error_count_(0)
+  halt_motors_error_count_(0),
+  motors_halted_(false),
+  motors_halted_reason_("")
 {
   resetMaxTiming();
 }
@@ -258,7 +262,6 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   hw_ = new pr2_hardware_interface::HardwareInterface();
   hw_->current_time_ = ros::Time::now();
   last_published_ = hw_->current_time_;
-  motor_last_published_ = hw_->current_time_;
 
   // Initialize slaves
   //set<string> actuator_names;
@@ -437,14 +440,14 @@ void EthercatHardwareDiagnosticsPublisher::publishDiagnostics()
   status_.name = "EtherCAT Master";
   if (diagnostics_.motors_halted_)
   {
-    if (diagnostics_.halt_after_reset_) 
+    std::ostringstream desc;
+    desc << "Motors halted";
+    if (diagnostics_.halt_after_reset_)
     {
-      status_.summary(status_.ERROR, "Motors halted soon after reset");
+      desc << " soon after reset";
     }
-    else
-    {
-      status_.summary(status_.ERROR, "Motors halted");
-    }
+    desc << " (" << diagnostics_.motors_halted_reason_ << ")";
+    status_.summary(status_.ERROR, desc.str());      
   } else {
     status_.summary(status_.OK, "OK");
   }
@@ -547,8 +550,6 @@ void EthercatHardware::update(bool reset, bool halt)
   ros::Time update_start_time(ros::Time::now());
 
   unsigned char *this_buffer, *prev_buffer;
-  bool old_halt_motors = halt_motors_;
-  bool halt_motors_error = false;  // True if motors halted due to error
 
   // Convert HW Interface commands to MCB-specific buffers
   this_buffer = this_buffer_;
@@ -556,7 +557,7 @@ void EthercatHardware::update(bool reset, bool halt)
   if (halt)
   {
     ++diagnostics_.halt_motors_service_count_;
-    halt_motors_ = true;
+    haltMotors(false /*no error*/, "service request");
   }
 
   // Resetting devices should clear device errors and release devices from halt.
@@ -573,6 +574,8 @@ void EthercatHardware::update(bool reset, bool halt)
   if (reset_devices)
   {
     halt_motors_ = false;
+    diagnostics_.motors_halted_ = false;
+    diagnostics_.motors_halted_reason_ = "";
     diagnostics_.resetMaxTiming();
     diagnostics_.pd_error_ = false;
   }
@@ -601,8 +604,7 @@ void EthercatHardware::update(bool reset, bool halt)
   if (!success)
   {
     // If process data didn't get sent after multiple retries, stop motors
-    halt_motors_error = true;
-    halt_motors_ = true;    
+    haltMotors(true /*error*/, "communication error");
     diagnostics_.pd_error_ = true;
   }
   else
@@ -614,8 +616,7 @@ void EthercatHardware::update(bool reset, bool halt)
     {
       if (!slaves_[s]->unpackState(this_buffer, prev_buffer) && !reset_devices)
       {
-        halt_motors_error = true;
-        halt_motors_ = true;
+        haltMotors(true /*error*/, "device error");
       }
       this_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
       prev_buffer += slaves_[s]->command_size_ + slaves_[s]->status_size_;
@@ -640,25 +641,10 @@ void EthercatHardware::update(bool reset, bool halt)
   {
     last_published_ = update_start_time;
     publishDiagnostics();
-  }
-
-  if (halt_motors_ != old_halt_motors ||
-      (update_start_time - motor_last_published_) > ros::Duration(1.0))
-  {
-    motor_last_published_ = update_start_time;
     motor_publisher_.lock();
     motor_publisher_.msg_.data = halt_motors_;
     motor_publisher_.unlockAndPublish();
   }
-
-  if ((halt_motors_ && !old_halt_motors) && (halt_motors_error))
-  {
-    ++diagnostics_.halt_motors_error_count_;
-    if ((update_start_time - last_reset_) < ros::Duration(0.5))
-    {
-      diagnostics_.halt_after_reset_ = true;
-    }
-  }    
 
   if (diagnostics_.collect_extra_timing_)
   {
@@ -666,6 +652,33 @@ void EthercatHardware::update(bool reset, bool halt)
     diagnostics_.publish_acc_((publish_end_time - unpack_end_time).toSec());
   }
 }
+
+
+void EthercatHardware::haltMotors(bool error, const char* reason)
+{
+  if (!halt_motors_)
+  {
+    // wasn't already halted
+    motor_publisher_.lock();
+    motor_publisher_.msg_.data = halt_motors_;
+    motor_publisher_.unlockAndPublish();
+    
+    diagnostics_.motors_halted_reason_=reason;
+    if (error)
+    {
+      ++diagnostics_.halt_motors_error_count_;
+      if ((ros::Time::now() - last_reset_) < ros::Duration(0.5))
+      {
+        // halted soon after reset
+        diagnostics_.halt_after_reset_ = true;
+      }
+    }
+  }
+  
+  diagnostics_.motors_halted_ = true;
+  halt_motors_ = true;
+}
+
 
 void EthercatHardware::updateAccMax(double &max, const accumulator_set<double, stats<tag::max, tag::mean> > &acc)
 {
