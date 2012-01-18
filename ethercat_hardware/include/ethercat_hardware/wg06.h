@@ -217,8 +217,12 @@ private:
   void convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs::Wrench &wrench);
   static const unsigned MAX_FT_SAMPLES = 4;  
   static const unsigned NUM_FT_CHANNELS = 6;
+  static const int FT_VHALF_IDEAL = 32768; //!< Vhalf ADC measurement is ideally about (1<<16)/2
+  static const int FT_VHALF_RANGE = 300;  //!< allow vhalf to range +/- 300 from ideal
   int      ft_overload_limit_; //!< Limit on raw range of F/T input 
   uint8_t  ft_overload_flags_;  //!< Bits 0-5 set to true if raw FT input goes beyond limit
+  bool     ft_disconnected_;  //!< f/t sensor may be disconnected
+  bool     ft_vhalf_error_; //!< error with Vhalf reference voltage
   bool     ft_sampling_rate_error_; //!< True if FT sampling rate was incorrect
   uint64_t ft_sample_count_;  //!< Counts number of ft sensor samples
   uint64_t ft_missed_samples_;  //!< Counts number of ft sensor samples that were missed

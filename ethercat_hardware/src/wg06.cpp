@@ -63,6 +63,8 @@ WG06::WG06() :
   accel_publisher_(NULL),
   ft_overload_limit_(31100),
   ft_overload_flags_(0),
+  ft_disconnected_(false),
+  ft_vhalf_error_(false),
   ft_sampling_rate_error_(false),
   ft_sample_count_(0),
   ft_missed_samples_(0),
@@ -421,6 +423,8 @@ void WG06::packCommand(unsigned char *buffer, bool halt, bool reset)
   {
     pressure_checksum_error_ = false;
     ft_overload_flags_ = 0;
+    ft_disconnected_ = false;
+    ft_vhalf_error_ = false;
     ft_sampling_rate_error_ = false;
   }
 
@@ -635,6 +639,25 @@ void WG06::convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs
     in[i] = (double(raw_data) - ft_params_.offset(i)) / ( ft_params_.gain(i) * double(1<<16) );
   }
 
+  // Vhalf ADC measurement should be amost half the ADC reference voltage
+  // For a 16bit ADC the Vhalf value should be about (1<<16)/2
+  // If Vhalf value is not close to this, this could mean 1 of 2 things:
+  //   1. WG035 electronics are damaged some-how 
+  //   2. WG035 is not present or disconnected gripper MCB 
+  if ( abs( int(sample.vhalf_) - FT_VHALF_IDEAL) > FT_VHALF_RANGE )
+  {
+    if ((sample.vhalf_ == 0x0000) || (sample.vhalf_ == 0xFFFF))
+    {
+      // When WG035 MCB is not present the DATA line floats low or high and all 
+      // reads through SPI interface return 0.
+      ft_disconnected_ = true;
+    }
+    else 
+    {
+      ft_vhalf_error_ = true;
+    }
+  }
+
   // Apply coeffiecient matrix multiplication to raw inputs to get force/torque values
   double out[6];
   for (unsigned i=0; i<6; ++i)
@@ -694,8 +717,10 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   ft_state.samples_.resize(usable_samples);
 
   // If any f/t channel is overload or the sampling rate is bad, there is an error.
-  ft_state.good_ = ((!ft_sampling_rate_error_) && (ft_overload_flags_ == 0));
-
+  ft_state.good_ = ( (!ft_sampling_rate_error_) && 
+                     (ft_overload_flags_ == 0) && 
+                     (!ft_disconnected_) && 
+                     (!ft_vhalf_error_) );
 
   for (unsigned sample_index=0; sample_index<usable_samples; ++sample_index)
   {
@@ -773,6 +798,9 @@ void WG06::multiDiagnostics(vector<diagnostic_msgs::DiagnosticStatus> &vec, unsi
     diagnosticsFT(d, status);
     vec.push_back(d);
   }
+
+  last_publish_time_ = ros::Time::now();
+  first_publish_ = false;
 }
 
 
@@ -821,8 +849,6 @@ void WG06::diagnosticsAccel(diagnostic_updater::DiagnosticStatusWrapper &d, unsi
     }
   }
   accelerometer_samples_ = 0;
-  last_publish_time_ = current_time;
-  first_publish_ = false;
 
   d.addf("Accelerometer", "%s", accelerometer_.state_.samples_.size() > 0 ? "Ok" : "Not Present");
   d.addf("Accelerometer range", "%s (%d)", range_str, acmd.range_);
@@ -961,7 +987,16 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
   d.summary(d.OK, "OK");
   d.clear();
 
-  d.addf("F/T sample count", "%llu", ft_sample_count_);
+  ros::Time current_time(ros::Time::now());
+  double sample_frequency = 0.0;
+  if (!first_publish_)
+  {
+    sample_frequency = double(ft_sample_count_ - diag_last_ft_sample_count_) / (current_time - last_publish_time_).toSec();
+  }
+  diag_last_ft_sample_count_ = ft_sample_count_;
+
+  //d.addf("F/T sample count", "%llu", ft_sample_count_);
+  d.addf("F/T sample frequency", "%.2f (Hz)", sample_frequency);
   d.addf("F/T missed samples", "%llu", ft_missed_samples_);
   std::stringstream ss;
   const FTDataSample &sample(status->ft_samples_[0]);  //use newest data sample
@@ -990,6 +1025,15 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
   if (ft_sampling_rate_error_)
   {
     d.mergeSummary(d.ERROR, "Sampling rate error");
+  }
+
+  if (ft_disconnected_)
+  {
+    d.mergeSummary(d.ERROR, "Amplifier disconnected");
+  }
+  else if (ft_vhalf_error_)
+  {
+    d.mergeSummary(d.ERROR, "Vhalf error, amplifier circuity may be damaged"); 
   }
 
   const std::vector<double> &ft_data( ft_analog_in_.state_.state_ );
