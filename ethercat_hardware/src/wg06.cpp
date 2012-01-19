@@ -243,11 +243,11 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       static const uint8_t PRESSURE_ENABLE_FLAG = 0x1;
       static const uint8_t FT_ENABLE_FLAG       = 0x2;
       static const unsigned PRESSURE_FT_ENABLE_ADDR = 0xAA;
-      uint8_t pressure_ft_enable_ = 0;
-      if (enable_pressure_sensor_) pressure_ft_enable_ |= PRESSURE_ENABLE_FLAG;
-      if (enable_ft_sensor_) pressure_ft_enable_ |= FT_ENABLE_FLAG;
+      uint8_t pressure_ft_enable = 0;
+      if (enable_pressure_sensor_) pressure_ft_enable |= PRESSURE_ENABLE_FLAG;
+      if (enable_ft_sensor_) pressure_ft_enable |= FT_ENABLE_FLAG;
       EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
-      if (writeMailbox(&com, PRESSURE_FT_ENABLE_ADDR, &pressure_ft_enable_, 1) != 0)
+      if (writeMailbox(&com, PRESSURE_FT_ENABLE_ADDR, &pressure_ft_enable, 1) != 0)
       {
         ROS_FATAL("Could not enable/disable pressure and force/torque sensors");
         return -1;
@@ -510,19 +510,28 @@ bool WG06::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
  */
 bool WG06::unpackPressure(unsigned char *pressure_buf)
 {  
+  if (!enable_pressure_sensor_)
+  {
+    // If pressure sensor is not enabled don't attempt to do anything with pressure data
+    return true;
+  }
+
   if (!verifyChecksum(pressure_buf, pressure_size_))
   {
     ++pressure_checksum_error_count_;
-    std::stringstream ss;
-    ss << "Pressure buffer checksum error : " << std::endl;
-    for (unsigned ii=0; ii<pressure_size_; ++ii)
+    if (false /* debugging */)
     {
-      ss << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
-         << unsigned(pressure_buf[ii]) << " ";
-      if ((ii%8) == 7) ss << std::endl;
+      std::stringstream ss;
+      ss << "Pressure buffer checksum error : " << std::endl;
+      for (unsigned ii=0; ii<pressure_size_; ++ii)
+      {
+        ss << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+           << unsigned(pressure_buf[ii]) << " ";
+        if ((ii%8) == 7) ss << std::endl;
+      }
+      ROS_ERROR_STREAM(ss.str());
+      std::cerr << ss.str() << std::endl;
     }
-    ROS_ERROR_STREAM(ss.str());
-    std::cerr << ss.str() << std::endl;
     pressure_checksum_error_ = true;
     return false;
   }
