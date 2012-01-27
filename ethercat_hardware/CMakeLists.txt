@@ -3,6 +3,9 @@ include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 set(ROS_BUILD_TYPE Release)
 rosbuild_init()
 
+find_library(LOG4CXX_LIBRARY log4cxx)
+rosbuild_add_boost_directories()
+
 rosbuild_add_boost_directories()
 rosbuild_genmsg()
 rosbuild_gensrv()
@@ -22,8 +25,8 @@ rosbuild_add_executable(motorconf
   src/wg_soft_processor.cpp src/wg_util.cpp src/wg_mailbox.cpp src/wg_eeprom.cpp
   )
 
-target_link_libraries(motorconf rt tinyxml)
-rosbuild_link_boost (motorconf regex system filesystem)
+target_link_libraries(motorconf rt tinyxml ${LOG4CXX_LIBRARY})
+rosbuild_link_boost(motorconf regex system filesystem thread)
 
 rosbuild_add_gtest(test/wg0x_test test/wg0x_test.cpp )
 target_link_libraries(test/wg0x_test ethercat_hardware tinyxml)
