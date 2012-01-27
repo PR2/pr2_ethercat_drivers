@@ -1,0 +1,8 @@
+string actuator_name     # name of actuator that soft-processor is part of (ex : r_gripper_motor)
+string processor_name    # name of soft-processor to firmware to read
+                         # certain actuators may have more than one soft-processor (ex : accel, pressure)
+---
+bool success             # true if firmware was successfully read from device
+string error_msg         # descriptive error message if call was not successful
+uint32[] instructions    # list of firmware binary instructions.  
+                         # not all soft-processors instructions use all 32bits for each instruction

@@ -58,95 +58,8 @@
 #define ERROR_HDR "\033[41mERROR\033[0m"
 #define WARN_HDR "\033[43mERROR\033[0m"
 
+#include "ethercat_hardware/wg_util.h"
 
-unsigned int WG0X::rotateRight8(unsigned in)
-{
-  in &= 0xff;
-  in = (in >> 1) | (in << 7);
-  in &= 0xff;
-  return in;
-}
-
-unsigned WG0X::computeChecksum(void const *data, unsigned length)
-{
-  const unsigned char *d = (const unsigned char *)data;
-  unsigned int checksum = 0x42;
-  for (unsigned int i = 0; i < length; ++i)
-  {
-    checksum = rotateRight8(checksum);
-    checksum ^= d[i];
-    checksum &= 0xff;
-  }
-  return checksum;
-}
-
-bool WG0XMbxHdr::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum)
-{
-  if (type==LOCAL_BUS_WRITE) 
-  {
-    if (length > MBX_DATA_SIZE) 
-    {
-      fprintf(stderr, "size of %d is too large for write\n", length);
-      return false;
-    }
-  }
-  else if (type==LOCAL_BUS_READ) 
-  {
-    // Result of mailbox read, only stores result data + 1byte checksum
-    if (length > (MBX_SIZE-1))
-    {
-      fprintf(stderr, "size of %d is too large for read\n", length);
-      return false;      
-    }
-  }
-  else {
-    assert(0 && "invalid MbxCmdType");
-    return false;
-  }
-  
-  address_ = address;
-  length_ = length - 1;
-  seqnum_ = seqnum;
-  write_nread_ = (type==LOCAL_BUS_WRITE) ? 1 : 0;
-  checksum_ = WG0X::rotateRight8(WG0X::computeChecksum(this, sizeof(*this) - 1));
-  return true;
-}
-
-bool WG0XMbxHdr::verifyChecksum(void) const
-{
-  return WG0X::computeChecksum(this, sizeof(*this)) != 0;
-}
-
-bool WG0XMbxCmd::build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data)
-{
-  if (!this->hdr_.build(address, length, type, seqnum))
-  {
-    return false;
-  }
-      
-  if (data != NULL)
-  {
-    memcpy(data_, data, length);
-  }
-  else
-  {
-    memset(data_, 0, length);
-  }
-  unsigned int checksum = WG0X::rotateRight8(WG0X::computeChecksum(data_, length));
-  data_[length] = checksum;
-  return true;
-}
-
-
-MbxDiagnostics::MbxDiagnostics() :
-  write_errors_(0),
-  read_errors_(0),
-  lock_errors_(0),
-  retries_(0),
-  retry_errors_(0)
-{
-  // Empty
-}
 
 WG0XDiagnostics::WG0XDiagnostics() :
   first_(true),
@@ -246,9 +159,9 @@ WG0X::WG0X() :
   status_checksum_error_(false),
   timestamp_jump_detected_(false),
   fpga_internal_reset_detected_(false),
+  encoder_errors_detected_(false),
   cached_zero_offset_(0), 
   calibration_status_(NO_CALIBRATION),
-  last_num_encoder_errors_(0),
   app_ram_status_(APP_RAM_MISSING),
   motor_model_(NULL),
   disable_motor_model_checking_(false)
@@ -270,10 +183,7 @@ WG0X::WG0X() :
   {
     ROS_ERROR("WG0X : init diagnostics mutex :%s", strerror(error));
   }
-  if ((error = pthread_mutex_init(&mailbox_lock_, NULL)) != 0)
-  {
-    ROS_ERROR("WG0X : init mailbox mutex :%s", strerror(error));
-  }
+
 }
 
 WG0X::~WG0X()
@@ -367,9 +277,13 @@ bool WG0X::initializeMotorModel(pr2_hardware_interface::HardwareInterface *hw,
 
   // When working with experimental setups we don't want motor model to halt motors when it detects a problem.
   // Allow rosparam to disable motor model halting for a specific motor.
-  if (!ros::NodeHandle().getParam(ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
+  if (!ros::param::get("~/" + ai.name + "/disable_motor_model_checking", disable_motor_model_checking_))
   {
     disable_motor_model_checking_ = false;
+  }
+  if (disable_motor_model_checking_)
+  {
+    ROS_WARN("Disabling motor model on %s", ai.name.c_str());
   }
 
   return true;
@@ -487,6 +401,8 @@ int WG0X::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
             sh_->get_serial());
 
   EthercatDirectCom com(EtherCAT_DataLinkLayer::instance());
+
+  mailbox_.initialize(sh_);
 
   if (sh_->get_product_code() == WG05_PRODUCT_CODE)
   {
@@ -635,6 +551,7 @@ void WG0X::clearErrorFlags(void)
   too_many_dropped_packets_ = false;
   status_checksum_error_ = false;
   timestamp_jump_detected_ = false;
+  encoder_errors_detected_ = false;
   if (motor_model_) motor_model_->reset();
   if (motor_heating_model_.get() != NULL) 
   {
@@ -690,7 +607,7 @@ void WG0X::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->mode_ = (cmd.enable_ && !halt && !has_error_) ? (MODE_ENABLE | MODE_CURRENT) : MODE_OFF;
   c->mode_ |= (reset ? MODE_SAFETY_RESET : 0);
   c->digital_out_ = digital_out_.command_.data_;
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+  c->checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(c, command_size_ - 1));
 }
 
 bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -746,7 +663,7 @@ bool WG0X::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
 
 bool WG0X::verifyChecksum(const void* buffer, unsigned size)
 {
-  bool success = computeChecksum(buffer, size) == 0;
+  bool success = wg_util::computeChecksum(buffer, size) == 0;
   if (!success) {
     if (tryLockWG0XDiagnostics()) {
       ++wg0x_collect_diagnostics_.checksum_errors_;
@@ -909,6 +826,11 @@ bool WG0X::verifyState(WG0XStatus *this_status, WG0XStatus *prev_status)
     goto end;
   }
 
+  if (this_status->num_encoder_errors_ != prev_status->num_encoder_errors_)
+  {
+    encoder_errors_detected_ = true;
+  }
+
   if (state.is_enabled_ && motor_model_)
   {
     if (!disable_motor_model_checking_)
@@ -931,7 +853,12 @@ end:
     bool new_error = in_lockout_ && !resetting_ && !has_error_;
     if (new_error || publish_motor_trace_.command_.data_)
     {
-      const char* reason = (new_error) ? "Safety Lockout" : "Publishing manually triggered";
+      const char* reason = "Publishing manually triggered";
+      if (new_error)
+      {
+        bool undervoltage = (this_status->mode_ & MODE_UNDERVOLTAGE);    
+        reason = (undervoltage) ? "Undervoltage Lockout" : "Safety Lockout";
+      }    
       int level          = (new_error) ? 2 : 0;
       motor_model_->flagPublish(reason, level , 100);
       publish_motor_trace_.command_.data_ = 0;
@@ -1062,164 +989,6 @@ bool WG0X::readAppRam(EthercatCom *com, double &zero_offset)
 
 
 /*!
- * \brief  Waits for SPI eeprom state machine to be idle.
- *
- * Polls busy SPI bit of SPI state machine. 
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if state machine is free, false if there is an error, or we timed out waiting
- */
-bool WG0X::waitForSpiEepromReady(EthercatCom *com)
-{
-  WG0XSpiEepromCmd cmd;
-  // TODO : poll for a given number of millseconds instead of a given number of cycles
-  //start_time = 0;
-  unsigned tries = 0;
-  do {
-    //read_time = time;
-    ++tries;
-    if (!readSpiEepromCmd(com, cmd))
-    {
-      ROS_ERROR("Error reading SPI Eeprom Cmd busy bit");
-      return false;
-    }
-
-    if (!cmd.busy_) 
-    {
-      return true;
-    }       
-    
-    usleep(100);
-  } while (tries <= 10);
-
-  ROS_ERROR("Timed out waiting for SPI state machine to be idle (%d)", tries);
-  return false;
-}
-
-
-/*!
- * \brief  Sends command to SPI EEPROM state machine.   
- *
- * This function makes sure SPI EEPROM state machine is idle before sending new command.
- * It also waits for state machine to be idle before returning.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if command was send, false if there is an error
- */
-bool WG0X::sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd)
-{
-  if (!waitForSpiEepromReady(com))
-  {
-    return false;
-  }
-
-  // Send command
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
-  {
-    ROS_ERROR("Error writing SPI EEPROM command");
-    return false;
-  }
-
-  // Now read back SPI EEPROM state machine register, and check : 
-  //  1. for state machine to become ready
-  //  2. that command data was properly write and not corrupted
-  WG0XSpiEepromCmd stat;
-  unsigned tries = 0;
-  do
-  {
-    if (!readSpiEepromCmd(com, stat))
-    {
-      return false;
-    }
-
-    if (stat.operation_ != cmd.operation_)
-    {
-      ROS_ERROR("Invalid readback of SPI EEPROM operation : got 0x%X, expected 0x%X\n", stat.operation_, cmd.operation_);
-      return false;
-    }
-
-    // return true if command has completed
-    if (!stat.busy_)
-    {
-      if (tries > 0) 
-      {
-        ROS_WARN("Eeprom state machine took %d cycles", tries);
-      }
-      return true;;
-    }
-
-    fprintf(stderr, "eeprom busy reading again, waiting...\n");
-    usleep(100);
-  } while (++tries < 10);
-
-  ROS_ERROR("Eeprom SPI state machine busy after %d cycles", tries);
-  return false;
-}
-
-
-/*!
- * \brief  Read data from single eeprom page. 
- *
- * Data should be less than 264 bytes.  Note that some eeproms only support 256 byte pages.  
- * If 264 bytes of data are read from a 256 byte eeprom, then last 8 bytes of data will be zeros.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param page      EEPROM page number to read from.  Should be 0 to 4095.
- * \param data      pointer to data buffer
- * \param length    length of data in buffer
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length)
-{
-  if (length > MAX_EEPROM_PAGE_SIZE)
-  {
-    ROS_ERROR("Eeprom read length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
-    return false;
-  }
-
-  if (page >= NUM_EEPROM_PAGES)
-  {
-    ROS_ERROR("Eeprom read page %d > %d", page, NUM_EEPROM_PAGES-1);
-    return false;
-  }
-
-  // Since we don't know the size of the eeprom there is not always 264 bytes available.
-  // This may try to read 264 bytes, but only the first 256 bytes may be valid.  
-  // To avoid any odd issue, zero out FPGA buffer before asking for eeprom data.
-  memset(data,0,length);  
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, &actuator_info_, sizeof(actuator_info_))) 
-  {
-    ROS_ERROR("Error zeroing eeprom data buffer");
-    return false;
-  }
-
-  // Send command to SPI state machine to perform read of eeprom, 
-  // sendSpiEepromCmd will automatically wait for SPI state machine 
-  // to be idle before a new command is sent
-  WG0XSpiEepromCmd cmd;
-  memset(&cmd,0,sizeof(cmd));
-  cmd.build_read(page);
-  if (!sendSpiEepromCmd(com, cmd)) 
-  {
-    ROS_ERROR("Error sending SPI read command");
-    return false;
-  }
-
-  // Wait for SPI Eeprom Read to complete
-  // sendSPICommand will wait for Command to finish before returning
-
-  // Read eeprom page data from FPGA buffer
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, length)) 
-  {
-    ROS_ERROR("Error reading eeprom data from buffer");
-    return false;
-  }
-
-  return true;
-}
-
-
-/*!
  * \brief  Reads actuator info from eeprom.  
  * 
  * \param com       EtherCAT communication class used for communicating with device
@@ -1230,7 +999,7 @@ bool WG0X::readActuatorInfoFromEeprom(EthercatCom *com, WG0XActuatorInfo &actuat
 {
   BOOST_STATIC_ASSERT(sizeof(actuator_info) == 264);
 
-  if (!readEepromPage(com, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
+  if (!eeprom_.readEepromPage(com, &mailbox_, ACTUATOR_INFO_PAGE, &actuator_info, sizeof(actuator_info)))
   {
     ROS_ERROR("Reading acutuator info from eeprom");
     return false;
@@ -1249,7 +1018,7 @@ bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeat
 {
   BOOST_STATIC_ASSERT(sizeof(config) == 256);
 
-  if (!readEepromPage(com, config.EEPROM_PAGE, &config, sizeof(config)))
+  if (!eeprom_.readEepromPage(com, &mailbox_, config.EEPROM_PAGE, &config, sizeof(config)))
   {
     ROS_ERROR("Reading motor heating model config from eeprom");
     return false;
@@ -1258,196 +1027,6 @@ bool WG0X::readMotorHeatingModelParametersFromEeprom(EthercatCom *com, MotorHeat
 }
 
 
-
-/*!
- * \brief  Write data to single eeprom page. 
- *
- * Data should be less than 264 bytes.  If data size is less than 264 bytes, then 
- * the page will be padded with 0xFF.  Note that some eeproms only support 256 byte
- * pages.  With 256 byte eeproms, the eeprom FW with ingore last 8 bytes of requested write.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param page      EEPROM page number to write to.  Should be 0 to 4095.
- * \param data      pointer to data buffer
- * \param length    length of data in buffer.  If length < 264, eeprom page will be padded out to 264 bytes.
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length)
-{
-  if (length > 264)
-  {
-    ROS_ERROR("Eeprom write length %d > %d", length, MAX_EEPROM_PAGE_SIZE);
-    return false;
-  }
-
-  if (page >= NUM_EEPROM_PAGES)
-  {
-    ROS_ERROR("Eeprom write page %d > %d", page, NUM_EEPROM_PAGES-1);
-    return false;
-  }
-
-  // wait for eeprom to be ready before write data into FPGA buffer
-  if (!waitForSpiEepromReady(com))
-  {
-    return false;
-  }
-
-  const void *write_buf = data;
-
-  // if needed, pad data to 264 byte in buf
-  uint8_t buf[MAX_EEPROM_PAGE_SIZE];
-  if (length < MAX_EEPROM_PAGE_SIZE)
-  {
-    memcpy(buf, data, length);
-    memset(buf+length, 0xFF, MAX_EEPROM_PAGE_SIZE-length);
-    write_buf = buf;    
-  }
-
-  // Write data to FPGA buffer
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, write_buf, MAX_EEPROM_PAGE_SIZE))
-  {
-    ROS_ERROR("Write of SPI EEPROM buffer failed");
-    return false;
-  }
-
-  // Have SPI EEPROM state machine start SPI data transfer
-  WG0XSpiEepromCmd cmd;
-  cmd.build_write(page);
-  if (!sendSpiEepromCmd(com, cmd)) 
-  {
-    ROS_ERROR("Error giving SPI EEPROM write command");
-    return false;
-  }
-
-  // Wait for EEPROM write to complete
-  if (!waitForEepromReady(com))
-  {
-    return false;
-  }
-
-  return true;
-}
-
-
-/*!
- * \brief  Waits for EEPROM to become ready
- *
- * Certain eeprom operations (such as page reads), are complete immediately after data is 
- * trasferred.  Other operations (such as page writes) take some amount of time after data
- * is trasfered to complete.  This polls the EEPROM status register until the 'ready' bit 
- * is set.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \return          true if there is success, false if there is an error or wait takes too long
- */
-bool WG0X::waitForEepromReady(EthercatCom *com)
-{
-  // Wait for eeprom write to complete
-  unsigned tries = 0;
-  EepromStatusReg status_reg;
-  do {
-    if (!readEepromStatusReg(com, status_reg))
-    {
-      return false;
-    }
-    if (status_reg.ready_)
-    {
-      break;
-    }
-    usleep(100);
-  } while (++tries < 20);
-
-  if (!status_reg.ready_) 
-  {
-    ROS_ERROR("Eeprom still busy after %d cycles", tries);
-    return false;
-  } 
-
-  if (tries > 10)
-  {
-    ROS_WARN("EEPROM took %d cycles to be ready", tries);
-  }
-  return true;
-}
-
-
-
-/*!
- * \brief  Reads EEPROM status register
- *
- * Amoung other things, eeprom status register provide information about whether eeprom 
- * is busy performing a write.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param reg       reference to EepromStatusReg struct where eeprom status will be stored
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg)
-{
-  // Status is read from EEPROM by having SPI state machine perform an "abitrary" operation.
-  // With an arbitrary operation, the SPI state machine shifts out byte from buffer, while
-  // storing byte shifted in from device into same location in buffer.
-  // SPI state machine has no idea what command it is sending device or how to intpret its result.
-
-  // To read eeprom status register, we transfer 2 bytes.  The first byte is the read status register 
-  // command value (0xD7).  When transfering the second byte, the EEPROM should send its status.
-  char data[2] = {0xD7, 0x00};
-  BOOST_STATIC_ASSERT(sizeof(data) == 2);
-  if (writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
-  {
-    ROS_ERROR("Writing SPI buffer");
-    return false;
-  }
-    
-  { // Have SPI state machine trasfer 2 bytes
-    WG0XSpiEepromCmd cmd;
-    cmd.build_arbitrary(sizeof(data));
-    if (!sendSpiEepromCmd(com, cmd)) 
-    {
-      ROS_ERROR("Sending SPI abitrary command");
-      return false;
-    }
-  }
-    
-  // Data read from device should now be stored in FPGA buffer
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
-  {
-    ROS_ERROR("Reading status register data from SPI buffer");
-    return false;
-  }
- 
-  // Status register would be second byte of buffer
-  reg.raw_ = data[1];
-  return true;
-}
-
-
-/*!
- * \brief  Reads SPI state machine command register
- *
- * For communicating with EEPROM, there is a simple state machine that transfers
- * data to/from FPGA buffer over SPI.  
- * When any type of comunication is done with EEPROM:
- *  1. Write command or write data into FPGA buffer.
- *  2. Have state machine start transfer bytes from buffer to EEPROM, and write data from EEPROM into buffer
- *  3. Wait for state machine to complete (by reading its status)
- *  4. Read EEPROM response from FPGA buffer.
- * 
- * \param com       EtherCAT communication class used for communicating with device
- * \param reg       reference to WG0XSpiEepromCmd struct where read data will be stored
- * \return          true if there is success, false if there is an error
- */
-bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
-{
-  BOOST_STATIC_ASSERT(sizeof(WG0XSpiEepromCmd) == 3);
-  if (readMailbox(com, WG0XSpiEepromCmd::SPI_COMMAND_ADDR, &cmd, sizeof(cmd)))
-  {
-    ROS_ERROR("Reading SPI command register with mailbox");
-    return false;
-  }
-  
-  return true;
-}
 
 
 /*!
@@ -1470,7 +1049,7 @@ bool WG0X::readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd)
  */
 bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
 {
-  if (!writeEepromPage(com, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
+  if (!eeprom_.writeEepromPage(com, &mailbox_, ACTUATOR_INFO_PAGE, &actutor_info, sizeof(actutor_info)))
   {
     ROS_ERROR("Writing actuator infomation to EEPROM");
     return false;
@@ -1496,680 +1075,13 @@ bool WG0X::program(EthercatCom *com, const WG0XActuatorInfo &actutor_info)
  */
 bool WG0X::program(EthercatCom *com, const ethercat_hardware::MotorHeatingModelParametersEepromConfig &heating_config)
 {
-  if (!writeEepromPage(com, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
+  if (!eeprom_.writeEepromPage(com, &mailbox_, heating_config.EEPROM_PAGE, &heating_config, sizeof(heating_config)))
   {
     ROS_ERROR("Writing motor heating model configuration to EEPROM");
     return false;
   }
   
   return true;  
-}
-
-/*!
- * \brief  Find differece between two timespec values
- *
- * \param current   current time 
- * \param current   start time 
- * \return          returns time difference (current-start) in milliseconds
- */
-int timediff_ms(const timespec &current, const timespec &start)
-{
-  int timediff_ms = (current.tv_sec-start.tv_sec)*1000 // 1000 ms in a sec
-    + (current.tv_nsec-start.tv_nsec)/1000000; // 1000000 ns in a ms
-  return timediff_ms;
-}
-
-
-/*!
- * \brief  error checking wrapper around clock_gettime
- *
- * \param current   current time 
- * \param current   start time 
- * \return          returns 0 for success, non-zero for failure
- */
-int safe_clock_gettime(clockid_t clk_id, timespec *time)
-{
-  int result = clock_gettime(clk_id, time);
-  if (result != 0) {
-    int error = errno;
-    fprintf(stderr, "safe_clock_gettime : %s\n", strerror(error));
-    return result;
-  }  
-  return result;
-}
-
-
-/*!
- * \brief  safe version of usleep.
- *
- * Uses nanosleep internally.  Will restart sleep after begin woken by signal.
- *
- * \param usec   number of microseconds to sleep for.  Must be < 1000000.
- */
-void safe_usleep(uint32_t usec) 
-{
-  assert(usec<1000000);
-  if (usec>1000000)
-    usec=1000000;
-  struct timespec req, rem;
-  req.tv_sec = 0;
-  req.tv_nsec = usec*1000;
-  while (nanosleep(&req, &rem)!=0) { 
-    int error = errno;
-    fprintf(stderr,"%s : Error : %s\n", __func__, strerror(error));    
-    if (error != EINTR) {
-      break;
-    }
-    req = rem;
-  }
-  return;
-}
-
-
-unsigned SyncMan::baseAddress(unsigned num) 
-{
-  assert(num < 8);
-  return BASE_ADDR + 8 * num;
-}  
-  
-
-/*!
- * \brief  Read data from Sync Manager
- *
- * \param com       used to perform communication with device
- * \param sh        slave to read data from
- * \param addrMode  addressing mode used to read data (FIXED/POSITIONAL)
- * \param num       syncman number to read 0-7
- * \return          returns true for success, false for failure 
- */
-bool SyncMan::readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num)
-{
-  return ( EthercatDevice::readData(com, sh, baseAddress(num), this, sizeof(*this), addrMode) == 0);
-}
-
-
-unsigned SyncManActivate::baseAddress(unsigned num)
-{
-  assert(num < 8);
-  return BASE_ADDR + 8 * num;
-}
-
-/*!
- * \brief  Write data to Sync Manager Activation register
- *
- * \param com       used to perform communication with device
- * \param sh        slave to read data from
- * \param addrMode  addressing mode used to read data (FIXED/POSITIONAL)
- * \param num       syncman number to read 0-7
- * \return          returns true for success, false for failure 
- */
-bool SyncManActivate::writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const
-{
-  return ( EthercatDevice::writeData(com, sh, baseAddress(num), this, sizeof(*this), addrMode) == 0);
-}
-
-
-void updateIndexAndWkc(EC_Telegram *tg, EC_Logic *logic) 
-{
-  tg->set_idx(logic->get_idx());
-  tg->set_wkc(logic->get_wkc());
-}
-
-
-bool WG0X::verifyDeviceStateForMailboxOperation()
-{
-  // Make sure slave is in correct state to do use mailbox
-  EC_State state = sh_->get_state();
-  if ((state != EC_SAFEOP_STATE) && (state != EC_OP_STATE)) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            "cannot do mailbox read in current device state = %d\n", __func__, state);
-    return false;
-  }
-  return true;
-}
-
-
-/*!
- * \brief  Runs diagnostic on read and write mailboxes.
- *
- * Collects and data from mailbox control registers.
- *
- * \todo            not implemented yet
- * \param com       used to perform communication with device
- * \return          returns true for success, false for failure 
- */
-void WG0X::diagnoseMailboxError(EthercatCom *com)
-{
-  
-}
-
-/*!
- * \brief  Clears read mailbox by reading first and last byte.
- *
- * Mailbox lock should be held when this function is called.
- *
- * \param com       used to perform communication with device
- * \return          returns true for success, false for failure 
- */
-bool WG0X::clearReadMailbox(EthercatCom *com)
-{
-  if (!verifyDeviceStateForMailboxOperation()){
-    return false;
-  }
-
-  EC_Logic *logic = EC_Logic::instance();    
-  EC_UINT station_addr = sh_->get_station_address();  
-  
-  // Create Ethernet packet with two EtherCAT telegrams inside of it : 
-  //  - One telegram to read first byte of mailbox
-  //  - One telegram to read last byte of mailbox
-  unsigned char unused[1] = {0};
-  NPRD_Telegram read_start(
-            logic->get_idx(),
-            station_addr,
-            MBX_STATUS_PHY_ADDR,
-            logic->get_wkc(),
-            sizeof(unused),
-            unused);
-  NPRD_Telegram read_end(  
-            logic->get_idx(),
-            station_addr,
-            MBX_STATUS_PHY_ADDR+MBX_STATUS_SIZE-1,
-            logic->get_wkc(),
-            sizeof(unused),
-             unused);
-  read_start.attach(&read_end);
-  EC_Ethernet_Frame frame(&read_start);
-
-
-  // Retry sending packet multiple times 
-  bool success=false;
-  static const unsigned MAX_DROPS = 15;
-  for (unsigned tries=0; tries<MAX_DROPS; ++tries) {
-    success = com->txandrx_once(&frame);
-    if (success) {
-      break;
-    }
-    updateIndexAndWkc(&read_start, logic);
-    updateIndexAndWkc(&read_end  , logic);
-  }
-
-  if (!success) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " too much packet loss\n", __func__);   
-    safe_usleep(100);
-    return false;
-  }
-  
-  // Check result for consistancy
-  if (read_start.get_wkc() != read_end.get_wkc()) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            "read mbx working counters are inconsistant, %d, %d\n",
-            __func__, read_start.get_wkc(), read_end.get_wkc());
-    return false;
-  }
-  if (read_start.get_wkc() > 1) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            "more than one device (%d) responded \n", __func__, read_start.get_wkc());
-    return false;
-  }
-  if (read_start.get_wkc() == 1)  {
-    fprintf(stderr, "%s : " WARN_MODE "WARN" STD_MODE 
-            " read mbx contained garbage data\n", __func__);
-    // Not an error, just warning
-  } 
-  
-  return true;  
-}
-
-
-
-/*!
- * \brief  Waits until read mailbox is full or timeout.
- *
- * Wait times out after 100msec.
- * Mailbox lock should be held when this function is called.
- *
- * \param com       used to perform communication with device
- * \return          returns true for success, false for failure or timeout
- */
-bool WG0X::waitForReadMailboxReady(EthercatCom *com)
-{
-  // Wait upto 100ms for device to toggle ack
-  static const int MAX_WAIT_TIME_MS = 100;
-  int timediff;
-  unsigned good_results=0;
-
-
-  struct timespec start_time, current_time;
-  if (safe_clock_gettime(CLOCK_MONOTONIC, &start_time)!=0) {
-    return false;
-  }
-  
-  do {      
-    // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus=0;
-    const unsigned SyncManAddr = 0x805+(MBX_STATUS_SYNCMAN_NUM*8);
-    if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
-      ++good_results;
-      const uint8_t MailboxStatusMask = (1<<3);
-      if (SyncManStatus & MailboxStatusMask) {
-        return true;
-      }
-    }      
-    if (safe_clock_gettime(CLOCK_MONOTONIC, &current_time)!=0) {
-      return false;
-      }
-    timediff = timediff_ms(current_time, start_time);
-    safe_usleep(100);
-  } while (timediff < MAX_WAIT_TIME_MS);
-  
-  if (good_results == 0) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " error reading from device\n", __func__);          
-  } else {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " error read mbx not full after %d ms\n", __func__, timediff);      
-  }
-
-  return false;
-}
-
-
-/*!
- * \brief  Waits until write mailbox is empty or timeout.
- *
- * Wait times out after 100msec.
- * Mailbox lock should be held when this function is called.
- *
- * \param com       used to perform communication with device
- * \return          returns true for success, false for failure or timeout
- */
-bool WG0X::waitForWriteMailboxReady(EthercatCom *com)
-{
-  // Wait upto 100ms for device to toggle ack
-  static const int MAX_WAIT_TIME_MS = 100;
-  int timediff;
-  unsigned good_results=0;
-
-
-  struct timespec start_time, current_time;
-  if (safe_clock_gettime(CLOCK_MONOTONIC, &start_time)!=0) {
-    return false;
-  }
-  
-  do {      
-    // Check if mailbox is full by looking at bit 3 of SyncMan status register.
-    uint8_t SyncManStatus=0;
-    const unsigned SyncManAddr = 0x805+(MBX_COMMAND_SYNCMAN_NUM*8);
-    if (readData(com, SyncManAddr, &SyncManStatus, sizeof(SyncManStatus), FIXED_ADDR) == 0) {
-      ++good_results;
-      const uint8_t MailboxStatusMask = (1<<3);
-      if ( !(SyncManStatus & MailboxStatusMask) ) {
-        return true;
-      }
-    }      
-    if (safe_clock_gettime(CLOCK_MONOTONIC, &current_time)!=0) {
-      return false;
-    }
-    timediff = timediff_ms(current_time, start_time);
-    safe_usleep(100);
-  } while (timediff < MAX_WAIT_TIME_MS);
-  
-  if (good_results == 0) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " error reading from device\n", __func__);          
-  } else {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " error write mbx not empty after %d ms\n", __func__, timediff);      
-  }
-
-  return false;
-}
-
-
-
-/*!
- * \brief  Writes data to mailbox.
- *
- * Will try to conserve bandwidth by only length bytes of data and last byte of mailbox.
- * Mailbox lock should be held when this function is called.
- *
- * \param com       used to perform communication with device
- * \param data      pointer to buffer where read data is stored.
- * \param length    amount of data to read from mailbox
- * \return          returns true for success, false for failure
- */
-bool WG0X::writeMailboxInternal(EthercatCom *com, void const *data, unsigned length)
-{
-  if (length > MBX_COMMAND_SIZE) {
-    assert(length <= MBX_COMMAND_SIZE);
-    return false;
-  }
-
-  // Make sure slave is in correct state to use mailbox
-  if (!verifyDeviceStateForMailboxOperation()){
-    return false;
-  }
-
-  EC_Logic *logic = EC_Logic::instance();    
-  EC_UINT station_addr = sh_->get_station_address();
-  
-
-  // If there enough savings, split mailbox write up into 2 parts : 
-  //  1. Write of actual data to begining of mbx buffer
-  //  2. Write of last mbx buffer byte, to complete write
-  static const unsigned TELEGRAM_OVERHEAD = 50;
-  bool split_write = (length+TELEGRAM_OVERHEAD) < MBX_COMMAND_SIZE;
-    
-  unsigned write_length = MBX_COMMAND_SIZE;
-  if (split_write) {
-    write_length = length;
-  }
-
-  // Possible do multiple things at once...
-  //  1. Clear read mailbox by reading both first and last mailbox bytes
-  //  2. Write data into write mailbox
-  {
-    // Build frame with 2-NPRD + 2 NPWR
-    unsigned char unused[1] = {0};
-    NPWR_Telegram write_start(
-                              logic->get_idx(),
-                              station_addr,
-                              MBX_COMMAND_PHY_ADDR,
-                              logic->get_wkc(),
-                              write_length,
-                              (const unsigned char*) data);
-    NPWR_Telegram write_end(
-                            logic->get_idx(),
-                            station_addr,
-                            MBX_COMMAND_PHY_ADDR+MBX_COMMAND_SIZE-1,
-                            logic->get_wkc(),
-                            sizeof(unused),
-                            unused);
-      
-    if (split_write) {
-      write_start.attach(&write_end);
-    }      
-
-    EC_Ethernet_Frame frame(&write_start);
-      
-    // Try multiple times, but remember number of of successful sends
-    unsigned sends=0;      
-    bool success=false;
-    for (unsigned tries=0; (tries<10) && !success; ++tries) {
-      success = com->txandrx_once(&frame);
-      if (!success) {
-        updateIndexAndWkc(&write_start, logic);
-        updateIndexAndWkc(&write_end, logic);
-      }
-      ++sends; //EtherCAT_com d/n support split TX and RX class, assume tx part of txandrx always succeeds
-      /* 
-      int handle = com->tx(&frame);
-      if (handle > 0) {
-        ++sends;
-        success = com->rx(&frame, handle);
-      }
-      if (!success) {
-        updateIndexAndWkc(&write_start, logic);
-        updateIndexAndWkc(&write_end, logic);
-      }
-      */
-    }
-    if (!success) {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " too much packet loss\n", __func__);   
-      safe_usleep(100);
-      return false;
-    }
-      
-    if (split_write && (write_start.get_wkc() != write_end.get_wkc())) {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " write mbx working counters are inconsistant\n", __func__);
-      return false;
-    }
-
-    if (write_start.get_wkc() > 1) 
-    {
-      fprintf(stderr, "%s : " ERROR_HDR
-              " multiple (%d) devices responded to mailbox write\n", __func__, write_start.get_wkc());
-      return false;
-    }
-    else if (write_start.get_wkc() != 1)
-    {
-      // Write to cmd mbx was refused 
-      if (sends<=1) {
-        // Packet was only sent once, there must be a problem with slave device
-        fprintf(stderr, "%s : " ERROR_HDR 
-                " initial mailbox write refused\n", __func__);
-        safe_usleep(100);
-        return false;
-      } else {
-        // Packet was sent multiple times because a packet drop occured  
-        // If packet drop occured on return path from device, a refusal is acceptable
-        fprintf(stderr, "%s : " WARN_HDR 
-                " repeated mailbox write refused\n", __func__);
-      }
-    }     
-  }
-
-  return true;
-}
-
-bool WG0X::readMailboxRepeatRequest(EthercatCom *com)
-{
-  bool success = _readMailboxRepeatRequest(com);
-  ++mailbox_diagnostics_.retries_;
-  if (!success) {
-    ++mailbox_diagnostics_.retry_errors_;
-  }
-  return success;
-}
-
-bool WG0X::_readMailboxRepeatRequest(EthercatCom *com)
-{
-  // Toggle repeat request flag, wait for ack from device
-  // Returns true if ack is received, false for failure
-  SyncMan sm;
-  if (!sm.readData(com, sh_, FIXED_ADDR, MBX_STATUS_SYNCMAN_NUM)) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " could not read status mailbox syncman (1)\n", __func__);
-    return false;
-  }
-  
-  // If device can handle repeat requests, then request and ack bit should already match
-  if (sm.activate.repeat_request != sm.pdi_control.repeat_ack) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " syncman repeat request and ack do not match\n", __func__);
-    return false;
-  }
-
-  // Write toggled repeat request,,, wait for ack.
-  SyncManActivate orig_activate(sm.activate);
-  sm.activate.repeat_request = ~orig_activate.repeat_request;
-  if (!sm.activate.writeData(com, sh_, FIXED_ADDR, MBX_STATUS_SYNCMAN_NUM)) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " could not write syncman repeat request\n", __func__);
-    //ec_mark(sh->getEM(), "could not write syncman repeat request", 1);
-    return false;
-  }
-  
-  // Wait upto 100ms for device to toggle ack
-  static const int MAX_WAIT_TIME_MS = 100;
-  int timediff;
-
-  struct timespec start_time, current_time;
-  if (safe_clock_gettime(CLOCK_MONOTONIC, &start_time)!=0) {
-    return false;
-  }
-  
-  do {
-    if (!sm.readData(com, sh_, FIXED_ADDR, MBX_STATUS_SYNCMAN_NUM)) {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " could not read status mailbox syncman (2)\n", __func__);
-      return false;
-    }
-
-    if (sm.activate.repeat_request == sm.pdi_control.repeat_ack) {
-      // Device responded, to some checks to make sure it seems to be telling the truth
-      if (sm.status.mailbox_status != 1) {
-        fprintf(stderr, "%s : " ERROR_HDR 
-                " got repeat response, but read mailbox is still empty\n", __func__);
-        //sm.print(WG0X_MBX_Status_Syncman_Num, std::cerr);
-        return false;
-      }
-      return true;
-    }
-    
-    if ( (sm.activate.repeat_request) == (orig_activate.repeat_request) ) {          
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " syncman repeat request was changed while waiting for response\n", __func__);
-      //sm.activate.print();
-      //orig_activate.print();
-      return false;
-    }
-
-    if (safe_clock_gettime(CLOCK_MONOTONIC, &current_time)!=0) {
-      return false;
-    }
-    
-    timediff = timediff_ms(current_time, start_time);
-    safe_usleep(100);        
-  } while (timediff < MAX_WAIT_TIME_MS);
-    
-  fprintf(stderr, "%s : " ERROR_HDR 
-          " error repeat request not acknowledged after %d ms\n", __func__, timediff);    
-  return false;
-}
-
-
-
-/*!
- * \brief  Reads data from read mailbox.
- *
- * Will try to conserve bandwidth by reading length bytes of data and last byte of mailbox.
- * Mailbox lock should be held when this function is called.
- *
- * \param com       used to perform communication with device
- * \param data      pointer to buffer where read data is stored.
- * \param length    amount of data to read from mailbox
- * \return          returns true for success, false for failure
- */
-bool WG0X::readMailboxInternal(EthercatCom *com, void *data, unsigned length)
-{
-  static const unsigned MAX_TRIES = 10;
-  static const unsigned MAX_DROPPED = 10;
-    
-  if (length > MBX_STATUS_SIZE) {
-    assert(length <= MBX_STATUS_SIZE);
-    return false;
-  }
-
-  // Make sure slave is in correct state to use mailbox
-  if (!verifyDeviceStateForMailboxOperation()){
-    return false;
-  }
-    
-  EC_Logic *logic = EC_Logic::instance();    
-  EC_UINT station_addr = sh_->get_station_address();
-
-
-  // If read is small enough :
-  //  1. read just length bytes in one telegram
-  //  2. then read last byte to empty mailbox
-  static const unsigned TELEGRAM_OVERHEAD = 50;
-  bool split_read = (length+TELEGRAM_OVERHEAD) < MBX_STATUS_SIZE;
-    
-  unsigned read_length = MBX_STATUS_SIZE;      
-  if (split_read) {
-    read_length = length;
- }
-
-  unsigned char unused[1] = {0};
-  NPRD_Telegram read_start(
-                           logic->get_idx(),
-                           station_addr,
-                           MBX_STATUS_PHY_ADDR,
-                           logic->get_wkc(),
-                           read_length,
-                           (unsigned char*) data);
-  NPRD_Telegram read_end(  
-                         logic->get_idx(),
-                         station_addr,
-                         MBX_STATUS_PHY_ADDR+MBX_STATUS_SIZE-1,
-                         logic->get_wkc(),
-                         sizeof(unused),
-                         unused);      
-
-  if (split_read) {
-    read_start.attach(&read_end);
-  }
-    
-  EC_Ethernet_Frame frame(&read_start);
-
-  unsigned tries = 0;    
-  unsigned total_dropped =0;
-  for (tries=0; tries<MAX_TRIES; ++tries) {      
-
-    // Send read - keep track of how many packets were dropped (for later)
-    unsigned dropped=0;
-    for (dropped=0; dropped<MAX_DROPPED; ++dropped) {
-      if (com->txandrx_once(&frame)) {
-        break;
-      }
-      ++total_dropped;
-      updateIndexAndWkc(&read_start   , logic);
-      updateIndexAndWkc(&read_end     , logic);
-    }
-      
-    if (dropped>=MAX_DROPPED) {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " too many dropped packets : %d\n", __func__, dropped);
-    }
-      
-    if (split_read && (read_start.get_wkc() != read_end.get_wkc())) {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              "read mbx working counters are inconsistant\n", __func__);
-      return false;
-    }
-      
-    if (read_start.get_wkc() == 0) {
-      if (dropped == 0) {
-        fprintf(stderr, "%s : " ERROR_HDR 
-                " inconsistancy : got wkc=%d with no dropped packets\n", 
-                __func__, read_start.get_wkc()); 
-        fprintf(stderr, "total dropped = %d\n", total_dropped);
-        return false;
-      } else {
-        // Packet was dropped after doing read from device,,,
-        // Ask device to repost data, so it can be read again.
-        fprintf(stderr, "%s : " WARN_HDR 
-                " asking for read repeat after dropping %d packets\n", __func__, dropped);
-        if (!readMailboxRepeatRequest(com)) {
-          return false;
-        }
-        continue;
-      }
-    } else if (read_start.get_wkc() == 1) {
-      // Successfull read of status data
-      break;
-    } else {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " invalid wkc for read : %d\n", __func__, read_start.get_wkc());   
-      diagnoseMailboxError(com);
-      return false;
-    }
-  }
-
-  if (tries >= MAX_TRIES) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " could not get responce from device after %d retries, %d total dropped packets\n",
-            __func__, tries, total_dropped);
-    diagnoseMailboxError(com);
-    return false;
-  }        
-
-  return true;
 }
 
 
@@ -2188,116 +1100,7 @@ bool WG0X::readMailboxInternal(EthercatCom *com, void *data, unsigned length)
  */
 int WG0X::readMailbox(EthercatCom *com, unsigned address, void *data, unsigned length)
 {
-  if (!lockMailbox())
-    return -1;
-
-  int result = readMailbox_(com, address, data, length);
-  if (result != 0) {
-    ++mailbox_diagnostics_.read_errors_;
-  }
-  
-  unlockMailbox();
-  return result;
-}
-
-/*!
- * \brief  Internal function.  
- *
- * Aguments are the same as readMailbox() except that this assumes the mailbox lock is held.
- */ 
-int WG0X::readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length)
-{
-  // Make sure slave is in correct state to use mailbox
-  if (!verifyDeviceStateForMailboxOperation()){
-    return false;
-  }
-
-  //  1. Clear read (status) mailbox by reading it first
-  if (!clearReadMailbox(com)) 
-  {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            " clearing read mbx\n", __func__);
-    return -1;
-  }
-
-  //  2. Put a (read) request into command mailbox
-  {
-    WG0XMbxCmd cmd;      
-    if (!cmd.build(address, length, LOCAL_BUS_READ, sh_->get_mbx_counter(), data)) 
-    {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              " builing mbx header\n", __func__);
-      return -1;
-    }
-    
-    if (!writeMailboxInternal(com, &cmd.hdr_, sizeof(cmd.hdr_))) 
-    {
-      fprintf(stderr, "%s : " ERROR_HDR " write of cmd failed\n", __func__);
-      return -1;
-    }
-  }
-  
-  // Wait for result (in read mailbox) to become ready
-  if (!waitForReadMailboxReady(com)) 
-  {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            "waiting for read mailbox\n", __func__);
-    return -1;
-  }
-
-  // Read result back from mailbox.
-  // It could take the FPGA some time to respond to a request.  
-  // Since the read mailbox is initiall cleared, any read to the mailbox
-  // should be refused (WKC==0) until WG0x FPGA has written it result into it.	   
-  // NOTE: For this to work the mailbox syncmanagers must be set up.
-  // TODO 1: Packets may get lost on return route to device.
-  //   In this case, the device will keep responding to the repeated packets with WKC=0.
-  //   To work correctly, the repeat request bit needs to be toggled.
-  // TODO 2: Need a better method to determine if data read from status mailbox.
-  //   is the right data, or just junk left over from last time.
-  { 
-    WG0XMbxCmd stat;
-    memset(&stat,0,sizeof(stat));
-    // Read data + 1byte checksum from mailbox
-    if (!readMailboxInternal(com, &stat, length+1)) 
-    {
-      fprintf(stderr, "%s : " ERROR_HDR " read failed\n", __func__);
-      return -1;
-    }
-    
-    if (computeChecksum(&stat, length+1) != 0) 
-    {
-      fprintf(stderr, "%s : " ERROR_HDR 
-              "checksum error reading mailbox data\n", __func__);
-      fprintf(stderr, "length = %d\n", length);
-      return -1;
-    }
-    memcpy(data, &stat, length);
-  }
-
-  return 0;
-
-
-}
-
-bool WG0X::lockMailbox() 
-{
-  int error = pthread_mutex_lock(&mailbox_lock_);
-  if (error != 0) {
-    fprintf(stderr, "%s : " ERROR_HDR " getting mbx lock\n", __func__);
-    ++mailbox_diagnostics_.lock_errors_;
-    return false;
-  }
-  return true;
-}
-
-void WG0X::unlockMailbox() 
-{
-  int error = pthread_mutex_unlock(&mailbox_lock_);
-  if (error != 0) {
-    fprintf(stderr, "%s : " ERROR_HDR " freeing mbx lock\n", __func__);
-    ++mailbox_diagnostics_.lock_errors_;
-  }
+  return mailbox_.readMailbox(com, address, data, length);
 }
 
 bool WG0X::lockWG0XDiagnostics() 
@@ -2351,56 +1154,9 @@ void WG0X::unlockWG0XDiagnostics()
  */
 int WG0X::writeMailbox(EthercatCom *com, unsigned address, void const *data, unsigned length)
 {
-  if (!lockMailbox())
-    return -1;
-
-  int result = writeMailbox_(com, address, data, length);
-  if (result != 0) {
-    ++mailbox_diagnostics_.write_errors_;
-  }
-
-  unlockMailbox();
-
-  return result;
+  return mailbox_.writeMailbox(com,address,data,length);
 }
 
-/*!
- * \brief  Internal function.  
- *
- * Aguments are the same as writeMailbox() except that this assumes the mailbox lock is held.
- */
-int WG0X::writeMailbox_(EthercatCom *com, unsigned address, void const *data, unsigned length)
-{
-  // Make sure slave is in correct state to use mailbox
-  if (!verifyDeviceStateForMailboxOperation()){
-    return -1;
-  }
-    
-  // Build message and put it into write mailbox
-  {		
-    WG0XMbxCmd cmd;
-    if (!cmd.build(address, length, LOCAL_BUS_WRITE, sh_->get_mbx_counter(), data)) {
-      fprintf(stderr, "%s : " ERROR_HDR " builing mbx header\n", __func__);
-      return -1;
-    }      
-    
-    unsigned write_length = sizeof(cmd.hdr_)+length+sizeof(cmd.checksum_);
-    if (!writeMailboxInternal(com, &cmd, write_length)) {
-      fprintf(stderr, "%s : " ERROR_HDR " write failed\n", __func__);
-      diagnoseMailboxError(com);
-      return -1;
-    }
-  }
-  
-  // TODO: Change slave firmware so that we can verify that localbus write was truly executed
-  //  Checking that device emptied write mailbox will have to suffice for now.
-  if (!waitForWriteMailboxReady(com)) {
-    fprintf(stderr, "%s : " ERROR_HDR 
-            "write mailbox\n", __func__);
-  }
-    
-  return 0;
-}
 
 
 #define CHECK_SAFETY_BIT(bit) \
@@ -2463,20 +1219,6 @@ string WG0X::modeString(uint8_t mode)
   return str;
 }
 
-void WG0X::publishMailboxDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
-{
-  if (lockMailbox()) { 
-    mailbox_publish_diagnostics_ = mailbox_diagnostics_;
-    unlockMailbox();
-  }
-
-  MbxDiagnostics const &m(mailbox_publish_diagnostics_);
-  d.addf("Mailbox Write Errors", "%d", m.write_errors_);
-  d.addf("Mailbox Read Errors", "%d",  m.read_errors_);
-  d.addf("Mailbox Retries", "%d",      m.retries_);
-  d.addf("Mailbox Retry Errors", "%d", m.retry_errors_);
-}
-
 void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper &d)
 { 
   // If possible, copy new diagnositics from collection thread, into diagnostics thread
@@ -2486,7 +1228,9 @@ void WG0X::publishGeneralDiagnostics(diagnostic_updater::DiagnosticStatusWrapper
   }
 
   if (too_many_dropped_packets_)
+  {
     d.mergeSummary(d.ERROR, "Too many dropped packets");
+  }
 
   if (status_checksum_error_)
   {
@@ -2587,8 +1331,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-  if (!has_error_)
-    d.summary(d.OK, "OK");
+  d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -2615,7 +1358,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
   d.addf("Encoder Reduction", "%f", actuator_info_.encoder_reduction_);
 
   publishGeneralDiagnostics(d);
-  publishMailboxDiagnostics(d);
+  mailbox_.publishMailboxDiagnostics(d);
 
   d.addf("Calibration Offset", "%f", cached_zero_offset_);
   d.addf("Calibration Status", "%s", 
@@ -2660,7 +1403,7 @@ void WG0X::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned 
     motor_heating_model_->diagnostics(d);
   }
 
-  if (last_num_encoder_errors_ != status->num_encoder_errors_)
+  if (encoder_errors_detected_)
   {
     d.mergeSummaryf(d.WARN, "Encoder errors detected");
   }

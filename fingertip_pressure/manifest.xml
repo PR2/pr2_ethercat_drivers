@@ -17,7 +17,7 @@ This package provides access to the PR2 fingertip pressure sensors. This informa
 <depend package='geometry_msgs' />
 <depend package='visualization_msgs' />
 <depend package='rostest' />
-<depend package='wxswig' />
+<rosdep name="wxwidgets"/>
 <export>
   <cpp cflags="-I${prefix}/msg/cpp"/>
 </export>

@@ -39,194 +39,12 @@
 #include "ethercat_hardware/motor_model.h"
 #include "ethercat_hardware/motor_heating_model.h"
 #include "realtime_tools/realtime_publisher.h"
+#include "ethercat_hardware/wg_mailbox.h"
+#include "ethercat_hardware/wg_eeprom.h"
 
 #include <boost/shared_ptr.hpp>
 
 using namespace ethercat_hardware;
-
-enum MbxCmdType {LOCAL_BUS_READ=1, LOCAL_BUS_WRITE=2};
-
-struct WG0XMbxHdr
-{
-  uint16_t address_;
-  union
-  {
-    uint16_t command_;
-    struct
-    {
-      uint16_t length_:12;
-      uint16_t seqnum_: 3;  // bits[14:12] sequence number, 0=disable, 1-7 normal sequence number
-      uint16_t write_nread_:1;
-    }__attribute__ ((__packed__));
-  };
-  uint8_t checksum_;
-
-  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum);
-  bool verifyChecksum(void) const;
-}__attribute__ ((__packed__));
-
-static const unsigned MBX_SIZE = 512;
-static const unsigned MBX_DATA_SIZE = (MBX_SIZE - sizeof(WG0XMbxHdr) - 1);
-struct WG0XMbxCmd
-{
-  WG0XMbxHdr hdr_;
-  uint8_t data_[MBX_DATA_SIZE];
-  uint8_t checksum_;
-
-  bool build(unsigned address, unsigned length, MbxCmdType type, unsigned seqnum, void const* data);
-}__attribute__ ((__packed__));
-
-struct WG0XSpiEepromCmd
-{
-  uint16_t page_;
-  union
-  {
-    uint8_t command_;
-    struct
-    {
-      uint8_t operation_ :4;
-      uint8_t start_ :1;
-      uint8_t busy_ :1;
-      uint8_t unused2_ :2;
-    }__attribute__ ((__packed__));
-  };
-
-  void build_read(unsigned page)
-  {
-    this->page_ = page & 0xffff;
-    this->operation_ = SPI_READ_OP;
-    this->start_ = 1;
-  }
-  void build_write(unsigned page)
-  {
-    this->page_ = page & 0xffff;
-    this->operation_ = SPI_WRITE_OP;
-    this->start_ = 1;
-  }
-  void build_arbitrary(unsigned length)
-  {
-    this->page_ = (length-1) & 0xffff;
-    this->operation_ = SPI_ARBITRARY_OP;
-    this->start_ = 1;
-  }
-
-  static const unsigned SPI_READ_OP = 0;
-  static const unsigned SPI_WRITE_OP = 1;
-  static const unsigned SPI_ARBITRARY_OP = 3;
-
-  static const unsigned SPI_COMMAND_ADDR = 0x0230;
-  static const unsigned SPI_BUFFER_ADDR = 0xF400;
-}__attribute__ ((__packed__));
-
-
-
-struct EepromStatusReg 
-{
-  union {
-    uint8_t raw_;
-    struct {
-      uint8_t page_size_     : 1; 
-      uint8_t write_protect_ : 1;
-      uint8_t eeprom_size_   : 4;
-      uint8_t compare_       : 1;
-      uint8_t ready_         : 1;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));
-} __attribute__ ((__packed__));
-
-
-// Syncmanger control register 0x804+N*8
-struct SyncManControl {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t mode            : 2;
-      uint8_t direction       : 2;
-      uint8_t ecat_irq_enable : 1;
-      uint8_t pdi_irq_enable  : 1;
-      uint8_t watchdog_enable : 1;
-      uint8_t res1            : 1;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  //static const unsigned BASE_ADDR=0x804;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger status register 0x805+N*8
-struct SyncManStatus {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t interrupt_write : 1;
-      uint8_t interrupt_read  : 1;
-      uint8_t res1            : 1;
-      uint8_t mailbox_status  : 1;
-      uint8_t buffer_status   : 2;
-      uint8_t res2            : 2;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  //static const unsigned BASE_ADDR=0x805;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger activation register 0x806+N*8
-struct SyncManActivate {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t enable : 1;
-      uint8_t repeat_request : 1;
-      uint8_t res4 : 4;
-      uint8_t ecat_latch_event : 1;
-      uint8_t pdi_latch_event : 1;
-    } __attribute__ ((__packed__));      
-  } __attribute__ ((__packed__));
-  static const unsigned BASE_ADDR=0x806;
-  static unsigned baseAddress(unsigned num);
-  //void print(std::ostream &os=std::cout) const;  
-  bool writeData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num) const;
-} __attribute__ ((__packed__));
-
-// Syncmanger PDI control register 0x807+N*8
-struct SyncManPDIControl {
-  union {
-    uint8_t raw;
-    struct {
-      uint8_t deactivate : 1;
-      uint8_t repeat_ack : 1;
-      uint8_t res6 : 6;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));      
-  //static const unsigned BASE_ADDR=0x807;
-  //static unsigned base_addr(unsigned num);
-  //void print(std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
-
-
-// For SyncManager settings REG 0x800+8*N
-struct SyncMan {
-  union {
-    uint8_t raw[8];
-    struct {
-      uint16_t start_addr;
-      uint16_t length;
-      SyncManControl control;
-      SyncManStatus status;
-      SyncManActivate activate;
-      SyncManPDIControl pdi_control;
-    } __attribute__ ((__packed__));
-  } __attribute__ ((__packed__));
-  
-  // Base address for first syncmanager
-  static const unsigned BASE_ADDR=0x800;
-  // Base address of Nth syncmanager for N=0-7
-  static unsigned baseAddress(unsigned num);
-  
-  bool readData(EthercatCom *com, EtherCAT_SlaveHandler *sh, EthercatDevice::AddrMode addrMode, unsigned num);
-  //void print(unsigned num, std::ostream &os=std::cout) const;
-} __attribute__ ((__packed__));
 
 
 struct WG0XSafetyDisableStatus
@@ -480,13 +298,13 @@ protected:
   bool status_checksum_error_;
   bool timestamp_jump_detected_;
   bool fpga_internal_reset_detected_;
+  bool encoder_errors_detected_;
 
   void clearErrorFlags(void);
 
   double cached_zero_offset_;
   enum {NO_CALIBRATION=0, CONTROLLER_CALIBRATION=1, SAVED_CALIBRATION=2};
   int calibration_status_;
-  unsigned last_num_encoder_errors_;  //!< Number of encoder errors the last time motors were reset
 
   /** The ros::Duration timestamp measures the time since the ethercat process started.
    * It is generated by accumulating diffs between 32bit device timestamps.
@@ -529,49 +347,17 @@ protected:
   static const int PWM_MAX = 0x4000;
   
 protected:
-  // Each WG0X device can only support one mailbox operation at a time
-  bool lockMailbox();
-  void unlockMailbox();
-  pthread_mutex_t mailbox_lock_;
-  MbxDiagnostics mailbox_diagnostics_;
-  MbxDiagnostics mailbox_publish_diagnostics_;
+  //! Mailbox access to device
+  ethercat_hardware::WGMailbox mailbox_;
 
-  // Mailbox helper functions
-  int writeMailbox_(EthercatCom *com, unsigned address, void const *data, unsigned length);
-  int readMailbox_(EthercatCom *com, unsigned address, void *data, unsigned length);  
-  bool verifyDeviceStateForMailboxOperation();
-  bool clearReadMailbox(EthercatCom *com);
-  bool waitForReadMailboxReady(EthercatCom *com);
-  bool waitForWriteMailboxReady(EthercatCom *com);
-  bool readMailboxRepeatRequest(EthercatCom *com);
-  bool _readMailboxRepeatRequest(EthercatCom *com);
-  bool writeMailboxInternal(EthercatCom *com, void const *data, unsigned length);
-  bool readMailboxInternal(EthercatCom *com, void *data, unsigned length);
-  void diagnoseMailboxError(EthercatCom *com);
-
-  // SPI Eeprom State machine helper functions
-  bool readSpiEepromCmd(EthercatCom *com, WG0XSpiEepromCmd &cmd);
-  bool sendSpiEepromCmd(EthercatCom *com, const WG0XSpiEepromCmd &cmd);
-  bool waitForSpiEepromReady(EthercatCom *com);
-
-  // Eeprom helper functions
-  bool readEepromStatusReg(EthercatCom *com, EepromStatusReg &reg);
-  bool waitForEepromReady(EthercatCom *com);
-  bool readEepromPage(EthercatCom *com, unsigned page, void* data, unsigned length);
-  bool writeEepromPage(EthercatCom *com, unsigned page, const void* data, unsigned length);  
-  
+  //! Access to device eeprom
+  ethercat_hardware::WGEeprom eeprom_;
 
   static const unsigned COMMAND_PHY_ADDR = 0x1000;
   static const unsigned STATUS_PHY_ADDR = 0x2000;
-  static const unsigned MBX_COMMAND_PHY_ADDR = 0x1400;
-  static const unsigned MBX_COMMAND_SIZE = 512;
-  static const unsigned MBX_STATUS_PHY_ADDR = 0x2400;
-  static const unsigned MBX_STATUS_SIZE = 512;
 
   static const unsigned PDO_COMMAND_SYNCMAN_NUM = 0;
   static const unsigned PDO_STATUS_SYNCMAN_NUM  = 1;
-  static const unsigned MBX_COMMAND_SYNCMAN_NUM = 2;
-  static const unsigned MBX_STATUS_SYNCMAN_NUM  = 3;
 
   enum
   {
@@ -595,8 +381,6 @@ protected:
   // Board configuration parameters
 
   static const unsigned ACTUATOR_INFO_PAGE = 4095;
-  static const unsigned NUM_EEPROM_PAGES   = 4096;
-  static const unsigned MAX_EEPROM_PAGE_SIZE = 264;
 
   // Not all devices will need this (WG021 won't) 
   MotorModel *motor_model_; 
@@ -630,9 +414,6 @@ public:
 
   static double calcEncoderVelocity(int32_t new_position, uint32_t new_timestamp, 
                                     int32_t old_position, uint32_t old_timestamp);
-
-  static unsigned computeChecksum(void const *data, unsigned length);
-  static unsigned int rotateRight8(unsigned in);
 
   static double convertRawTemperature(int16_t raw_temp);
 };

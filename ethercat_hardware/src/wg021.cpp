@@ -47,6 +47,8 @@
 #include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 
+#include "ethercat_hardware/wg_util.h"
+
 PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805021, WG021, EthercatDevice);
 
 void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
@@ -100,11 +102,11 @@ void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
   (*pd)[1] = EC_SyncMan(STATUS_PHY_ADDR, base_status);
   (*pd)[1].ChannelEnable = true;
 
-  (*pd)[2] = EC_SyncMan(MBX_COMMAND_PHY_ADDR, MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
+  (*pd)[2] = EC_SyncMan(WGMailbox::MBX_COMMAND_PHY_ADDR, WGMailbox::MBX_COMMAND_SIZE, EC_QUEUED, EC_WRITTEN_FROM_MASTER);
   (*pd)[2].ChannelEnable = true;
   (*pd)[2].ALEventEnable = true;
 
-  (*pd)[3] = EC_SyncMan(MBX_STATUS_PHY_ADDR, MBX_STATUS_SIZE, EC_QUEUED);
+  (*pd)[3] = EC_SyncMan(WGMailbox::MBX_STATUS_PHY_ADDR, WGMailbox::MBX_STATUS_SIZE, EC_QUEUED);
   (*pd)[3].ChannelEnable = true;
 
   sh->set_pd_config(pd);
@@ -181,7 +183,7 @@ void WG021::packCommand(unsigned char *buffer, bool halt, bool reset)
   c->config1_ = ((cmd.I_ & 0xf) << 4) | ((cmd.M_ & 0xf) << 0);
   c->config2_ = ((cmd.L1_ & 0xf) << 4) | ((cmd.L0_ & 0xf) << 0);
   c->general_config_ = cmd.pulse_replicator_ == true;
-  c->checksum_ = rotateRight8(computeChecksum(c, command_size_ - 1));
+  c->checksum_ = wg_util::rotateRight8(wg_util::computeChecksum(c, command_size_ - 1));
 }
 
 bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
@@ -248,8 +250,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   snprintf(serial, sizeof(serial), "%d-%05d-%05d", config_info_.product_id_ / 100000 , config_info_.product_id_ % 100000, config_info_.device_serial_number_);
   d.hardware_id = serial;
 
-  if (!has_error_)
-    d.summary(d.OK, "OK");
+  d.summary(d.OK, "OK");
 
   d.clear();
   d.add("Configuration", config_info_.configuration_status_ ? "good" : "error loading configuration");
@@ -268,7 +269,7 @@ void WG021::diagnostics(diagnostic_updater::DiagnosticStatusWrapper &d, unsigned
   d.addf("SW Max Current", "%f", actuator_info_.max_current_);
 
   publishGeneralDiagnostics(d);
-  publishMailboxDiagnostics(d);
+  mailbox_.publishMailboxDiagnostics(d);
 
   d.add("Mode", modeString(status->mode_));
   d.addf("Digital out", "%d", status->digital_out_);

@@ -1,0 +1,6 @@
+string actuator_name     # name of actuator that soft-processor is part of (ex : r_gripper_motor)
+string processor_name    # name of soft-processor to soft-reset, 
+                         # certain devices may have more than one soft-processor
+---
+bool success             # true if processor was successfully reset
+string error_msg         # descriptive error message if call was not successful
