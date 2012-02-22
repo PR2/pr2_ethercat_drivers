@@ -422,7 +422,7 @@ void MotorHeatingModel::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     }
     else 
     {
-      ROS_WARN("Duration == 0");
+      //ROS_WARN("Duration == 0");
       average_ambient_temperature = ambient_temperature_;
       average_heating_power = 0.0;
     }
