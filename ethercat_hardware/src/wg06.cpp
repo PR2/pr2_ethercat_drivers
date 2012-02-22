@@ -929,7 +929,7 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
     // the pressure sensor may not be installed
     if ((l_finger_good_count == 0) && (r_finger_good_count == 0))
     {
-      d.mergeSummary(d.WARN, "Pressure sensors may not been connected");
+      d.mergeSummary(d.WARN, "Pressure sensors may not be connected");
     }
     else 
     {
@@ -945,7 +945,7 @@ void WG06::diagnosticsPressure(diagnostic_updater::DiagnosticStatusWrapper &d, u
 
       if (r_finger_good_count == 0)
       {
-        d.mergeSummary(d.WARN, "Sensor on right finger may not been connected");
+        d.mergeSummary(d.WARN, "Sensor on right finger may not be connected");
       }
       else if (r_finger_good_count < NUM_PRESSURE_REGIONS)
       {
