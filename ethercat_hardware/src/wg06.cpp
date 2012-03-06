@@ -363,8 +363,8 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
   // FT provides 6 values : 3 Forces + 3 Torques
   ft_raw_analog_in_.state_.state_.resize(6); 
   // FT usually provides 3-4 new samples per cycle
-  force_torque_.state_.samples_.reserve(4);
-  force_torque_.state_.good_ = true;
+  ft_state_samples_.reserve(4);
+  ft_state_good_ = true;
 
   // For now publish RAW F/T values for engineering purposes.  In future this publisher may be disabled by default.
   std::string topic = "raw_ft";
@@ -379,8 +379,7 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
   // Allocate space for raw f/t data values
   raw_ft_publisher_->msg_.samples.reserve(MAX_FT_SAMPLES);
 
-  force_torque_.command_.halt_on_error_ = false;
-  force_torque_.state_.good_ = true;
+  ft_state_good_ = true;
 
   if (!actuator_.name_.empty())
   {
@@ -721,8 +720,6 @@ void WG06::convertFTDataSampleToWrench(const FTDataSample &sample, geometry_msgs
  */
 bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *last_status)
 {  
-  pr2_hardware_interface::ForceTorqueState &ft_state(force_torque_.state_);
-
   ros::Time current_time(ros::Time::now());
 
   // Fill in raw analog output with most recent data sample, (might become deprecated?)
@@ -749,10 +746,10 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   }
 
   // Make room in data structure for more f/t samples
-  ft_state.samples_.resize(usable_samples);
+  ft_state_samples_.resize(usable_samples);
 
   // If any f/t channel is overload or the sampling rate is bad, there is an error.
-  ft_state.good_ = ((!ft_sampling_rate_error_) && (ft_overload_flags_ == 0));
+  ft_state_good_ = ((!ft_sampling_rate_error_) && (ft_overload_flags_ == 0));
 
 
   for (unsigned sample_index=0; sample_index<usable_samples; ++sample_index)
@@ -761,14 +758,14 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
     // this is the reverse of the order data is stored in hardware_interface::ForceTorque buffer.
     unsigned status_sample_index = usable_samples-sample_index-1;
     const FTDataSample &sample(status->ft_samples_[status_sample_index]); 
-    geometry_msgs::Wrench &wrench(ft_state.samples_[sample_index]);
+    geometry_msgs::Wrench &wrench(ft_state_samples_[sample_index]);
     convertFTDataSampleToWrench(sample, wrench);
   }
 
   // Put newest sample into analog vector for controllers (deprecated)
   if (usable_samples > 0)
   {
-    const geometry_msgs::Wrench &wrench(ft_state.samples_[usable_samples-1]);
+    const geometry_msgs::Wrench &wrench(ft_state_samples_[usable_samples-1]);
     ft_analog_in_.state_.state_[0] = wrench.force.x;
     ft_analog_in_.state_.state_[1] = wrench.force.y;
     ft_analog_in_.state_.state_[2] = wrench.force.z;
@@ -804,13 +801,13 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   if ( (usable_samples > 0) && (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
     ft_publisher_->msg_.header.stamp = current_time;
-    ft_publisher_->msg_.wrench = ft_state.samples_[usable_samples-1];
+    ft_publisher_->msg_.wrench = ft_state_samples_[usable_samples-1];
     ft_publisher_->unlockAndPublish();
   }
 
   // If this returns false, it will cause motors to halt.
   // Return "good_" state of sensor, unless halt_on_error is false. 
-  return ft_state.good_ || !force_torque_.command_.halt_on_error_;
+  return ft_state_good_;
 }
 
 

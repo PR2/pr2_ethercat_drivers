@@ -229,7 +229,9 @@ private:
   //! Provides F/T data to controllers (deprecated, use pr2_hardware_interface::ForceTorque instead)
   pr2_hardware_interface::AnalogIn ft_analog_in_;  
   //! Provides F/T data to controllers
-  pr2_hardware_interface::ForceTorque force_torque_;
+  //pr2_hardware_interface::ForceTorque force_torque_;
+  bool ft_state_good_;
+  std::vector<geometry_msgs::Wrench> ft_state_samples_;
 
   //! Realtime Publisher of RAW F/T data 
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
