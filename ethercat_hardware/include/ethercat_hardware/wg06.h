@@ -231,12 +231,12 @@ private:
   //! Provides F/T data to controllers (deprecated, use pr2_hardware_interface::ForceTorque instead)
   pr2_hardware_interface::AnalogIn ft_analog_in_;  
   //! Provides F/T data to controllers
-  pr2_hardware_interface::ForceTorque force_torque_;
+  bool ft_state_good_;
+  std::vector<geometry_msgs::Wrench> ft_state_samples_;
 
   //! Realtime Publisher of RAW F/T data 
   realtime_tools::RealtimePublisher<ethercat_hardware::RawFTData> *raw_ft_publisher_;
   realtime_tools::RealtimePublisher<geometry_msgs::WrenchStamped> *ft_publisher_;
-  //pr2_hardware_interface::AnalogIn ft_analog_in_;      //!< Provides
   FTParamsInternal ft_params_;
 
   bool enable_pressure_sensor_;
