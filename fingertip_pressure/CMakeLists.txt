@@ -8,6 +8,8 @@ find_package(catkin REQUIRED COMPONENTS pr2_msgs geometry_msgs visualization_msg
 
 add_message_files(DIRECTORY msg FILES PressureInfoElement.msg PressureInfo.msg)
 
+catkin_python_setup()
+
 generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 
 catkin_package(
@@ -22,3 +24,11 @@ add_rostest(test/test_marker_rectangle.xml)
 
 add_rostest(test/test_marker_sphere.xml)
 
+install(DIRECTORY scripts/
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
+install(DIRECTORY launch
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+
+install(FILES ui/fingertip_panel.xrc
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ui/)
