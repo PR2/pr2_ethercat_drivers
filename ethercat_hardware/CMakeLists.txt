@@ -32,9 +32,9 @@ generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
     DEPENDS EML
-    CATKIN_DEPENDS pr2_msgs pr2_hardware_interface roscpp realtime_tools diagnostic_msgs diagnostic_updater pluginlib
-    INCLUDE_DIRS # TODO include
-    LIBRARIES # TODO
+    CATKIN_DEPENDS pr2_msgs pr2_hardware_interface roscpp realtime_tools diagnostic_msgs diagnostic_updater pluginlib message_runtime
+    INCLUDE_DIRS include
+    LIBRARIES ethercat_hardware
 )
 
 add_library(
