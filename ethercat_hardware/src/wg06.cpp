@@ -219,12 +219,12 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       return -1;
     }
 
-    // For some versions of software pressure and force/torque sensors can be selectively enabled / disabled    
+    // For some versions of software pressure and force/torque sensors can be
+    // selectively enabled / disabled    
     ros::NodeHandle nh(string("~/") + actuator_.name_);
-    bool pressure_enabled_ ;
     if (!nh.getParam("enable_pressure_sensor", enable_pressure_sensor_))
     {
-      pressure_enabled_ = true; //default to to true
+      enable_pressure_sensor_ = true; //default to to true
     }
     if (!nh.getParam("enable_ft_sensor", enable_ft_sensor_))
     {
