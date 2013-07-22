@@ -37,6 +37,8 @@ catkin_package(
     LIBRARIES ethercat_hardware
 )
 
+add_definitions(-O3)
+
 add_library(
   ethercat_hardware src/ethercat_hardware.cpp src/ethercat_com.cpp
   src/ethercat_device.cpp src/wg0x.cpp src/wg05.cpp src/wg06.cpp src/wg021.cpp
