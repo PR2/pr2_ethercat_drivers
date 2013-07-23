@@ -720,19 +720,32 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
   uint32_t revision = sh->get_revision();
   unsigned slave = sh->get_station_address()-1;
 
-  // The point of this code to find a class whose name matches the EtherCAT product ID 
-  // for a given device.  
+  // The point of this code to find a class whose name matches the EtherCAT
+  // product ID for a given device.  
   // Thus device plugins would register themselves with PLUGIN_REGISTER_CLASS
   //
-  //    PLUGINLIB_REGISTER_CLASS(class_name, class_type, base_class_type)
-  // 
-  // For the WG05 driver (productID = 6805005), this statement would look something like:
+  //    PLUGINLIB_EXPORT_CLASS(class_type, base_class_type)
   //
-  //   PLUGINLIB_DECLARE_CLASS(6805005, WG05, EthercatDevice);
+  // and in the plugin.xml, specify name="" inside the <class> tag:
   //
-  // PLUGINLIB_DECLARE_CLASS macro is now depricated, PLUGINLIB_REGISTER_CLASS should be used instead : 
+  //    <class name="package/serial"
+  //           base_class_type="ethercat_hardware::EthercatDevice" />
+  //
   // 
-  //   PLUGINLIB_DECLARE_CLASS(package, class_name, class_type, base_class_type)
+  // For the WG05 driver (productID = 6805005), this statement would look
+  // something like:
+  //
+  //    PLUGINLIB_EXPORT_CLASS(WG05, EthercatDevice)
+  //
+  // and in the plugin.xml:
+  //
+  //    <class name="ethercat_hardware/6805005" type="WG05"
+  //           base_class_type="EthercatDevice">
+  //      <description>
+  //        WG05 - Generic Motor Control Board
+  //      </description>
+  //    </class>
+  //
   //
   // Unfortunately, we don't know which ROS package that a particular driver is defined in.
   // To account for this, we search through the list of class names, one-by-one and find string where

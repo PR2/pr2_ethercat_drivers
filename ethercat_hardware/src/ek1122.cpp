@@ -37,7 +37,7 @@
 
 #include <ros/console.h>
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 73542738, EK1122, EthercatDevice);
+PLUGINLIB_EXPORT_CLASS(EK1122, EthercatDevice);
 
 void EK1122::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {

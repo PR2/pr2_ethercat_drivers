@@ -37,7 +37,7 @@
 
 #include <ros/console.h>
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805014, WG014, EthercatDevice);
+PLUGINLIB_EXPORT_CLASS(WG014, EthercatDevice);
 
 void WG014::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {

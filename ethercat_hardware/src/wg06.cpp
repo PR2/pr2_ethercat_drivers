@@ -48,7 +48,7 @@
 
 #include "ethercat_hardware/wg_util.h"
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805006, WG06, EthercatDevice);
+PLUGINLIB_EXPORT_CLASS(WG06, EthercatDevice);
 
 
 WG06::WG06() :
