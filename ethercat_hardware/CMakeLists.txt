@@ -48,6 +48,7 @@ add_library(
   )
 add_dependencies(ethercat_hardware ${ethercat_hardware_EXPORTED_TARGETS})
 target_link_libraries(ethercat_hardware ${catkin_LIBRARIES})
+pr2_enable_rpath(ethercat_hardware)
 
 add_executable(motorconf 
   src/motorconf.cpp src/ethercat_hardware.cpp src/ethercat_com.cpp
