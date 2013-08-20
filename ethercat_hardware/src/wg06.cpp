@@ -350,10 +350,10 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
   }
 
   // Register force/torque sensor with pr2_hardware_interface::HardwareInterface
-  ft_sensor_.name_ = actuator_.name_;
-  if (hw && !hw->addForceTorque(&ft_sensor_))
+  force_torque_.name_ = actuator_.name_;
+  if (hw && !hw->addForceTorque(&force_torque_))
   {
-    ROS_FATAL("A force/torque sensor of the name '%s' already exists.  Device #%02d has a duplicate name", ft_sensor_.name_.c_str(), sh_->get_ring_position());
+    ROS_FATAL("A force/torque sensor of the name '%s' already exists.  Device #%02d has a duplicate name", force_torque_.name_.c_str(), sh_->get_ring_position());
     return false;
   }
 

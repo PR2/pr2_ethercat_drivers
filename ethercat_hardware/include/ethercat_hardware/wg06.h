@@ -182,7 +182,6 @@ private:
 
   pr2_hardware_interface::PressureSensor pressure_sensors_[2];
   pr2_hardware_interface::Accelerometer accelerometer_;
-  pr2_hardware_interface::ForceTorque ft_sensor_;
 
   bool initializePressure(pr2_hardware_interface::HardwareInterface *hw);
   bool initializeAccel(pr2_hardware_interface::HardwareInterface *hw);
