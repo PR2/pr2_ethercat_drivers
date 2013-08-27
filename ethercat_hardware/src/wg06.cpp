@@ -48,7 +48,7 @@
 
 #include "ethercat_hardware/wg_util.h"
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805006, WG06, EthercatDevice);
+PLUGINLIB_EXPORT_CLASS(WG06, EthercatDevice);
 
 
 WG06::WG06() :
@@ -219,12 +219,12 @@ int WG06::initialize(pr2_hardware_interface::HardwareInterface *hw, bool allow_u
       return -1;
     }
 
-    // For some versions of software pressure and force/torque sensors can be selectively enabled / disabled    
+    // For some versions of software pressure and force/torque sensors can be
+    // selectively enabled / disabled    
     ros::NodeHandle nh(string("~/") + actuator_.name_);
-    bool pressure_enabled_ ;
     if (!nh.getParam("enable_pressure_sensor", enable_pressure_sensor_))
     {
-      pressure_enabled_ = true; //default to to true
+      enable_pressure_sensor_ = true; //default to to true
     }
     if (!nh.getParam("enable_ft_sensor", enable_ft_sensor_))
     {
@@ -348,6 +348,15 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
               ft_raw_analog_in_.name_.c_str(), sh_->get_ring_position());
     return false;
   }
+
+  // Register force/torque sensor with pr2_hardware_interface::HardwareInterface
+  force_torque_.name_ = actuator_.name_;
+  if (hw && !hw->addForceTorque(&force_torque_))
+  {
+    ROS_FATAL("A force/torque sensor of the name '%s' already exists.  Device #%02d has a duplicate name", force_torque_.name_.c_str(), sh_->get_ring_position());
+    return false;
+  }
+
   // FT provides 6 values : 3 Forces + 3 Torques
   ft_raw_analog_in_.state_.state_.resize(6); 
   // FT usually provides 3-4 new samples per cycle

@@ -49,7 +49,7 @@
 
 #include "ethercat_hardware/wg_util.h"
 
-PLUGINLIB_DECLARE_CLASS(ethercat_hardware, 6805021, WG021, EthercatDevice);
+PLUGINLIB_EXPORT_CLASS(WG021, EthercatDevice);
 
 void WG021::construct(EtherCAT_SlaveHandler *sh, int &start_address)
 {
@@ -191,9 +191,10 @@ bool WG021::unpackState(unsigned char *this_buffer, unsigned char *prev_buffer)
   bool rv = true;
 
   pr2_hardware_interface::ProjectorState &state = projector_.state_;
-  WG021Status *this_status, *prev_status;
+  WG021Status *this_status;
+  //WG021Status *prev_status;
   this_status = (WG021Status *)(this_buffer + command_size_);
-  prev_status = (WG021Status *)(prev_buffer + command_size_);
+  //prev_status = (WG021Status *)(prev_buffer + command_size_);
   
   if (!verifyChecksum(this_status, status_size_))
   {
