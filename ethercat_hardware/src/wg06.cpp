@@ -349,14 +349,6 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
     return false;
   }
 
-  // Register force/torque sensor with pr2_hardware_interface::HardwareInterface
-  force_torque_.name_ = actuator_.name_;
-  if (hw && !hw->addForceTorque(&force_torque_))
-  {
-    ROS_FATAL("A force/torque sensor of the name '%s' already exists.  Device #%02d has a duplicate name", force_torque_.name_.c_str(), sh_->get_ring_position());
-    return false;
-  }
-
   // FT provides 6 values : 3 Forces + 3 Torques
   ft_raw_analog_in_.state_.state_.resize(6); 
   // FT usually provides 3-4 new samples per cycle
@@ -396,6 +388,14 @@ bool WG06::initializeFT(pr2_hardware_interface::HardwareInterface *hw)
       if (ft_publisher_ == NULL)
       {
         ROS_FATAL("Could not allocate ft publisher");
+        return false;
+      }
+
+      // Register force/torque sensor with pr2_hardware_interface::HardwareInterface
+      force_torque_.name_ = actuator_.name_;
+      if (hw && !hw->addForceTorque(&force_torque_))
+      {
+        ROS_FATAL("A force/torque sensor of the name '%s' already exists.  Device #%02d has a duplicate name", force_torque_.name_.c_str(), sh_->get_ring_position());
         return false;
       }
     }
