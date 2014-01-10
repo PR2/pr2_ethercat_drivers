@@ -639,9 +639,10 @@ int main(int argc, char *argv[])
 
   // Set log level to DEBUG to allow device information to be displayed to
   // output by default
-  log4cxx::LoggerPtr logger = log4cxx::Logger::getLogger(ROSCONSOLE_DEFAULT_NAME);
-  logger->setLevel(ros::console::g_level_lookup[ros::console::levels::Debug]);
-  ros::console::notifyLoggerLevelsChanged();
+  if( ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME,
+        ros::console::levels::Debug) ) {
+    ros::console::notifyLoggerLevelsChanged();
+  }
   
   // Parse options
   g_options.program_name_ = argv[0];
