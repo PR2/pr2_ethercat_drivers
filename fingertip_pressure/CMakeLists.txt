@@ -26,6 +26,7 @@ add_rostest(test/test_marker_rectangle.xml)
 add_rostest(test/test_marker_sphere.xml)
 
 install(DIRECTORY scripts/
+   USE_SOURCE_PERMISSIONS
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 install(DIRECTORY launch
