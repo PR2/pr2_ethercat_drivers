@@ -2,5 +2,8 @@
 Changelog for package pr2_ethercat_drivers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 1.8.9 (2014-09-29)
 ------------------

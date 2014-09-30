@@ -2,5 +2,8 @@
 Changelog for package ethercat_hardware
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 1.8.9 (2014-09-29)
 ------------------
