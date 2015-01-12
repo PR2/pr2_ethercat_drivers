@@ -87,7 +87,6 @@ EthercatHardware::~EthercatHardware()
     EC_FixedStationAddress fsa(i + 1);
     EtherCAT_SlaveHandler *sh = em_->get_slave_handler(fsa);
     if (sh) sh->to_state(EC_PREOP_STATE);
-    delete slaves_[i];
   }
   if (ni_)
   {
@@ -189,7 +188,7 @@ void EthercatHardware::init(char *interface, bool allow_unprogrammed)
   }
 
   // Size slaves vector to hold appropriate number of device pointers
-  slaves_.resize(num_ethercat_devices_, NULL);
+  slaves_.resize(num_ethercat_devices_);
 
   // Make temporary list of slave handles
   std::vector<EtherCAT_SlaveHandler*> slave_handles;
@@ -356,7 +355,7 @@ EthercatHardwareDiagnosticsPublisher::~EthercatHardwareDiagnosticsPublisher()
 }
 
 void EthercatHardwareDiagnosticsPublisher::initialize(const string &interface, unsigned int buffer_size, 
-                                                      const std::vector<EthercatDevice*> &slaves, 
+                                                      const std::vector<boost::shared_ptr<EthercatDevice> > &slaves, 
                                                       unsigned int num_ethercat_devices, 
                                                       unsigned timeout, unsigned max_pd_retries)
 {
@@ -711,29 +710,42 @@ void EthercatHardware::publishDiagnostics()
 }
 
 
-EthercatDevice *
+boost::shared_ptr<EthercatDevice>
 EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 {
   static int start_address = 0x00010000;
-  EthercatDevice *p = NULL;
+  boost::shared_ptr<EthercatDevice> p;
   unsigned product_code = sh->get_product_code();
   unsigned serial = sh->get_serial();
   uint32_t revision = sh->get_revision();
   unsigned slave = sh->get_station_address()-1;
 
-  // The point of this code to find a class whose name matches the EtherCAT product ID 
-  // for a given device.  
+  // The point of this code to find a class whose name matches the EtherCAT
+  // product ID for a given device.  
   // Thus device plugins would register themselves with PLUGIN_REGISTER_CLASS
   //
-  //    PLUGINLIB_REGISTER_CLASS(class_name, class_type, base_class_type)
-  // 
-  // For the WG05 driver (productID = 6805005), this statement would look something like:
+  //    PLUGINLIB_EXPORT_CLASS(class_type, base_class_type)
   //
-  //   PLUGINLIB_DECLARE_CLASS(6805005, WG05, EthercatDevice);
+  // and in the plugin.xml, specify name="" inside the <class> tag:
   //
-  // PLUGINLIB_DECLARE_CLASS macro is now depricated, PLUGINLIB_REGISTER_CLASS should be used instead : 
+  //    <class name="package/serial"
+  //           base_class_type="ethercat_hardware::EthercatDevice" />
+  //
   // 
-  //   PLUGINLIB_DECLARE_CLASS(package, class_name, class_type, base_class_type)
+  // For the WG05 driver (productID = 6805005), this statement would look
+  // something like:
+  //
+  //    PLUGINLIB_EXPORT_CLASS(WG05, EthercatDevice)
+  //
+  // and in the plugin.xml:
+  //
+  //    <class name="ethercat_hardware/6805005" type="WG05"
+  //           base_class_type="EthercatDevice">
+  //      <description>
+  //        WG05 - Generic Motor Control Board
+  //      </description>
+  //    </class>
+  //
   //
   // Unfortunately, we don't know which ROS package that a particular driver is defined in.
   // To account for this, we search through the list of class names, one-by-one and find string where
@@ -764,11 +776,11 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
     //ROS_WARN("Using driver class '%s' for device with product code %d", 
     //         matching_class_name.c_str(), product_code);
     try {      
-      p = device_loader_.createClassInstance(matching_class_name);
+      p = device_loader_.createInstance(matching_class_name);
     }
     catch (pluginlib::LibraryLoadException &e)
     {
-      p = NULL;
+      p.reset();
       ROS_FATAL("Unable to load plugin for slave #%d, product code: %u (0x%X), serial: %u (0x%X), revision: %d (0x%X)",
                 slave, product_code, product_code, serial, serial, revision, revision);
       ROS_FATAL("%s", e.what());
@@ -805,16 +817,16 @@ EthercatHardware::configSlave(EtherCAT_SlaveHandler *sh)
 }
 
 
-EthercatDevice *
+boost::shared_ptr<EthercatDevice>
 EthercatHardware::configNonEthercatDevice(const std::string &name, const std::string &type)
 {
-  EthercatDevice *p = NULL;
+  boost::shared_ptr<EthercatDevice> p;
   try {
-    p = device_loader_.createClassInstance(type);
+    p = device_loader_.createInstance(type);
   }
   catch (pluginlib::LibraryLoadException &e)
   {
-    p = NULL;
+    p.reset();
     ROS_FATAL("Unable to load plugin for non-EtherCAT device '%s' with type: %s : %s"
               , name.c_str(), type.c_str(), e.what());
   }
@@ -893,7 +905,8 @@ void EthercatHardware::loadNonEthercatDevices()
     
     std::string type(static_cast<std::string>(device_info["type"])); 
 
-    EthercatDevice *new_device = configNonEthercatDevice(name,type);
+    boost::shared_ptr<EthercatDevice> new_device = 
+      configNonEthercatDevice(name,type);
     if (new_device != NULL)
     {
       slaves_.push_back(new_device);
@@ -930,7 +943,7 @@ void EthercatHardware::collectDiagnostics()
 
   for (unsigned i = 0; i < slaves_.size(); ++i)
   {    
-    EthercatDevice * d(slaves_[i]);
+    boost::shared_ptr<EthercatDevice> d(slaves_[i]);
     d->collectDiagnostics(oob_com_);
   }
 }

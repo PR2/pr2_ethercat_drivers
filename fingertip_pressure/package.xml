@@ -1,0 +1,27 @@
+<package>
+  <name>fingertip_pressure</name>
+  <version>1.8.11</version>
+  <description>This package provides access to the PR2 fingertip pressure sensors. This information includes:</description>
+  <maintainer email="ahendrix@willowgarage.com">Austin Hendrix</maintainer>
+
+  <license>BSD</license>
+
+  <url type="website">http://ros.org/wiki/fingertip_pressure</url>
+  <!-- <url type="bugtracker"></url> -->
+
+  <author email="blaise@willowgarage.com">Blaise Gassend</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>std_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>rostest</build_depend>
+  <build_depend>message_generation</build_depend>
+
+  <run_depend>std_msgs</run_depend>
+  <run_depend>pr2_msgs</run_depend>
+  <run_depend>rospy</run_depend>
+  <run_depend>geometry_msgs</run_depend>
+  <run_depend>visualization_msgs</run_depend>
+  <run_depend>message_runtime</run_depend>
+</package>

@@ -1,0 +1,41 @@
+<package>
+  <name>ethercat_hardware</name>
+  <version>1.8.11</version>
+  <description>Package for creating a hardware interface to the robot using the EtherCAT motor controller/driver</description>
+  <maintainer email="ahendrix@willowgarage.com">Austin Hendrix</maintainer>
+
+  <license>BSD</license>
+
+  <url type="website">http://ros.org/wiki/ethercat_hardware</url>
+  <!-- <url type="bugtracker"></url> -->
+
+  <author email="wheeler@willowgarage.com">Rob Wheeler</author>
+  <author email="dking@willowgarage.com">Derek King</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>pr2_msgs</build_depend>
+  <build_depend>pr2_hardware_interface</build_depend>
+  <build_depend>eml</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>realtime_tools</build_depend>
+  <build_depend>diagnostic_msgs</build_depend>
+  <build_depend>diagnostic_updater</build_depend>
+  <build_depend>pluginlib</build_depend>
+  <build_depend>log4cxx</build_depend>
+
+  <run_depend>message_runtime</run_depend>
+  <run_depend>pr2_msgs</run_depend>
+  <run_depend>pr2_hardware_interface</run_depend>
+  <run_depend>eml</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>realtime_tools</run_depend>
+  <run_depend>diagnostic_msgs</run_depend>
+  <run_depend>diagnostic_updater</run_depend>
+  <run_depend>pluginlib</run_depend>
+  <run_depend>log4cxx</run_depend>
+
+  <export>
+    <ethercat_hardware plugin="${prefix}/ethercat_device_plugin.xml"/>
+  </export>
+</package>

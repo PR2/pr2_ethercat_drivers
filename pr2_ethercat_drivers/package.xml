@@ -1,0 +1,24 @@
+<package>
+  <name>pr2_ethercat_drivers</name>
+  <version>1.8.11</version>
+  <description>This stack contains drivers for the ethercat system and the peripherals
+    that connect to it: motor control boards, fingertip sensors, texture
+    projector, hand accelerometer.</description>
+  <maintainer email="ahendrix@willowgarage.com">Austin Hendrix</maintainer>
+
+  <license>BSD</license>
+  <license>GPL</license>
+
+  <url type="website">http://ros.org/wiki/pr2_ethercat_drivers</url>
+  <!-- <url type="bugtracker"></url> -->
+
+  <author>Derek King</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <run_depend>ethercat_hardware</run_depend>
+  <run_depend>fingertip_pressure</run_depend>
+
+  <export>
+    <metapackage/>
+  </export>
+</package>

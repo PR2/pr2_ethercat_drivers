@@ -118,7 +118,7 @@ public:
    * \param number of EtherCAT slave devices
    */
   void initialize(const string &interface, unsigned int buffer_size, 
-                  const std::vector<EthercatDevice*> &slaves, 
+                  const std::vector<boost::shared_ptr<EthercatDevice> > &slaves,
                   unsigned int num_ethercat_devices_,
                   unsigned timeout, unsigned max_pd_retries);
 
@@ -176,7 +176,7 @@ private:
   EthercatHardwareDiagnostics diagnostics_; //!< Diagnostics information use by publish function
   unsigned char *diagnostics_buffer_;
   unsigned int buffer_size_;
-  std::vector<EthercatDevice*> slaves_;
+  std::vector<boost::shared_ptr<EthercatDevice> > slaves_;
   unsigned int num_ethercat_devices_;
   string interface_;
 
@@ -256,7 +256,7 @@ private:
   static void changeState(EtherCAT_SlaveHandler *sh, EC_State new_state);
 
   void loadNonEthercatDevices();
-  EthercatDevice *configNonEthercatDevice(const std::string &product_id, const std::string &data);
+  boost::shared_ptr<EthercatDevice> configNonEthercatDevice(const std::string &product_id, const std::string &data);
 
   void haltMotors(bool error, const char* reason);
 
@@ -268,8 +268,8 @@ private:
   EtherCAT_AL *al_;
   EtherCAT_Master *em_;
 
-  EthercatDevice *configSlave(EtherCAT_SlaveHandler *sh);
-  std::vector<EthercatDevice*> slaves_;
+  boost::shared_ptr<EthercatDevice> configSlave(EtherCAT_SlaveHandler *sh);
+  std::vector<boost::shared_ptr<EthercatDevice> > slaves_;
   unsigned int num_ethercat_devices_;
 
   unsigned char *this_buffer_;

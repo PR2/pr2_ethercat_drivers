@@ -59,6 +59,8 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 
+#include <log4cxx/logger.h>
+
 using namespace ethercat_hardware;
 
 vector<EthercatDevice *> devices;
