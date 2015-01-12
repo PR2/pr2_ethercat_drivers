@@ -1,0 +1,30 @@
+<package>
+  <name>eml</name>
+  <version>1.0.0</version>
+  <description>This is an implementation of the EtherCAT master protocol for the PR2 robot based on the work done at Flanders' Mechatronics Technology Centre.</description>
+  <maintainer email="dash@clearpathrobotics.com">Devon Ash</maintainer>
+
+  <license>binary only</license>
+
+  <url type="website">http://ethercatmaster.berlios.de/</url>
+  <!-- <url type="bugtracker"></url> -->
+
+  <author>Tom Panis</author>
+  <author>Klaas Gadeyne</author>
+  <author>Bob Koninckx</author>
+
+  <!-- Dependencies which this package needs to build itself. -->
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!-- Dependencies needed to compile this package. -->
+
+  <!-- Dependencies needed after this package is compiled. -->
+
+  <!-- Dependencies needed only for running tests. -->
+
+<export>
+    <cpp lflags="-Wl,-rpath,${prefix}/eml/lib -L${prefix}/eml/lib -leml" cflags="-I${prefix}/eml/include"/>
+    <doxymaker external="http://ethercatmaster.berlios.de/doxygen/html/index.html"/>
+</export>
+
+</package>
