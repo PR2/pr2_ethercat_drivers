@@ -1,6 +1,6 @@
 <package>
   <name>ethercat_hardware</name>
-  <version>1.8.13</version>
+  <version>1.8.14</version>
   <description>Package for creating a hardware interface to the robot using the EtherCAT motor controller/driver</description>
   <maintainer email="ahendrix@willowgarage.com">Austin Hendrix</maintainer>
 
