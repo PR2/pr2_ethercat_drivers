@@ -72,6 +72,7 @@ add_dependencies(wg0x_test ${ethercat_hardware_EXPORTED_TARGETS})
 catkin_add_gtest(motor_heating_model_test test/motor_heating_model_test.cpp )
 target_link_libraries(motor_heating_model_test ethercat_hardware tinyxml
    ${EML_LIBRARIES})
+
 add_dependencies(motor_heating_model_test ${ethercat_hardware_EXPORTED_TARGETS})
 
 install(TARGETS ethercat_hardware
@@ -85,5 +86,7 @@ install(TARGETS motorconf
 install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION})
 
-install(FILES ethercat_device_plugin.xml
+install(DIRECTORY srv msg DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+
+install(FILES ethercat_device_plugin.xml actuators.conf actuators_alpha.conf
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
