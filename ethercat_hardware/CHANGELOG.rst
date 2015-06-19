@@ -2,8 +2,8 @@
 Changelog for package ethercat_hardware
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.8.15 (2015-06-19)
+-------------------
 * Added install rules
 * Contributors: TheDash
 
