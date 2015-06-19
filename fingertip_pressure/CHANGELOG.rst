@@ -2,6 +2,9 @@
 Changelog for package fingertip_pressure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 1.8.12 (2015-02-11)
 -------------------
 
