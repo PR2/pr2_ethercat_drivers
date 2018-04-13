@@ -10,6 +10,11 @@ Changelog for package ethercat_hardware
 1.8.12 (2015-02-11)
 -------------------
 
+Forthcoming
+-----------
+* fixed compile error
+* Contributors: David Feil-Seifer
+
 1.8.17 (2018-02-14)
 -------------------
 * Merge pull request `#69 <https://github.com/PR2/pr2_ethercat_drivers/issues/69>`_ from goretkin/patch-1
