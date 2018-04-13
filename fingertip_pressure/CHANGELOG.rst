@@ -8,8 +8,8 @@ Changelog for package fingertip_pressure
 1.8.12 (2015-02-11)
 -------------------
 
-Forthcoming
------------
+1.8.18 (2018-04-12)
+-------------------
 * updated maintainer
 * Contributors: David Feil-Seifer
 
