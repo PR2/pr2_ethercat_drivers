@@ -12,6 +12,10 @@ Changelog for package ethercat_hardware
 
 Forthcoming
 -----------
+* updated maintainer
+* fixed compile error
+* Contributors: David Feil-Seifer
+
 * fixed compile error
 * Contributors: David Feil-Seifer
 

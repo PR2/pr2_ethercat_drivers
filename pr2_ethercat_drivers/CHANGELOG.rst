@@ -12,6 +12,8 @@ Changelog for package pr2_ethercat_drivers
 
 Forthcoming
 -----------
+* updated maintainer
+* Contributors: David Feil-Seifer
 
 1.8.17 (2018-02-14)
 -------------------

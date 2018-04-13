@@ -10,6 +10,8 @@ Changelog for package fingertip_pressure
 
 Forthcoming
 -----------
+* updated maintainer
+* Contributors: David Feil-Seifer
 
 1.8.17 (2018-02-14)
 -------------------
