@@ -8,6 +8,9 @@ Changelog for package fingertip_pressure
 1.8.12 (2015-02-11)
 -------------------
 
+Forthcoming
+-----------
+
 1.8.17 (2018-02-14)
 -------------------
 * Merge pull request `#70 <https://github.com/PR2/pr2_ethercat_drivers/issues/70>`_ from k-okada/orp
