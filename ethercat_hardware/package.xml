@@ -23,6 +23,7 @@
   <build_depend>diagnostic_updater</build_depend>
   <build_depend>pluginlib</build_depend>
   <build_depend>log4cxx</build_depend>
+  <build_depend>tinyxml</build_depend>
 
   <run_depend>message_runtime</run_depend>
   <run_depend>pr2_msgs</run_depend>
@@ -34,6 +35,7 @@
   <run_depend>diagnostic_updater</run_depend>
   <run_depend>pluginlib</run_depend>
   <run_depend>log4cxx</run_depend>
+  <run_depend>tinyxml</run_depend>
 
   <export>
     <ethercat_hardware plugin="${prefix}/ethercat_device_plugin.xml"/>
