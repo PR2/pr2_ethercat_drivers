@@ -10,8 +10,8 @@ Changelog for package pr2_ethercat_drivers
 * Changed maintainership, creation of Indigo devel branch
 * Contributors: TheDash
 
-Forthcoming
------------
+1.8.18 (2019-03-12)
+-------------------
 
 1.8.17 (2018-02-14)
 -------------------

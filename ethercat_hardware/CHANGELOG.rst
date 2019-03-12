@@ -2,8 +2,8 @@
 Changelog for package ethercat_hardware
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.8.18 (2019-03-12)
+-------------------
 * fix order of Changelog contents
 * Merge pull request `#75 <https://github.com/pr2/pr2_ethercat_drivers/issues/75>`_ from k-okada/add_travis
   update travis.yml and fix for kinetic/melodic
