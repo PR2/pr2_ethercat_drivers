@@ -34,6 +34,8 @@
 
 #include <iomanip>
 
+#include <algorithm>
+
 #include <math.h>
 #include <stddef.h>
 
@@ -721,7 +723,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
 
   unsigned new_samples = (unsigned(status->ft_sample_count_) - unsigned(last_status->ft_sample_count_)) & 0xFF;
   ft_sample_count_ += new_samples;
-  int missed_samples = std::max(int(0), int(new_samples) - MAX_FT_SAMPLES);
+  int missed_samples = std::max(int(0), int(new_samples) - int(MAX_FT_SAMPLES));
   ft_missed_samples_ += missed_samples;
   unsigned usable_samples = min(new_samples, MAX_FT_SAMPLES); 
 

@@ -405,7 +405,7 @@ bool WGEeprom::readEepromStatusReg(EthercatCom *com, WGMailbox *mbx, EepromStatu
 
   // To read eeprom status register, we transfer 2 bytes.  The first byte is the read status register 
   // command value (0xD7).  When transfering the second byte, the EEPROM should send its status.
-  char data[2] = {0xD7, 0x00};
+  unsigned char data[2] = {0xD7, 0x00};
   BOOST_STATIC_ASSERT(sizeof(data) == 2);
   if (mbx->writeMailbox(com, WG0XSpiEepromCmd::SPI_BUFFER_ADDR, data, sizeof(data)))
   {
