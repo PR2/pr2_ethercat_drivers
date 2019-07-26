@@ -35,6 +35,8 @@
 #include "ethercat_hardware/wg_eeprom.h"
 #include "ros/ros.h"
 
+#include <boost/static_assert.hpp>
+#include <boost/thread/mutex.hpp>
 #include <boost/thread.hpp>
 
 namespace ethercat_hardware

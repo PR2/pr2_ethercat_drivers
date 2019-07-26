@@ -32,6 +32,8 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
+#include <vector>
+
 #include "ethercat_hardware/ethercat_hardware.h"
 
 #include <ethercat/ethercat_xenomai_drv.h>
@@ -42,8 +44,11 @@
 
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include <boost/bind.hpp>
 #include <boost/foreach.hpp>
 #include <boost/regex.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/thread/thread.hpp>
 
 EthercatHardwareDiagnostics::EthercatHardwareDiagnostics() :
 
