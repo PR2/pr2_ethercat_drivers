@@ -2,6 +2,15 @@
 Changelog for package ethercat_hardware
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Make sure to include the correct boost libraries.
+  This follows the principle of "include what you use", and
+  also should in theory fix the problems on the build farm.
+  (`#76 <https://github.com/PR2/pr2_ethercat_drivers/issues/76>`_)
+  Signed-off-by: Chris Lalancette <clalancette@openrobotics.org>
+* Contributors: Chris Lalancette
+
 1.8.18 (2019-03-12)
 -------------------
 * fix order of Changelog contents
