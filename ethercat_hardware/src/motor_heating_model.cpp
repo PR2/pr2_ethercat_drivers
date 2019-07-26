@@ -40,6 +40,8 @@
 #include <boost/bind.hpp>
 #include <boost/foreach.hpp>
 #include <boost/timer.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/thread.hpp>
 
 // Use XML format when saving or loading XML file
 #include <tinyxml.h>
@@ -712,7 +714,10 @@ bool MotorHeatingModel::saveTemperatureState()
   {
     int error = errno;
     char errbuf[100];
-    strerror_r(error, errbuf, sizeof(errbuf));
+    if (strerror_r(error, errbuf, sizeof(errbuf)) != 0)
+    {
+      memcpy(errbuf, "Unknown error\0", 14);
+    }
     errbuf[sizeof(errbuf)-1] = '\0';
     ROS_WARN("Problem renaming '%s' to '%s' : (%d) '%s'", 
              tmp_filename.c_str(), save_filename_.c_str(), error, errbuf);

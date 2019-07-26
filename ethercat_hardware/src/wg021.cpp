@@ -44,7 +44,6 @@
 #include <dll/ethercat_device_addressed_telegram.h>
 #include <dll/ethercat_frame.h>
 
-#include <boost/crc.hpp>
 #include <boost/static_assert.hpp>
 
 #include "ethercat_hardware/wg_util.h"
