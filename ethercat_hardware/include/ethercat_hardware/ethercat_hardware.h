@@ -35,6 +35,10 @@
 #ifndef ETHERCAT_HARDWARE_H
 #define ETHERCAT_HARDWARE_H
 
+#include <iostream>
+#include <string>
+#include <vector>
+
 #include <pr2_hardware_interface/hardware_interface.h>
 
 #include <al/ethercat_AL.h>
@@ -51,6 +55,8 @@
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/max.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
+
+#include <boost/shared_ptr.hpp>
 
 #include <boost/thread/thread.hpp>
 #include <boost/thread/mutex.hpp>

@@ -45,6 +45,7 @@
 #include <dll/ethercat_frame.h>
 
 #include <boost/crc.hpp>
+#include <boost/shared_ptr.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/make_shared.hpp>
 
