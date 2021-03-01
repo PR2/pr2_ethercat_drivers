@@ -736,6 +736,9 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   // Make room in data structure for more f/t samples
   ft_state.samples_.resize(usable_samples);
 
+  // add side "l" or "r" to frame_id
+  string ft_link_id = string(actuator_info_.name_).substr(0,1) + "_force_torque_link";
+
   // If any f/t channel is overload or the sampling rate is bad, there is an error.
   ft_state.good_ = ( (!ft_sampling_rate_error_) && 
                      (ft_overload_flags_ == 0) && 
@@ -791,6 +794,7 @@ bool WG06::unpackFT(WG06StatusWithAccelAndFT *status, WG06StatusWithAccelAndFT *
   if ( (usable_samples > 0) && (ft_publisher_ != NULL) && (ft_publisher_->trylock()) )
   {
     ft_publisher_->msg_.header.stamp = current_time;
+    ft_publisher_->msg_.header.frame_id = ft_link_id;
     ft_publisher_->msg_.wrench = ft_state.samples_[usable_samples-1];
     ft_publisher_->unlockAndPublish();
   }

@@ -52,7 +52,6 @@
 #include <ethercat_hardware/wg021.h>
 #include <ethercat_hardware/wg014.h>
 
-#include <boost/crc.hpp>
 #include <boost/foreach.hpp>
 
 #include <net/if.h>
