@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#! /usr/bin/python3
 
 #***********************************************************
 #* Software License Agreement (BSD License)
@@ -57,20 +57,20 @@ class pressureSimulator:
     def publish(self):
         ps = PressureState()
         ps.header.stamp = rospy.get_rostime();
-        ps.l_finger_tip = []
-        ps.r_finger_tip = []
+        ps.l_finger_tip = list()
+        ps.r_finger_tip = list()
         t = rospy.get_time()
         for i in range(0,22):
             ph = .1 * t * (i / 22. + 1)
-            ps.l_finger_tip.append(4000*(1+sin(ph)))
-            ps.r_finger_tip.append(4000*(1+cos(ph)))
+            ps.l_finger_tip.append(int(4000*(1+sin(ph))))
+            ps.r_finger_tip.append(int(4000*(1+cos(ph))))
         self.pub.publish(ps)
 
     def __init__(self, dest):
         rospy.init_node('sim_sensor', anonymous=True)
         rospy.sleep(.2)
         
-        self.pub = rospy.Publisher(dest, PressureState)
+        self.pub = rospy.Publisher(dest, PressureState, queue_size=1000)
         
 
 if __name__ == '__main__':

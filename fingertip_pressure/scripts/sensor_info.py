@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#! /usr/bin/python3
 
 #***********************************************************
 #* Software License Agreement (BSD License)
@@ -53,7 +53,7 @@ class pressureInformationPublisher:
         self.info = []
         self.info.append(pressureInformation(frame0, 1))
         self.info.append(pressureInformation(frame1, -1))
-        self.publisher = rospy.Publisher(dest, PressureInfo, latch=True)
+        self.publisher = rospy.Publisher(dest, PressureInfo, latch=True, queue_size=1000)
 
     def publish(self):
         self.publisher.publish(self.info)
