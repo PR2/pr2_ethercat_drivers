@@ -1,4 +1,4 @@
-#! /usr/bin/python3
+#! /usr/bin/python
 
 #***********************************************************
 #* Software License Agreement (BSD License)
@@ -57,8 +57,8 @@ class pressureSimulator:
     def publish(self):
         ps = PressureState()
         ps.header.stamp = rospy.get_rostime();
-        ps.l_finger_tip = list()
-        ps.r_finger_tip = list()
+        ps.l_finger_tip = []
+        ps.r_finger_tip = []
         t = rospy.get_time()
         for i in range(0,22):
             ph = .1 * t * (i / 22. + 1)
