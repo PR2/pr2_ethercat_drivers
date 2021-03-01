@@ -4,7 +4,6 @@
   <description>This stack contains drivers for the ethercat system and the peripherals
     that connect to it: motor control boards, fingertip sensors, texture
     projector, hand accelerometer.</description>
-  <maintainer email="ros-orphaned-packages@googlegroups.com">ROS Orphaned Package Maintainers</maintainer>
 
   <license>BSD</license>
   <license>GPL</license>

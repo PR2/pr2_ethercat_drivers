@@ -28,6 +28,15 @@ Changelog for package ethercat_hardware
   Fixes `#66 <https://github.com/pr2/pr2_ethercat_drivers/issues/66>`_
 * Contributors: David Feil-Seifer, Kei Okada, v4hn
 
+1.8.18 (2018-04-12)
+-------------------
+* updated maintainer
+* fixed compile error
+* Contributors: David Feil-Seifer
+
+* fixed compile error
+* Contributors: David Feil-Seifer
+
 1.8.17 (2018-02-14)
 -------------------
 * Merge pull request `#69 <https://github.com/PR2/pr2_ethercat_drivers/issues/69>`_ from goretkin/patch-1
