@@ -129,7 +129,7 @@ class pressureVisualizer:
         self.dataready = False
         self.lock = threading.Lock()
 
-        self.vis_pub = rospy.Publisher('visualization_marker', Marker)
+        self.vis_pub = rospy.Publisher('visualization_marker', Marker, queue_size=1000)
         rospy.Subscriber(source, PressureState, self.callback)
         rospy.Subscriber(source + "_info", PressureInfo, self.info_callback)
         

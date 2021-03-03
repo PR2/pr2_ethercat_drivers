@@ -25,8 +25,9 @@ add_rostest(test/test_marker_rectangle.xml)
 
 add_rostest(test/test_marker_sphere.xml)
 
-install(DIRECTORY scripts/
-   USE_SOURCE_PERMISSIONS
+file(GLOB PYTHON_SCRIPTS scripts/*.py)
+catkin_install_python(PROGRAMS
+   ${PYTHON_SCRIPTS}
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 install(DIRECTORY launch
@@ -34,3 +35,7 @@ install(DIRECTORY launch
 
 install(FILES ui/fingertip_panel.xrc
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ui/)
+
+catkin_install_python(PROGRAMS
+   test/pressure_info_test.py
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/test/)

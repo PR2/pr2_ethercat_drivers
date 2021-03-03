@@ -56,15 +56,15 @@ class PressureInfoTest(unittest.TestCase):
         sub = rospy.Subscriber('pressure/r_gripper_motor_info',
                 PressureInfo, self.callback)
         timeout_t = rospy.get_time() + 2
-        print 'waiting for message'
+        print('waiting for message')
         while self.msg == None and timeout_t > rospy.get_time():
             rospy.sleep(0.1)
-        print 'done waiting for message'
+        print('done waiting for message')
         sub.unregister()
         self.assertNotEquals(self.msg, None)
                                     
     def callback(self, msg):
-        print 'got message'
+        print('got message')
         # Account for offset origin of sensor origin.
         for i in range(0,2):
             for j in range(0,22):
@@ -118,9 +118,9 @@ if __name__ == '__main__':
     time.sleep(0.75)
     try:
         rostest.rosrun('fingertip_pressure', 'pressure_info_test', PressureInfoTest)
-    except KeyboardInterrupt, e:
+    except KeyboardInterrupt as e:
         pass
-    print "exiting"
+    print("exiting")
 
 
 
