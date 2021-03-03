@@ -2,6 +2,9 @@
 Changelog for package ethercat_hardware
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 1.8.19 (2019-07-26)
 -------------------
 * Make sure to include the correct boost libraries.
