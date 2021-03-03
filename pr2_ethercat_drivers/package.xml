@@ -1,6 +1,6 @@
 <package>
   <name>pr2_ethercat_drivers</name>
-  <version>1.8.19</version>
+  <version>1.9.0</version>
   <description>This stack contains drivers for the ethercat system and the peripherals
     that connect to it: motor control boards, fingertip sensors, texture
     projector, hand accelerometer.</description>

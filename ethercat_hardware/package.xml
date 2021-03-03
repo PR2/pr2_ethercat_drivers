@@ -1,6 +1,6 @@
 <package>
   <name>ethercat_hardware</name>
-  <version>1.8.19</version>
+  <version>1.9.0</version>
   <description>Package for creating a hardware interface to the robot using the EtherCAT motor controller/driver</description>
   <maintainer email="ros-orphaned-packages@googlegroups.com">ROS Orphaned Package Maintainers</maintainer>
 

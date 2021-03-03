@@ -8,8 +8,8 @@ Changelog for package fingertip_pressure
 1.8.12 (2015-02-11)
 -------------------
 
-Forthcoming
------------
+1.9.0 (2021-03-03)
+------------------
 * Merge pull request `#79 <https://github.com/pr2/pr2_ethercat_drivers/issues/79>`_ from k-okada/add_noetic_travis
 * add queue_size=1000 and use int for list, https://github.com/PR2/pr2_ethercat_drivers/pull/78/commits/aa6f87a6191ee816c181b1548464b9e8b7a060a1 except explicit python3 shban, which catkin_instal_python deal with
 * use catkin_install_python for python script install
