@@ -1048,7 +1048,7 @@ void WG06::diagnosticsFT(diagnostic_updater::DiagnosticStatusWrapper &d, WG06Sta
 
   if (ft_sampling_rate_error_)
   {
-    d.mergeSummary(d.ERROR, "Sampling rate error");
+    d.mergeSummary(d.WARN, "Sampling rate error");
   }
 
   if (ft_disconnected_)
