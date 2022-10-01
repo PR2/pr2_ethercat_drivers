@@ -5,6 +5,7 @@ project(ethercat_hardware)
 find_package(catkin REQUIRED COMPONENTS pr2_msgs pr2_hardware_interface roscpp realtime_tools diagnostic_msgs diagnostic_updater pluginlib message_generation)
 
 find_library(LOG4CXX_LIBRARY log4cxx)
+find_library(TINYXML_LIBRARY tinyxml)
 
 find_package(EML REQUIRED)
 
@@ -60,17 +61,18 @@ add_executable(motorconf
 add_dependencies(motorconf ${ethercat_hardware_EXPORTED_TARGETS})
 
 message(STATUS ${LD_LIBRARY_PATH})
-target_link_libraries(motorconf rt tinyxml ${LOG4CXX_LIBRARY} ${EML_LIBRARIES})
+target_link_libraries(motorconf rt ${TINYXML_LIBRARY} ${LOG4CXX_LIBRARY} ${EML_LIBRARIES})
 find_package(Boost REQUIRED COMPONENTS regex system thread filesystem)
 include_directories(${Boost_INCLUDE_DIRS})
 target_link_libraries(motorconf ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 
 catkin_add_gtest(wg0x_test test/wg0x_test.cpp )
-target_link_libraries(wg0x_test ethercat_hardware tinyxml ${EML_LIBRARIES})
+target_link_libraries(wg0x_test ethercat_hardware ${TINYXML_LIBRARY} ${EML_LIBRARIES})
 add_dependencies(wg0x_test ${ethercat_hardware_EXPORTED_TARGETS})
 
 catkin_add_gtest(motor_heating_model_test test/motor_heating_model_test.cpp )
-target_link_libraries(motor_heating_model_test ethercat_hardware tinyxml
+target_link_libraries(motor_heating_model_test ethercat_hardware
+   ${TINYXML_LIBRARY}
    ${EML_LIBRARIES})
 
 add_dependencies(motor_heating_model_test ${ethercat_hardware_EXPORTED_TARGETS})
