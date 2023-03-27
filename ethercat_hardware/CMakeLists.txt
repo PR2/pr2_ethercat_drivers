@@ -48,7 +48,7 @@ add_library(
   src/wg_soft_processor.cpp src/wg_util.cpp src/wg_mailbox.cpp src/wg_eeprom.cpp
   )
 add_dependencies(ethercat_hardware ${ethercat_hardware_EXPORTED_TARGETS})
-target_link_libraries(ethercat_hardware ${catkin_LIBRARIES})
+target_link_libraries(ethercat_hardware ${catkin_LIBRARIES} ${EML_LIBRARIES})
 pr2_enable_rpath(ethercat_hardware)
 
 add_executable(motorconf 
