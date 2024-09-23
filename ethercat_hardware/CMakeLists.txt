@@ -66,16 +66,17 @@ find_package(Boost REQUIRED COMPONENTS regex system thread filesystem)
 include_directories(${Boost_INCLUDE_DIRS})
 target_link_libraries(motorconf ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 
-catkin_add_gtest(wg0x_test test/wg0x_test.cpp )
-target_link_libraries(wg0x_test ethercat_hardware ${TINYXML_LIBRARY} ${EML_LIBRARIES})
-add_dependencies(wg0x_test ${ethercat_hardware_EXPORTED_TARGETS})
+if(CATKIN_ENABLE_TESTING)
+   catkin_add_gtest(wg0x_test test/wg0x_test.cpp )
+   target_link_libraries(wg0x_test ethercat_hardware ${TINYXML_LIBRARY} ${EML_LIBRARIES})
+   add_dependencies(wg0x_test ${ethercat_hardware_EXPORTED_TARGETS})
 
-catkin_add_gtest(motor_heating_model_test test/motor_heating_model_test.cpp )
-target_link_libraries(motor_heating_model_test ethercat_hardware
-   ${TINYXML_LIBRARY}
-   ${EML_LIBRARIES})
-
-add_dependencies(motor_heating_model_test ${ethercat_hardware_EXPORTED_TARGETS})
+   catkin_add_gtest(motor_heating_model_test test/motor_heating_model_test.cpp )
+   target_link_libraries(motor_heating_model_test ethercat_hardware
+      ${TINYXML_LIBRARY}
+      ${EML_LIBRARIES})
+   add_dependencies(motor_heating_model_test ${ethercat_hardware_EXPORTED_TARGETS})
+endif()
 
 install(TARGETS ethercat_hardware
    RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
