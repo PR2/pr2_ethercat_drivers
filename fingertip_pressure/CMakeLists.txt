@@ -7,7 +7,6 @@ find_package(catkin REQUIRED COMPONENTS
    std_msgs 
    geometry_msgs 
    message_generation
-   rostest 
    )
 
 
@@ -19,11 +18,12 @@ generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 
 catkin_package(CATKIN_DEPENDS std_msgs geometry_msgs message_runtime)
 
-add_rostest(test/pressure_info_tests.xml)
-
-add_rostest(test/test_marker_rectangle.xml)
-
-add_rostest(test/test_marker_sphere.xml)
+if(CATKIN_ENABLE_TESTING)
+   find_package(rostest REQUIRED)
+   add_rostest(test/pressure_info_tests.xml)
+   add_rostest(test/test_marker_rectangle.xml)
+   add_rostest(test/test_marker_sphere.xml)
+endif()
 
 file(GLOB PYTHON_SCRIPTS scripts/*.py)
 catkin_install_python(PROGRAMS
